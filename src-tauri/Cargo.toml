@@ -1,0 +1,45 @@
+[package]
+name = "qpxui"
+version = "0.1.0"
+description = "Local desktop viewer for the QPX (Quantitative Proteomics eXchange) format"
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "qpxui_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+dirs = "5"
+
+# Async runtime needed for the S3 commands (Tauri manages a tokio runtime).
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "io-util", "net", "time"] }
+
+# AWS S3 (rustls, no OpenSSL needed).
+aws-config = { version = "1", default-features = false, features = ["behavior-version-latest", "rt-tokio", "rustls"] }
+aws-sdk-s3 = { version = "1", default-features = false, features = ["rt-tokio", "rustls"] }
+futures = "0.3"
+
+log = "0.4"
+env_logger = "0.11"
+
+# HTTP client for the public quantms portal (browse.quantms.org) example source.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+
+[dev-dependencies]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

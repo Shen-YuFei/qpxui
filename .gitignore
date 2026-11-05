@@ -1,0 +1,13 @@
+# Node
+node_modules/
+dist/
+
+# Tauri / Rust
+src-tauri/target/
+
+# Local scratch
+.DS_Store
+*.log
+
+# Sample data (downloaded with scripts/fetch-sample.mjs)
+sample/
