@@ -1,9 +1,32 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { state } from "../store";
-import type { ViewInfo } from "../lib/api";
+import { api, type StreamStat, type ViewInfo } from "../lib/api";
 
 const datasets = computed(() => state.datasets);
+
+// For streamed S3 views, show how much of the object has actually been read.
+const streamStats = ref<Record<string, StreamStat>>({});
+let timer: number | undefined;
+async function refreshStats() {
+  if (state.sourceKind !== "s3") return;
+  try {
+    streamStats.value = await api.streamS3Stats();
+  } catch {
+    /* backend not ready */
+  }
+}
+onMounted(() => {
+  refreshStats();
+  timer = window.setInterval(refreshStats, 1500);
+});
+onUnmounted(() => window.clearInterval(timer));
+
+function streamTitle(v: ViewInfo): string {
+  const s = streamStats.value[v.path];
+  if (!s) return "Streamed from S3 — not read yet";
+  return `Streamed from S3: ${fmt(s.fetchedBytes)} of ${fmt(s.sizeBytes)} fetched in ${s.requests} range request(s)`;
+}
 
 function fmt(n: number): string {
   if (!n) return "0 B";
@@ -63,6 +86,9 @@ const viewIcon: Record<string, string> = {
         >
           <span class="vi">{{ viewIcon[v.view] ?? '📦' }}</span>
           <span class="vname mono">{{ v.view }}</span>
+          <span v-if="v.path.startsWith('s3://')" class="stream muted" :title="streamTitle(v)">
+            ⚡ {{ fmt(streamStats[v.path]?.fetchedBytes ?? 0) }} /
+          </span>
           <span class="vsize muted">{{ fmt(v.sizeBytes) }}</span>
           <span v-if="state.registered.has(v.path)" class="ok" title="Loaded in DuckDB">✓</span>
         </div>
@@ -140,6 +166,10 @@ button.xs {
 }
 .vsize {
   font-size: 11px;
+}
+.stream {
+  font-size: 10px;
+  white-space: nowrap;
 }
 .ok {
   color: var(--ok);

@@ -32,6 +32,11 @@ export async function init() {
   const logger = new duckdb.ConsoleLogger(duckdb.LogLevel.WARNING);
   db = new duckdb.AsyncDuckDB(logger, worker);
   await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+  // Remote (streamed) files must be read with range requests only. With the
+  // defaults, duckdb-wasm may fall back to GETting the whole object.
+  await db.open({
+    filesystem: { reliableHeadRequests: true, allowFullHTTPReads: false, forceFullHTTPReads: false },
+  });
   conn = await db.connect();
 }
 
@@ -44,10 +49,11 @@ function safeName(name: string): string {
 /** Register a view's parquet file and expose it as a DuckDB table.
  *
  * Local files (and files already downloaded to cache) are loaded as buffers.
- * Remote S3 views (`s3://…`) are registered *lazily*: we presign a URL and
- * hand it to DuckDB's HTTP file system, which fetches only the byte ranges a
- * query actually needs — so huge parquet files can be browsed/queried without
- * ever downloading the whole object.
+ * Remote S3 views (`s3://…`) are registered *lazily*: the Rust backend runs a
+ * 127.0.0.1 range proxy that fetches byte ranges from S3 with the user's
+ * credentials, and DuckDB's HTTP file system asks it only for the ranges a
+ * query needs (parquet footer, then the touched column chunks). Huge files
+ * open instantly, nothing is downloaded up front, and the bucket needs no CORS.
  */
 export async function ensureViewReady(view: ViewInfo): Promise<string> {
   await init();
@@ -57,16 +63,17 @@ export async function ensureViewReady(view: ViewInfo): Promise<string> {
   const fileKey = `${table}.parquet`;
   if (view.path.startsWith("s3://")) {
     const bucket = view.path.slice(5).split("/")[0];
-    const urls = await api.presignS3Urls(bucket, [view.path]);
-    const url = urls[view.path];
-    if (!url) throw new Error(`could not presign ${view.path}`);
-    // directIO = true: DuckDB streams ranges directly from the URL.
-    await db!.registerFileURL(
-      fileKey,
-      url,
-      duckdb.DuckDBDataProtocol.HTTP,
-      true
-    );
+    let url: string | undefined;
+    try {
+      url = (await api.streamS3Urls(bucket, [view.path]))[view.path]?.url;
+    } catch (e) {
+      // Fall back to a presigned URL read directly by the webview (needs CORS).
+      console.warn("stream proxy unavailable, falling back to presigned URL", e);
+      url = (await api.presignS3Urls(bucket, [view.path]))[view.path];
+    }
+    if (!url) throw new Error(`could not open ${view.path} for streaming`);
+    // directIO = true: no whole-file buffering, every read is a range request.
+    await db!.registerFileURL(fileKey, url, duckdb.DuckDBDataProtocol.HTTP, true);
   } else {
     const b64 = await api.readFileBytes(view.path);
     const bytes = base64ToUint8(b64);
@@ -102,9 +109,8 @@ function guardError(e: unknown): string {
   ) {
     return (
       `${msg}\n\n` +
-      "Hint: this looks like a blocked remote (lazy) read. If the dataset is on S3, " +
-      "enable CORS (with Range support) for this app's origin, or switch the S3 source " +
-      "to “Download to cache” which reads over the authenticated backend instead."
+      "Hint: this looks like a failed remote (streamed) read — check your AWS credentials " +
+      "and network, or use “Download to cache” for this view instead."
     );
   }
   return msg;

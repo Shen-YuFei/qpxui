@@ -169,8 +169,8 @@ const activeBars = computed(() =>
 const overallPct = computed(() => overall());
 
 const streamHint =
-  "Streams the parquet in place — queries fetch only the byte ranges they need, " +
-  "no full download. Requires the bucket to allow CORS + Range to this app's origin.";
+  "Opens the parquet in place on S3 — each query fetches only the byte ranges it needs " +
+  "(footer + touched columns/row groups), so even multi-GB files open instantly.";
 </script>
 
 <template>
@@ -179,8 +179,8 @@ const streamHint =
     <p class="muted">
       Uses your default AWS credential chain (env vars, <span class="mono">~/.aws/credentials</span>, or an
       IAM role). Pick the parquet views you want, then either <b>download them to cache</b>
-      (once, for fully offline querying) or <b>stream them remotely</b> (query the file in
-      place on S3 — no download, but the bucket must allow CORS + Range to this app).
+      (once, for fully offline querying) or <b>stream them</b> (query the files in place on
+      S3 — only the byte ranges each query needs are fetched, nothing is downloaded up front).
     </p>
 
     <div class="row">
@@ -198,7 +198,7 @@ const streamHint =
         <span class="muted">{{ remoteDatasets.length }} dataset(s) found</span>
         <div class="actions">
           <button @click="streamSelection" :disabled="busy || !selectedCount" :title="streamHint">
-            ⚡ Stream (query remote, no download)
+            ⚡ Stream (lazy, no download)
           </button>
           <button class="primary" @click="loadSelection" :disabled="busy || !selectedCount">
             {{ busy ? "Loading…" : "Download to cache" }}

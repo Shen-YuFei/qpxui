@@ -43,6 +43,17 @@ export interface PortalDataset {
   pxUrl?: string | null;
 }
 
+export interface StreamHandle {
+  url: string;
+  sizeBytes: number;
+}
+
+export interface StreamStat {
+  sizeBytes: number;
+  fetchedBytes: number;
+  requests: number;
+}
+
 export const api = {
   /** Native file picker for a single QPX file. */
   chooseFile: (): Promise<string | null> =>
@@ -70,6 +81,11 @@ export const api = {
   /** Sign S3 paths so DuckDB can read them lazily over HTTP without credentials. */
   presignS3Urls: (bucket: string, paths: string[]) =>
     invoke<Record<string, string>>("presign_s3_urls", { bucket, paths }),
+  /** Register S3 views with the backend range proxy (lazy, no download). */
+  streamS3Urls: (bucket: string, paths: string[]) =>
+    invoke<Record<string, StreamHandle>>("stream_s3_urls", { bucket, paths }),
+  /** Bytes actually fetched from S3 per streamed view (keyed by s3:// path). */
+  streamS3Stats: () => invoke<Record<string, StreamStat>>("stream_s3_stats"),
 
   /** Ask the backend to abort an in-flight download batch. */
   cancelDownload: (id: string) => invoke<void>("cancel_download", { id }),

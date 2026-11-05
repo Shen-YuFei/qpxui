@@ -1,0 +1,386 @@
+//! Lazy S3 access for DuckDB-wasm.
+//!
+//! A tiny HTTP server bound to 127.0.0.1 serves registered S3 objects with
+//! HTTP Range support. DuckDB (running in the webview) treats each object as a
+//! remote parquet file and only requests the byte ranges a query needs (footer,
+//! then the column chunks / row groups it touches). Each range is fetched from
+//! S3 with the backend's AWS credentials and kept in an in-memory block cache,
+//! so:
+//!   * nothing is downloaded up front, however large the object is;
+//!   * the bucket needs no CORS configuration and credentials never reach the
+//!     webview;
+//!   * re-reading the same pages (paging, re-sorting) is served from memory.
+//!
+//! URLs carry a random per-session token so other local processes can't use
+//! the proxy to read the user's buckets.
+
+use crate::commands::s3::client_for_bucket;
+use aws_sdk_s3::Client;
+use bytes::Bytes;
+use http_body_util::Full;
+use hyper::body::Incoming;
+use hyper::server::conn::http1;
+use hyper::service::service_fn;
+use hyper::{header, Method, Request, Response, StatusCode};
+use hyper_util::rt::TokioIo;
+use lru::LruCache;
+use serde::Serialize;
+use std::collections::{BTreeMap, HashMap};
+use std::convert::Infallible;
+use std::num::NonZeroUsize;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use tokio::net::TcpListener;
+use tokio::sync::OnceCell;
+
+/// Cache granularity. Requests are widened to whole blocks so neighbouring
+/// small reads (parquet footers, page headers) share one S3 round-trip.
+const BLOCK: u64 = 256 * 1024;
+/// In-memory cache budget (in blocks) shared by all streamed objects.
+const CACHE_BLOCKS: usize = 2048;
+
+struct Object {
+    bucket: String,
+    key: String,
+    size: u64,
+    last_modified: Option<String>,
+    client: Client,
+    fetched: AtomicU64,
+    requests: AtomicU64,
+}
+
+struct Proxy {
+    port: u16,
+    token: String,
+    objects: Mutex<HashMap<String, Arc<Object>>>,
+    cache: Mutex<LruCache<(String, u64), Bytes>>,
+}
+
+static PROXY: OnceCell<Arc<Proxy>> = OnceCell::const_new();
+
+fn random_token() -> String {
+    use std::collections::hash_map::RandomState;
+    use std::hash::{BuildHasher, Hasher};
+    let mut out = String::new();
+    for i in 0..2u64 {
+        let mut h = RandomState::new().build_hasher();
+        h.write_u64(i);
+        h.write_u128(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or_default(),
+        );
+        out.push_str(&format!("{:016x}", h.finish()));
+    }
+    out
+}
+
+async fn proxy() -> Result<Arc<Proxy>, String> {
+    PROXY
+        .get_or_try_init(|| async {
+            let listener = TcpListener::bind(("127.0.0.1", 0))
+                .await
+                .map_err(|e| format!("stream proxy bind: {e}"))?;
+            let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+            let p = Arc::new(Proxy {
+                port,
+                token: random_token(),
+                objects: Mutex::new(HashMap::new()),
+                cache: Mutex::new(LruCache::new(NonZeroUsize::new(CACHE_BLOCKS).unwrap())),
+            });
+            let served = p.clone();
+            tokio::spawn(async move {
+                loop {
+                    let Ok((stream, _)) = listener.accept().await else { continue };
+                    let p = served.clone();
+                    tokio::spawn(async move {
+                        let svc = service_fn(move |req| handle(p.clone(), req));
+                        let _ = http1::Builder::new()
+                            .keep_alive(true)
+                            .serve_connection(TokioIo::new(stream), svc)
+                            .await;
+                    });
+                }
+            });
+            log::info!("S3 stream proxy listening on 127.0.0.1:{port}");
+            Ok(p)
+        })
+        .await
+        .cloned()
+}
+
+fn cors(b: hyper::http::response::Builder) -> hyper::http::response::Builder {
+    b.header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+        .header(header::ACCESS_CONTROL_ALLOW_METHODS, "GET, HEAD, OPTIONS")
+        .header(header::ACCESS_CONTROL_ALLOW_HEADERS, "Range, Content-Type")
+        .header(
+            header::ACCESS_CONTROL_EXPOSE_HEADERS,
+            "Content-Length, Content-Range, Accept-Ranges, Last-Modified",
+        )
+        .header("Cross-Origin-Resource-Policy", "cross-origin")
+        .header(header::CACHE_CONTROL, "no-store")
+}
+
+fn plain(status: StatusCode, msg: impl Into<String>) -> Response<Full<Bytes>> {
+    cors(Response::builder().status(status))
+        .header(header::CONTENT_TYPE, "text/plain")
+        .body(Full::new(Bytes::from(msg.into())))
+        .unwrap()
+}
+
+/// Parse a single `bytes=` range into an inclusive (start, end).
+fn parse_range(h: &str, size: u64) -> Option<(u64, u64)> {
+    let spec = h.trim().strip_prefix("bytes=")?.split(',').next()?.trim();
+    let (a, b) = spec.split_once('-')?;
+    if size == 0 {
+        return None;
+    }
+    let (start, end) = if a.is_empty() {
+        let n: u64 = b.parse().ok()?;
+        (size.saturating_sub(n), size - 1)
+    } else {
+        let s: u64 = a.parse().ok()?;
+        let e = if b.is_empty() { size - 1 } else { b.parse::<u64>().ok()?.min(size - 1) };
+        (s, e)
+    };
+    (start <= end && start < size).then_some((start, end))
+}
+
+async fn handle(p: Arc<Proxy>, req: Request<Incoming>) -> Result<Response<Full<Bytes>>, Infallible> {
+    if req.method() == Method::OPTIONS {
+        return Ok(cors(Response::builder().status(StatusCode::NO_CONTENT))
+            .body(Full::new(Bytes::new()))
+            .unwrap());
+    }
+    let mut parts = req.uri().path().trim_start_matches('/').splitn(2, '/');
+    let (token, id) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+    if token != p.token {
+        return Ok(plain(StatusCode::FORBIDDEN, "bad token"));
+    }
+    let id = id.split('/').next().unwrap_or("").to_string();
+    let Some(obj) = p.objects.lock().unwrap().get(&id).cloned() else {
+        return Ok(plain(StatusCode::NOT_FOUND, "unknown object"));
+    };
+
+    let range = req
+        .headers()
+        .get(header::RANGE)
+        .and_then(|v| v.to_str().ok())
+        .map(|r| parse_range(r, obj.size));
+    if let Some(None) = range {
+        return Ok(cors(Response::builder().status(StatusCode::RANGE_NOT_SATISFIABLE))
+            .header(header::CONTENT_RANGE, format!("bytes */{}", obj.size))
+            .body(Full::new(Bytes::new()))
+            .unwrap());
+    }
+    let range = range.flatten();
+    let (start, end) = range.unwrap_or((0, obj.size.saturating_sub(1)));
+    let len = if obj.size == 0 { 0 } else { end - start + 1 };
+
+    let mut b = cors(Response::builder())
+        .header(header::ACCEPT_RANGES, "bytes")
+        .header(header::CONTENT_TYPE, "application/octet-stream")
+        .header(header::CONTENT_LENGTH, len.to_string());
+    if let Some(lm) = &obj.last_modified {
+        b = b.header(header::LAST_MODIFIED, lm.as_str());
+    }
+    b = if range.is_some() {
+        b.status(StatusCode::PARTIAL_CONTENT)
+            .header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{}", obj.size))
+    } else {
+        b.status(StatusCode::OK)
+    };
+
+    if req.method() == Method::HEAD {
+        return Ok(b.body(Full::new(Bytes::new())).unwrap());
+    }
+    if req.method() != Method::GET {
+        return Ok(plain(StatusCode::METHOD_NOT_ALLOWED, "method not allowed"));
+    }
+    if len == 0 {
+        return Ok(b.body(Full::new(Bytes::new())).unwrap());
+    }
+    match read_range(&p, &id, &obj, start, end).await {
+        Ok(data) => Ok(b.body(Full::new(data)).unwrap()),
+        Err(e) => {
+            log::warn!("stream {}/{}: {e}", obj.bucket, obj.key);
+            Ok(plain(StatusCode::BAD_GATEWAY, e))
+        }
+    }
+}
+
+/// Fetch one inclusive byte range from S3.
+async fn fetch(obj: &Object, start: u64, end: u64) -> Result<Bytes, String> {
+    let out = obj
+        .client
+        .get_object()
+        .bucket(&obj.bucket)
+        .key(&obj.key)
+        .range(format!("bytes={start}-{end}"))
+        .send()
+        .await
+        .map_err(|e| format!("S3 range get {}: {}", obj.key, aws_sdk_s3::error::DisplayErrorContext(e)))?;
+    let data = out.body.collect().await.map_err(|e| e.to_string())?.into_bytes();
+    obj.fetched.fetch_add(data.len() as u64, Ordering::Relaxed);
+    obj.requests.fetch_add(1, Ordering::Relaxed);
+    Ok(data)
+}
+
+/// Serve [start, end] from the block cache, fetching missing blocks from S3 in
+/// as few contiguous range requests as possible.
+async fn read_range(p: &Proxy, id: &str, obj: &Object, start: u64, end: u64) -> Result<Bytes, String> {
+    let (first, last) = (start / BLOCK, end / BLOCK);
+    let mut blocks: BTreeMap<u64, Bytes> = BTreeMap::new();
+    {
+        let mut cache = p.cache.lock().unwrap();
+        for b in first..=last {
+            if let Some(d) = cache.get(&(id.to_string(), b)) {
+                blocks.insert(b, d.clone());
+            }
+        }
+    }
+
+    // Group missing blocks into contiguous runs.
+    let mut runs: Vec<(u64, u64)> = Vec::new();
+    for b in first..=last {
+        if blocks.contains_key(&b) {
+            continue;
+        }
+        match runs.last_mut() {
+            Some((_, e)) if *e + 1 == b => *e = b,
+            _ => runs.push((b, b)),
+        }
+    }
+    for (rb, re) in runs {
+        let s = rb * BLOCK;
+        let e = ((re + 1) * BLOCK).min(obj.size) - 1;
+        let data = fetch(obj, s, e).await?;
+        let mut cache = p.cache.lock().unwrap();
+        for b in rb..=re {
+            let off = ((b - rb) * BLOCK) as usize;
+            if off >= data.len() {
+                break;
+            }
+            let chunk = data.slice(off..(off + BLOCK as usize).min(data.len()));
+            cache.put((id.to_string(), b), chunk.clone());
+            blocks.insert(b, chunk);
+        }
+    }
+
+    let mut out = Vec::with_capacity((end - start + 1) as usize);
+    for b in first..=last {
+        let d = blocks
+            .get(&b)
+            .ok_or_else(|| format!("short read from S3 for {} (block {b})", obj.key))?;
+        let base = b * BLOCK;
+        let lo = start.saturating_sub(base) as usize;
+        let hi = ((end + 1 - base) as usize).min(d.len());
+        if lo < hi {
+            out.extend_from_slice(&d[lo..hi]);
+        }
+    }
+    Ok(Bytes::from(out))
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamHandle {
+    pub url: String,
+    pub size_bytes: u64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamStat {
+    pub size_bytes: u64,
+    pub fetched_bytes: u64,
+    pub requests: u64,
+}
+
+fn object_id(bucket: &str, key: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (bucket, key).hash(&mut h);
+    format!("{:016x}", h.finish())
+}
+
+/// Register `s3://bucket/key` views with the local stream proxy and return a
+/// 127.0.0.1 URL per view that DuckDB can range-read. Only a HEAD request is
+/// made here; the data itself is fetched lazily as queries need it.
+pub async fn register(bucket: &str, paths: &[String]) -> Result<BTreeMap<String, StreamHandle>, String> {
+    let p = proxy().await?;
+    let client = client_for_bucket(bucket).await?;
+    let mut out = BTreeMap::new();
+    for path in paths {
+        let key = path.trim_start_matches(&format!("s3://{bucket}/")).to_string();
+        let id = object_id(bucket, &key);
+        let existing = p.objects.lock().unwrap().get(&id).cloned();
+        let obj = match existing {
+            Some(o) => o,
+            None => {
+                let head = client
+                    .head_object()
+                    .bucket(bucket)
+                    .key(&key)
+                    .send()
+                    .await
+                    .map_err(|e| format!("S3 head {key}: {}", aws_sdk_s3::error::DisplayErrorContext(e)))?;
+                let o = Arc::new(Object {
+                    bucket: bucket.to_string(),
+                    key: key.clone(),
+                    size: head.content_length().unwrap_or(0).max(0) as u64,
+                    last_modified: head
+                        .last_modified()
+                        .and_then(|d| d.fmt(aws_sdk_s3::primitives::DateTimeFormat::HttpDate).ok()),
+                    client: client.clone(),
+                    fetched: AtomicU64::new(0),
+                    requests: AtomicU64::new(0),
+                });
+                p.objects.lock().unwrap().insert(id.clone(), o.clone());
+                o
+            }
+        };
+        let file = key.rsplit('/').next().unwrap_or(&key);
+        out.insert(
+            path.clone(),
+            StreamHandle {
+                url: format!("http://127.0.0.1:{}/{}/{id}/{file}", p.port, p.token),
+                size_bytes: obj.size,
+            },
+        );
+    }
+    Ok(out)
+}
+
+/// Bytes actually pulled from S3 per streamed view (keyed by `s3://` path).
+pub fn stats() -> BTreeMap<String, StreamStat> {
+    let Some(p) = PROXY.get() else { return BTreeMap::new() };
+    let objects = p.objects.lock().unwrap();
+    objects
+        .values()
+        .map(|o| {
+            (
+                format!("s3://{}/{}", o.bucket, o.key),
+                StreamStat {
+                    size_bytes: o.size,
+                    fetched_bytes: o.fetched.load(Ordering::Relaxed),
+                    requests: o.requests.load(Ordering::Relaxed),
+                },
+            )
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub async fn stream_s3_urls(
+    bucket: String,
+    paths: Vec<String>,
+) -> Result<BTreeMap<String, StreamHandle>, String> {
+    register(&bucket, &paths).await
+}
+
+#[tauri::command]
+pub fn stream_s3_stats() -> BTreeMap<String, StreamStat> {
+    stats()
+}

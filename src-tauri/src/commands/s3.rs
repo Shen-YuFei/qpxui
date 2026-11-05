@@ -28,11 +28,55 @@ pub struct S3Listing {
 }
 
 async fn client() -> Result<Client, String> {
-    let config = aws_config::defaults(BehaviorVersion::latest())
-        .region(RegionProviderChain::default_provider())
-        .load()
-        .await;
-    Ok(Client::new(&config))
+    client_in(None).await
+}
+
+/// Build a client, optionally pinned to a region. A custom endpoint
+/// (`AWS_ENDPOINT_URL`, e.g. MinIO / Ceph / a local test server) switches to
+/// path-style addressing, which those servers expect.
+async fn client_in(region: Option<String>) -> Result<Client, String> {
+    let mut loader = aws_config::defaults(BehaviorVersion::latest());
+    loader = match region {
+        Some(r) => loader.region(aws_config::Region::new(r)),
+        None => loader.region(RegionProviderChain::default_provider().or_else("us-east-1")),
+    };
+    let config = loader.load().await;
+    let mut b = aws_sdk_s3::config::Builder::from(&config);
+    if std::env::var_os("AWS_ENDPOINT_URL").is_some()
+        || std::env::var_os("AWS_ENDPOINT_URL_S3").is_some()
+    {
+        b = b.force_path_style(true);
+    }
+    Ok(Client::from_conf(b.build()))
+}
+
+/// A client in the bucket's own region. Range reads are many small requests,
+/// so we resolve the region once (HeadBucket reports it even on a redirect)
+/// instead of paying a cross-region redirect on every request.
+pub(crate) async fn client_for_bucket(bucket: &str) -> Result<Client, String> {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    static REGIONS: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
+
+    let cached = REGIONS.lock().unwrap().as_ref().and_then(|m| m.get(bucket).cloned());
+    if let Some(r) = cached {
+        return client_in(Some(r)).await;
+    }
+    let base = client().await?;
+    let region = match base.head_bucket().bucket(bucket).send().await {
+        Ok(out) => out.bucket_region().map(str::to_string),
+        Err(e) => e
+            .raw_response()
+            .and_then(|r| r.headers().get("x-amz-bucket-region"))
+            .map(str::to_string),
+    };
+    match region {
+        Some(r) if Some(r.as_str()) != base.config().region().map(|x| x.as_ref()) => {
+            REGIONS.lock().unwrap().get_or_insert_with(HashMap::new).insert(bucket.to_string(), r.clone());
+            client_in(Some(r)).await
+        }
+        _ => Ok(base),
+    }
 }
 
 fn s3_url(bucket: &str, key: &str) -> String {
@@ -43,7 +87,7 @@ fn s3_url(bucket: &str, key: &str) -> String {
 /// datasets (grouped by the `<prefix>` part of their filenames).
 #[tauri::command]
 pub async fn list_s3(bucket: String, prefix: Option<String>) -> Result<S3Listing, String> {
-    let client = client().await?;
+    let client = client_for_bucket(&bucket).await?;
     let prefix = prefix.unwrap_or_default();
 
     let mut objects: Vec<S3Object> = Vec::new();
@@ -151,7 +195,7 @@ pub async fn cache_s3_views(
     paths: Vec<String>,
 ) -> Result<Vec<ViewInfo>, String> {
     let token = xfers::begin(&cancel_id);
-    let client = client().await?;
+    let client = client_for_bucket(&bucket).await?;
     let root = cache_root()?;
     std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
 

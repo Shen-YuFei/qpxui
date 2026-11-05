@@ -22,12 +22,19 @@ base64 = "0.22"
 dirs = "5"
 
 # Async runtime needed for the S3 commands (Tauri manages a tokio runtime).
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "io-util", "net", "time"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "io-util", "net", "time", "sync"] }
 
 # AWS S3 (rustls, no OpenSSL needed).
 aws-config = { version = "1", default-features = false, features = ["behavior-version-latest", "rt-tokio", "rustls"] }
 aws-sdk-s3 = { version = "1", default-features = false, features = ["rt-tokio", "rustls"] }
 futures = "0.3"
+
+# Local HTTP range proxy that lets DuckDB-wasm stream S3 objects lazily.
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+bytes = "1"
+lru = "0.18"
 
 log = "0.4"
 env_logger = "0.11"

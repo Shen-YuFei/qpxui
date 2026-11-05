@@ -1,6 +1,8 @@
 mod commands;
 mod qpx;
 
+pub use commands::s3stream::{register as stream_register, stats as stream_stats};
+
 pub fn run() {
     env_logger::init();
 
@@ -14,6 +16,8 @@ pub fn run() {
             commands::s3::list_s3,
             commands::s3::cache_s3_views,
             commands::s3::presign_s3_urls,
+            commands::s3stream::stream_s3_urls,
+            commands::s3stream::stream_s3_stats,
             commands::transfers::cancel_download,
             commands::portal::portal_datasets,
             commands::portal::portal_registry,

@@ -138,8 +138,17 @@ AWS_PROFILE=myprod AWS_REGION=eu-west-1 npm run tauri dev
 ```
 
 In the app: **New source → S3 bucket**, enter the bucket name and an optional prefix, click
-**List**, tick the views you want, then **Load selected**. The chosen parquet files are cached
-locally and queryable straight away.
+**List**, tick the views you want, then choose:
+
+- **⚡ Stream (lazy, no download)**: query the files in place. The Rust backend runs a
+  `127.0.0.1` HTTP range proxy (`src-tauri/src/commands/s3stream.rs`). DuckDB reads only the
+  parquet footer plus the column chunks / row groups each query touches, and the proxy fetches
+  just those byte ranges from S3 with your credentials, keeping them in a 512 MB in-memory block
+  cache. Buckets need no CORS setup, and credentials never reach the webview. The sidebar shows
+  how much of each file has actually been fetched (e.g. `⚡ 16 MB / 170 MB`).
+- **Download to cache**: fetch whole files once (with progress + cancel) for fully offline use.
+
+S3-compatible stores (MinIO, Ceph, …) work via `AWS_ENDPOINT_URL=http://host:9000`.
 
 ---
 
