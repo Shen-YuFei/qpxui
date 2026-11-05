@@ -11,6 +11,23 @@ open a single file, a dataset folder, a collection of many projects, or a remote
 
 ---
 
+## Install
+
+Download the installer for your platform from the
+[latest release](https://github.com/bigbio/qpxui/releases/latest):
+
+| Platform | File | Notes |
+|----------|------|-------|
+| macOS (Apple Silicon / Intel) | `qpxui_<version>_aarch64.dmg` / `_x64.dmg` | Open the `.dmg` and drag **qpxui** to Applications. |
+| Windows | `qpxui_<version>_x64-setup.exe` or `.msi` | Run the installer (uses the WebView2 runtime that ships with Windows 10/11). |
+| Linux | `.AppImage`, `.deb`, `.rpm` | `chmod +x *.AppImage && ./qpxui*.AppImage`, or install the `.deb`/`.rpm`. |
+
+> **macOS unsigned-app note:** the builds aren't notarized yet, so the first launch may say the
+> app "is damaged" or "can't be opened". Right-click the app → **Open**, or run
+> `xattr -dr com.apple.quarantine /Applications/qpxui.app`.
+
+---
+
 ## Features
 
 | Source | What it does |
@@ -134,8 +151,17 @@ locally and queryable straight away.
   rendered — the current viewer focuses on the Parquet views. That can be extended later.
 - Large views (especially `mz`/spectra) are loaded into the webview's memory when queried; for
   very large files the DuckDB WASM engine may be limited. Paging/Browse helps keep memory in check.
-- Icons: `src-tauri/icons/icon.png` is a placeholder — replace with a proper 512×512 app icon
-  before shipping a release bundle.
+- Icons are generated from `src-tauri/icons/icon-source.png` (drawn by `scripts/make-icon.py`)
+  with `npx tauri icon src-tauri/icons/icon-source.png`.
+
+## Releasing
+
+Push a version tag. The `Release` GitHub Actions workflow then builds the macOS (arm64 + x64),
+Windows and Linux installers and attaches them to a draft release:
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
 
 ---
 
