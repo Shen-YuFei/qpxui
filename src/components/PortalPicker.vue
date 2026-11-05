@@ -116,6 +116,25 @@ async function loadSelection() {
   }
 }
 
+/** Open the selected views lazily: nothing is downloaded up front, each query
+ * fetches only the byte ranges it needs from the portal's storage. */
+function streamSelection() {
+  if (!selected.value) return;
+  error.value = "";
+  const sel = views.value.filter((v) => checked.value[v.path]);
+  if (!sel.length) {
+    error.value = "Select at least one view to stream.";
+    return;
+  }
+  const ds: DatasetInfo = {
+    prefix: selected.value.accession,
+    path: `quantms portal / ${selected.value.accession}`,
+    views: sel.map((v) => ({ ...v })).sort((a, b) => a.view.localeCompare(b.view)),
+    sourceKind: "portal",
+  };
+  loadDatasets([ds], "portal | " + selected.value.accession + " (stream)");
+}
+
 function toggleAll() {
   const allOn = views.value.every((v) => checked.value[v.path]);
   for (const v of views.value) checked.value[v.path] = !allOn;
@@ -157,8 +176,9 @@ function fmtPx(n: number): string {
     <p class="muted">
       Browse, search, and open reanalysed datasets published on the
       <a href="https://portal.quantms.org" target="_blank" rel="noopener">quantms portal</a>.
-      Sources load over HTTPS (no AWS credentials needed); the views you choose are
-      downloaded once to your local cache, then queryable offline.
+      Sources load over HTTPS (no AWS credentials needed). <b>Stream</b> the views you choose
+      to query them in place (only the byte ranges each query needs are fetched), or
+      <b>download them to cache</b> once for fully offline use.
     </p>
 
     <div v-if="error" class="error">{{ error }}</div>
@@ -218,9 +238,18 @@ function fmtPx(n: number): string {
 
           <div v-if="views.length" class="toolbar">
             <span class="muted">{{ views.length }} view(s) · {{ selectedCount }} selected</span>
-            <button class="primary" @click="loadSelection" :disabled="busy || !selectedCount">
-              {{ downloading ? "Downloading…" : "Load selected (download to cache)" }}
-            </button>
+            <div class="actions">
+              <button
+                @click="streamSelection"
+                :disabled="busy || !selectedCount"
+                title="Query the files in place — each query fetches only the byte ranges it needs"
+              >
+                ⚡ Stream (lazy, no download)
+              </button>
+              <button class="primary" @click="loadSelection" :disabled="busy || !selectedCount">
+                {{ downloading ? "Downloading…" : "Download to cache" }}
+              </button>
+            </div>
           </div>
 
           <div v-if="downloading && activeBars.length" class="progress-box">
@@ -381,6 +410,11 @@ a {
   margin: 10px 0;
   font-size: 13px;
   gap: 10px;
+  flex-wrap: wrap;
+}
+.actions {
+  display: flex;
+  gap: 8px;
   flex-wrap: wrap;
 }
 .view-list {

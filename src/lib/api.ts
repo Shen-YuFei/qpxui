@@ -84,7 +84,10 @@ export const api = {
   /** Register S3 views with the backend range proxy (lazy, no download). */
   streamS3Urls: (bucket: string, paths: string[]) =>
     invoke<Record<string, StreamHandle>>("stream_s3_urls", { bucket, paths }),
-  /** Bytes actually fetched from S3 per streamed view (keyed by s3:// path). */
+  /** Register public portal (https) files with the backend range proxy. */
+  streamHttpUrls: (urls: string[]) =>
+    invoke<Record<string, StreamHandle>>("stream_http_urls", { urls }),
+  /** Bytes actually fetched per streamed view (keyed by its s3:// or https path). */
   streamS3Stats: () => invoke<Record<string, StreamStat>>("stream_s3_stats"),
 
   /** Ask the backend to abort an in-flight download batch. */

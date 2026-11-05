@@ -9,7 +9,7 @@ const datasets = computed(() => state.datasets);
 const streamStats = ref<Record<string, StreamStat>>({});
 let timer: number | undefined;
 async function refreshStats() {
-  if (state.sourceKind !== "s3") return;
+  if (!state.datasets.some((d) => d.views.some(isStreamed))) return;
   try {
     streamStats.value = await api.streamS3Stats();
   } catch {
@@ -22,10 +22,14 @@ onMounted(() => {
 });
 onUnmounted(() => window.clearInterval(timer));
 
+function isStreamed(v: ViewInfo): boolean {
+  return /^(s3|https?):\/\//.test(v.path);
+}
+
 function streamTitle(v: ViewInfo): string {
   const s = streamStats.value[v.path];
-  if (!s) return "Streamed from S3 — not read yet";
-  return `Streamed from S3: ${fmt(s.fetchedBytes)} of ${fmt(s.sizeBytes)} fetched in ${s.requests} range request(s)`;
+  if (!s) return "Streamed (lazy) — not read yet";
+  return `Streamed (lazy): ${fmt(s.fetchedBytes)} of ${fmt(s.sizeBytes)} fetched in ${s.requests} range request(s)`;
 }
 
 function fmt(n: number): string {
@@ -86,7 +90,7 @@ const viewIcon: Record<string, string> = {
         >
           <span class="vi">{{ viewIcon[v.view] ?? '📦' }}</span>
           <span class="vname mono">{{ v.view }}</span>
-          <span v-if="v.path.startsWith('s3://')" class="stream muted" :title="streamTitle(v)">
+          <span v-if="isStreamed(v)" class="stream muted" :title="streamTitle(v)">
             ⚡ {{ fmt(streamStats[v.path]?.fetchedBytes ?? 0) }} /
           </span>
           <span class="vsize muted">{{ fmt(v.sizeBytes) }}</span>

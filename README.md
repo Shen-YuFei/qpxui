@@ -150,6 +150,11 @@ In the app: **New source → S3 bucket**, enter the bucket name and an optional 
 
 S3-compatible stores (MinIO, Ceph, …) work via `AWS_ENDPOINT_URL=http://host:9000`.
 
+The **quantms portal** source has the same two buttons. Streaming portal files goes through the
+same proxy: it follows the portal's redirect to a short-lived signed storage URL (and re-resolves
+it when it expires), then fetches only the byte ranges each query needs. No credentials needed.
+Large reads are split into 4 MB range requests fetched 8 at a time.
+
 ---
 
 ## Notes & limitations

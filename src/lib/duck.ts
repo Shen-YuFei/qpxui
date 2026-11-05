@@ -74,6 +74,11 @@ export async function ensureViewReady(view: ViewInfo): Promise<string> {
     if (!url) throw new Error(`could not open ${view.path} for streaming`);
     // directIO = true: no whole-file buffering, every read is a range request.
     await db!.registerFileURL(fileKey, url, duckdb.DuckDBDataProtocol.HTTP, true);
+  } else if (/^https?:\/\//.test(view.path)) {
+    // Public portal file: same lazy range proxy, fetched over HTTPS.
+    const url = (await api.streamHttpUrls([view.path]))[view.path]?.url;
+    if (!url) throw new Error(`could not open ${view.path} for streaming`);
+    await db!.registerFileURL(fileKey, url, duckdb.DuckDBDataProtocol.HTTP, true);
   } else {
     const b64 = await api.readFileBytes(view.path);
     const bytes = base64ToUint8(b64);
