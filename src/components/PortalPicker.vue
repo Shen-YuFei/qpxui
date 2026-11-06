@@ -32,15 +32,60 @@ async function cancel() {
   }
 }
 
+type SortKey = "accession" | "totalSize" | "peptides" | "psmCount" | "proteins" | "samples";
+const SORTS: { key: SortKey; label: string }[] = [
+  { key: "accession", label: "Accession" },
+  { key: "totalSize", label: "Size" },
+  { key: "peptides", label: "Peptides" },
+  { key: "psmCount", label: "PSMs" },
+  { key: "proteins", label: "Proteins" },
+  { key: "samples", label: "Samples" },
+];
+const sortKey = ref<SortKey>("accession");
+const sortDesc = ref(false);
+
+function setSort(k: SortKey) {
+  if (sortKey.value === k) {
+    sortDesc.value = !sortDesc.value;
+    return;
+  }
+  // Numbers read best largest-first; accessions A→Z.
+  sortKey.value = k;
+  sortDesc.value = k !== "accession";
+}
+
 const filtered = computed(() => {
   const q = query.value.trim().toLowerCase();
-  if (!q) return rows.value;
-  return rows.value.filter((r) =>
-    [r.accession, r.title, r.organism, r.instrument]
-      .filter(Boolean)
-      .some((s) => (s as string).toLowerCase().includes(q))
-  );
+  const list = q
+    ? rows.value.filter((r) =>
+        [r.accession, r.title, r.organism, r.instrument, r.collectionTitle]
+          .filter(Boolean)
+          .some((s) => (s as string).toLowerCase().includes(q))
+      )
+    : [...rows.value];
+  const k = sortKey.value;
+  const dir = sortDesc.value ? -1 : 1;
+  return list.sort((a, b) => {
+    if (k === "accession") return dir * rowKey(a).localeCompare(rowKey(b));
+    // Missing values always sink to the bottom.
+    const x = a[k] ?? null;
+    const y = b[k] ?? null;
+    if (x === null || y === null) return x === y ? 0 : x === null ? 1 : -1;
+    return dir * (x - y) || rowKey(a).localeCompare(rowKey(b));
+  });
 });
+
+/** Some accessions hold several runs (one per organism), so key by run ref. */
+function rowKey(r: PortalDataset): string {
+  return r.datasetRef ?? r.accession;
+}
+
+function fmtCount(n: number | null | undefined): string {
+  if (n === null || n === undefined) return "—";
+  if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}K`;
+  return String(n);
+}
 
 const selectedCount = computed(
   () => views.value.filter((v) => checked.value[v.path]).length
@@ -195,15 +240,28 @@ function fmtPx(n: number): string {
           type="search"
           placeholder="Search datasets (accession, title, organism, instrument)…"
         />
+        <div class="sortbar">
+          <span class="muted">Sort</span>
+          <button
+            v-for="s in SORTS"
+            :key="s.key"
+            class="chip"
+            :class="{ on: sortKey === s.key }"
+            @click="setSort(s.key)"
+            :title="sortKey === s.key ? 'Click to reverse' : `Sort by ${s.label.toLowerCase()}`"
+          >
+            {{ s.label }}<span v-if="sortKey === s.key"> {{ sortDesc ? "↓" : "↑" }}</span>
+          </button>
+        </div>
         <div class="meta muted">
           {{ filtered.length }} of {{ rows.length }} datasets · {{ selected?.accession ?? "none" }} selected
         </div>
         <div class="rows">
           <button
             v-for="r in filtered"
-            :key="r.accession"
+            :key="rowKey(r)"
             class="row"
-            :class="{ active: selected?.accession === r.accession }"
+            :class="{ active: selected && rowKey(selected) === rowKey(r) }"
             @click="selectDataset(r)"
           >
             <div class="row-top">
@@ -216,6 +274,12 @@ function fmtPx(n: number): string {
               <template v-if="r.organism && r.instrument"> · </template>
               <span v-if="r.instrument">{{ r.instrument }}</span>
               <template v-if="r.samples"> · {{ r.samples }} samples</template>
+            </div>
+            <div class="counts">
+              <span :class="{ hi: sortKey === 'peptides' }" title="Distinct peptides">{{ fmtCount(r.peptides) }} pep</span>
+              <span :class="{ hi: sortKey === 'psmCount' }" title="PSMs">{{ fmtCount(r.psmCount) }} PSM</span>
+              <span :class="{ hi: sortKey === 'proteins' }" title="Proteins">{{ fmtCount(r.proteins) }} prot</span>
+              <span v-if="r.collectionTitle" class="coll" :title="r.collectionTitle">{{ r.collectionTitle }}</span>
             </div>
           </button>
           <div v-if="!filtered.length" class="muted empty">No datasets match “{{ query }}”.</div>
@@ -232,7 +296,13 @@ function fmtPx(n: number): string {
               <span v-if="selected.organism">{{ selected.organism }}</span>
               <span v-if="selected.instrument"> · {{ selected.instrument }}</span>
               <span v-if="selected.samples"> · {{ selected.samples }} samples</span>
-              <span v-if="selected.proteins"> · {{ selected.proteins }} proteins</span>
+            </div>
+            <div class="stats">
+              <div><b>{{ fmt(selected.totalSize) }}</b><span class="muted">size</span></div>
+              <div><b>{{ selected.peptides?.toLocaleString() ?? "—" }}</b><span class="muted">peptides</span></div>
+              <div><b>{{ selected.psmCount?.toLocaleString() ?? "—" }}</b><span class="muted">PSMs</span></div>
+              <div><b>{{ selected.proteins?.toLocaleString() ?? "—" }}</b><span class="muted">proteins</span></div>
+              <div><b>{{ selected.samples?.toLocaleString() ?? "—" }}</b><span class="muted">samples</span></div>
             </div>
           </div>
 
@@ -379,6 +449,57 @@ a {
   overflow: hidden;
 }
 .sub {
+  font-size: 11px;
+}
+.sortbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  font-size: 12px;
+}
+.chip {
+  padding: 2px 9px;
+  font-size: 11px;
+  border-radius: 999px;
+}
+.chip.on {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.counts .hi {
+  color: var(--accent);
+  font-weight: 600;
+}
+.counts .coll {
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 45%;
+}
+.stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+.stats div {
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+}
+.stats span {
   font-size: 11px;
 }
 .empty {

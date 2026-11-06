@@ -190,6 +190,7 @@ async fn handle(p: Arc<Proxy>, req: Request<Incoming>) -> Result<Response<Full<B
             .unwrap());
     }
     let range = range.flatten();
+    log::debug!("{} {} range={range:?} size={}", req.method(), obj.path, obj.size);
     let (start, end) = range.unwrap_or((0, obj.size.saturating_sub(1)));
     let len = if obj.size == 0 { 0 } else { end - start + 1 };
 
