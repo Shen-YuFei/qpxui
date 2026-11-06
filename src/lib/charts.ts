@@ -1,7 +1,7 @@
 // Shared, theme-aware ECharts option builders for the report views.
 
 import { use } from "echarts/core";
-import { BarChart, BoxplotChart, CustomChart, LineChart, ScatterChart } from "echarts/charts";
+import { BarChart, BoxplotChart, CustomChart, HeatmapChart, LineChart, ScatterChart } from "echarts/charts";
 import {
   DataZoomComponent,
   GraphicComponent,
@@ -9,11 +9,12 @@ import {
   LegendComponent,
   MarkLineComponent,
   TooltipComponent,
+  VisualMapComponent,
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 
 use([
-  BarChart, LineChart, BoxplotChart, ScatterChart, CustomChart,
+  BarChart, LineChart, BoxplotChart, ScatterChart, CustomChart, HeatmapChart, VisualMapComponent,
   GraphicComponent, GridComponent, TooltipComponent, LegendComponent, DataZoomComponent, MarkLineComponent, CanvasRenderer,
 ]);
 
@@ -64,7 +65,7 @@ export function chartTheme(): ChartTheme {
   };
 }
 
-const SERIES_COLORS = ["#22d3ee", "#818cf8", "#f472b6", "#fbbf24", "#34d399", "#f87171", "#a3e635", "#fb923c"];
+export const SERIES_COLORS = ["#22d3ee", "#818cf8", "#f472b6", "#fbbf24", "#34d399", "#f87171", "#a3e635", "#fb923c"];
 
 export function buildOption(spec: ChartSpec, t: ChartTheme): any {
   const horizontal = spec.kind === "hbar";
@@ -163,7 +164,7 @@ export function buildOption(spec: ChartSpec, t: ChartTheme): any {
   };
 }
 
-function commonPrefix(labels: string[]): string {
+export function commonPrefix(labels: string[]): string {
   if (labels.length < 4) return "";
   let p = labels[0];
   for (const l of labels) {
