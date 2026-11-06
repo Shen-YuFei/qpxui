@@ -16,6 +16,7 @@ import {
   listText,
   objects,
   proteinExpr,
+  sampleMapSql,
   targetWhere,
   type Column,
   type DatasetTables,
@@ -25,6 +26,7 @@ import {
   averageLinkageOrder,
   column,
   correlation,
+  groupingColumns,
   medianNormalize,
   natural,
   pca,
@@ -69,18 +71,7 @@ function matrixSql(S: TableRef): string {
   const byName = `(contains(upper(${prot}), 'CONTAMINANT') OR contains(upper(${prot}), 'CON__'))`;
   const cont = S.cols.has("contaminant") ? `(coalesce(contaminant, false) OR ${byName})` : byName;
   const R = props.t.run?.cols.has("samples") ? props.t.run : undefined;
-  // Runs -> samples: by (run, channel label) for multiplexed data; by run only
-  // when the run holds a single sample (label-free labels rarely match).
-  // Channel names differ between converters ("TMT131" vs "TMT131N", case, spaces).
-  const norm = (e: string) => `regexp_replace(upper(replace(${e}, ' ', '')), '^TMT131N$', 'TMT131')`;
-  const maps = R
-    ? `, m AS (SELECT run_file_name AS r, ${norm("s.label")} AS l, min(s.sample_accession) AS sa
-              FROM (SELECT run_file_name, unnest(samples) AS s FROM ${ident(R.table)}) GROUP BY 1, 2),
-         m1 AS (SELECT r, min(sa) AS sa FROM m GROUP BY r HAVING count(DISTINCT sa) = 1)`
-    : "";
-  const joins = R ? `LEFT JOIN m ON m.r = x.r AND m.l = ${norm("x.i.label")} LEFT JOIN m1 ON m1.r = x.r` : "";
-  const fallback = `CASE WHEN x.i.label IS NULL OR x.i.label IN ('LFQ', 'label free sample') THEN x.r ELSE x.r || ' · ' || x.i.label END`;
-  const col = R ? `coalesce(m.sa, m1.sa, ${fallback})` : fallback;
+  const { ctes: maps, joins, col } = sampleMapSql(R);
   return `
 WITH x AS (
   SELECT ${prot} AS p, ${gene} AS g, ${run} AS r, ${cont} AS c, unnest(intensities) AS i
@@ -170,19 +161,9 @@ const matrix = computed<QuantMatrix | null>(() => {
 const isSampleCols = computed(() => !!raw.value && raw.value.samples.some((s) => meta.value.has(s)));
 
 /** Sample attributes that split the samples into 2..n-1 groups. */
-const groupOptions = computed(() => {
-  if (!raw.value || !isSampleCols.value) return [] as string[];
-  const rows = raw.value.samples.map((s) => meta.value.get(s)).filter(Boolean) as Record<string, any>[];
-  if (!rows.length) return [];
-  const out: string[] = [];
-  for (const k of Object.keys(rows[0])) {
-    if (k === "sample_accession") continue;
-    const vals = new Set(rows.map((r) => (r[k] == null ? null : String(r[k]))).filter((v) => v !== null && v !== ""));
-    if (vals.size >= 2 && vals.size < rows.length && vals.size <= 12) out.push(k);
-  }
-  const pref = ["disease", "histologic_subtype", "organism_part", "cell_type", "cell_line", "sex", "developmental_stage"];
-  return out.sort((a, b) => ((pref.indexOf(a) + 1 || 99) - (pref.indexOf(b) + 1 || 99)) || a.localeCompare(b));
-});
+const groupOptions = computed(() =>
+  raw.value && isSampleCols.value ? groupingColumns(raw.value.samples, meta.value) : ([] as string[])
+);
 
 function groupOf(sample: string): string {
   if (!groupBy.value) return "";

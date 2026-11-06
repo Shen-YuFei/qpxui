@@ -183,3 +183,19 @@ export function pca(rows: Float64Array[], n: number, k = 3): Pca {
 
 /** Natural ("Sample-2" < "Sample-10") string compare. */
 export const natural = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
+
+/** Sample attributes that split `samples` into 2..12 groups (fewer groups
+ * than samples), the most informative first. `meta` maps sample accession to
+ * its sample-view row. */
+export function groupingColumns(samples: string[], meta: Map<string, Record<string, any>>): string[] {
+  const rows = samples.map((s) => meta.get(s)).filter(Boolean) as Record<string, any>[];
+  if (!rows.length) return [];
+  const out: string[] = [];
+  for (const k of Object.keys(rows[0])) {
+    if (k === "sample_accession") continue;
+    const vals = new Set(rows.map((r) => (r[k] == null ? null : String(r[k]))).filter((v) => v !== null && v !== ""));
+    if (vals.size >= 2 && vals.size < rows.length && vals.size <= 12) out.push(k);
+  }
+  const pref = ["disease", "histologic_subtype", "organism_part", "cell_type", "cell_line", "sex", "developmental_stage"];
+  return out.sort((a, b) => ((pref.indexOf(a) + 1 || 99) - (pref.indexOf(b) + 1 || 99)) || a.localeCompare(b));
+}
