@@ -233,7 +233,7 @@ const descOpen = ref(false);
           <ReportPTMs v-else-if="state.reportTab === 'ptms'" :key="ds.path + ds.prefix + 'ptm'" :ds="ds" :t="tables" :file-base="fileBase" />
           <ReportSamples v-else-if="state.reportTab === 'samples'" :key="ds.path + ds.prefix + 'smp'" :ds="ds" :t="tables" :file-base="fileBase" />
           <ReportProteins v-else-if="state.reportTab === 'proteins'" :key="ds.path + ds.prefix + 'prot'" :ds="ds" :t="tables" :file-base="fileBase" />
-          <ReportPeptides v-else :key="ds.path + ds.prefix + 'pep'" :ds="ds" :t="tables" :file-base="fileBase" />
+          <ReportPeptides v-else :key="ds.path + ds.prefix + 'pep'" :ds="ds" :t="tables" :file-base="fileBase" :accession="accession" />
         </KeepAlive>
       </section>
     </template>

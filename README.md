@@ -26,6 +26,7 @@ Built with [Tauri v2](https://v2.tauri.app/) (Rust), Vue 3 + TypeScript + Vite, 
   - [Data sources](#data-sources)
   - [Dataset report](#dataset-report)
   - [Protein & peptide search](#protein--peptide-search)
+  - [Spectrum viewer](#spectrum-viewer)
   - [Browse, summary & SQL](#browse-summary--sql)
   - [PTMs, settings & export](#ptms-settings--export)
 - [Streaming from S3 and the portal](#streaming-from-s3-and-the-portal)
@@ -122,6 +123,23 @@ Results are cached, so switching tabs is instant.
   and its protein links open the protein.
 - The **sidebar search box** searches the selected dataset. An upper-case amino-acid string of 8 or
   more residues is searched as a peptide.
+
+### Spectrum viewer
+
+When the PSM view stores fragment peaks (`mz_array` / `intensity_array`, as in the
+[π-MSNet](https://github.com/PHOENIXcenter/pi-MSnet) collection), the peptide evidence pane lists
+PSMs, and clicking one opens an annotated spectrum in the style of the PRIDE USI viewer:
+
+- stick plot with b (blue) and y (red) ions, neutral losses and labels; zoom with the wheel or slider;
+- fragment coverage map, mass-error panel and a b/y fragment ion table;
+- annotations either **from the file** (spectrum_utils labels stored in `ion_type_array`) or
+  **computed** here, with an adjustable tolerance (ppm or Da), fragment charge and H₂O/NH₃ losses;
+- the PSM's USI (`mzspec:PXD…:run:scan:N:peptidoform/z`), with a link to the PRIDE USI viewer;
+- PNG and CSV (peaks + annotations) export.
+
+Only the selected PSM's row is read, so this also works on large streamed files. Whether a file
+has spectra is decided from the parquet footer statistics. π-MSNet file names
+(`<prefix>-MSNet.parquet`, `<prefix>-MSNet.psm.parquet`) are recognised as the PSM view of `<prefix>`.
 
 ### Browse, summary & SQL
 

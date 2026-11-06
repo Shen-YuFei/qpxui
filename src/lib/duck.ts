@@ -25,19 +25,30 @@ const MANUAL_BUNDLES: duckdb.DuckDBBundles = {
 let db: duckdb.AsyncDuckDB | null = null;
 let conn: duckdb.AsyncDuckDBConnection | null = null;
 
-export async function init() {
-  if (db) return;
+let initPromise: Promise<void> | null = null;
+
+// Concurrent callers share one initialisation, so nobody sees a half-ready db.
+export function init(): Promise<void> {
+  if (!initPromise) {
+    initPromise = doInit();
+    initPromise.catch(() => (initPromise = null));
+  }
+  return initPromise;
+}
+
+async function doInit() {
   const bundle = await duckdb.selectBundle(MANUAL_BUNDLES);
   const worker = new Worker(bundle.mainWorker!);
   const logger = new duckdb.ConsoleLogger(duckdb.LogLevel.WARNING);
-  db = new duckdb.AsyncDuckDB(logger, worker);
-  await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+  const d = new duckdb.AsyncDuckDB(logger, worker);
+  await d.instantiate(bundle.mainModule, bundle.pthreadWorker);
   // Remote (streamed) files must be read with range requests only. With the
   // defaults, duckdb-wasm may fall back to GETting the whole object.
-  await db.open({
+  await d.open({
     filesystem: { reliableHeadRequests: true, allowFullHTTPReads: false, forceFullHTTPReads: false },
   });
-  conn = await db.connect();
+  conn = await d.connect();
+  db = d;
 }
 
 function safeName(name: string): string {

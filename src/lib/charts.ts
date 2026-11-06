@@ -1,16 +1,20 @@
 // Shared, theme-aware ECharts option builders for the report views.
 
 import { use } from "echarts/core";
-import { BarChart, BoxplotChart, LineChart } from "echarts/charts";
+import { BarChart, BoxplotChart, CustomChart, LineChart, ScatterChart } from "echarts/charts";
 import {
   DataZoomComponent,
   GridComponent,
   LegendComponent,
+  MarkLineComponent,
   TooltipComponent,
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 
-use([BarChart, LineChart, BoxplotChart, GridComponent, TooltipComponent, LegendComponent, DataZoomComponent, CanvasRenderer]);
+use([
+  BarChart, LineChart, BoxplotChart, ScatterChart, CustomChart,
+  GridComponent, TooltipComponent, LegendComponent, DataZoomComponent, MarkLineComponent, CanvasRenderer,
+]);
 
 export interface ChartSeries {
   name: string;
@@ -200,7 +204,7 @@ function boxTooltip(spec: ChartSpec) {
   };
 }
 
-function escapeHtml(s: string): string {
+export function escapeHtml(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 }
 

@@ -32,10 +32,24 @@ pub struct DatasetInfo {
 /// Split a QPX filename into `(prefix, view, format)`.
 ///
 /// `PXD021013.feature.parquet` -> `("PXD021013", "feature", "parquet")`.
+///
+/// π-MSNet collections ship their annotated PSMs (with spectra) as
+/// `<prefix>-MSNet.parquet` or `<prefix>-MSNet.psm.parquet`; both map to the
+/// `psm` view of `<prefix>` so they group with the sibling metadata views.
 pub fn parse_filename(filename: &str) -> Option<(String, String, String)> {
     let mut it = filename.rsplitn(2, '.');
     let format = it.next()?.to_ascii_lowercase();
     let rest = it.next()?;
+    if let Some(prefix) = strip_msnet(rest) {
+        return Some((prefix.to_string(), "psm".to_string(), format));
+    }
+    if let Some((p, v)) = rest.rsplit_once('.') {
+        if v == "psm" {
+            if let Some(prefix) = strip_msnet(p) {
+                return Some((prefix.to_string(), "psm".to_string(), format));
+            }
+        }
+    }
     let mut it2 = rest.rsplitn(2, '.');
     let view = it2.next()?;
     let prefix = it2.next()?;
@@ -43,6 +57,15 @@ pub fn parse_filename(filename: &str) -> Option<(String, String, String)> {
         return None;
     }
     Some((prefix.to_string(), view.to_string(), format))
+}
+
+fn strip_msnet(s: &str) -> Option<&str> {
+    let n = s.len().checked_sub("-MSNet".len())?;
+    if n > 0 && s.is_char_boundary(n) && s[n..].eq_ignore_ascii_case("-MSNet") {
+        Some(&s[..n])
+    } else {
+        None
+    }
 }
 
 fn into_datasets(
@@ -126,5 +149,24 @@ fn walk(
                 walk(&p, source_kind, depth + 1, max_depth, out, seen);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_filename;
+
+    fn p(s: &str) -> Option<(String, String, String)> {
+        parse_filename(s)
+    }
+
+    #[test]
+    fn standard_and_msnet_names() {
+        let t = |a: &str, b: &str, c: &str| Some((a.to_string(), b.to_string(), c.to_string()));
+        assert_eq!(p("PXD021013.feature.parquet"), t("PXD021013", "feature", "parquet"));
+        assert_eq!(p("PXD021013-MSNet.parquet"), t("PXD021013", "psm", "parquet"));
+        assert_eq!(p("PDC000219-MSNet.psm.parquet"), t("PDC000219", "psm", "parquet"));
+        assert_eq!(p("PXD019483-hCOV-MSNet.parquet"), t("PXD019483-hCOV", "psm", "parquet"));
+        assert_eq!(p("plain.parquet"), None);
     }
 }
