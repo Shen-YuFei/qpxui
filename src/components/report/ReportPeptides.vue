@@ -2,11 +2,13 @@
 import { computed, onMounted, ref, watch } from "vue";
 import PeptideSeq from "../PeptideSeq.vue";
 import ReportTable from "../ReportTable.vue";
+import SpectrumViewer, { type PsmKey } from "../SpectrumViewer.vue";
 import type { Column } from "../../lib/report";
 import type { DatasetInfo } from "../../lib/api";
 import {
   cachedSql,
   evidence,
+  hasSpectra,
   ident,
   intensitySumExpr,
   likePattern,
@@ -20,7 +22,7 @@ import {
 import { runSql } from "../../lib/duck";
 import { openProtein, state } from "../../store";
 
-const props = defineProps<{ ds: DatasetInfo; t: DatasetTables; fileBase: string }>();
+const props = defineProps<{ ds: DatasetInfo; t: DatasetTables; fileBase: string; accession?: string }>();
 
 const LIMIT = 500;
 const ev = evidence(props.t);
@@ -44,6 +46,14 @@ const focus = ref<string | null>(null);
 const evRows = ref<Record<string, any>[]>([]);
 const evBusy = ref(false);
 
+// PSM spectra: when the psm view stores peaks, the evidence pane lists PSMs
+// (even if a feature view exists) and a row opens the spectrum viewer.
+const spectra = ref(false);
+const spectrum = ref<PsmKey | null>(null);
+const evSrc = computed(() => (spectra.value && props.t.psm ? props.t.psm : ev));
+const evLabel = computed(() => (evSrc.value === props.t.psm ? "PSMs" : "features"));
+const evDetail = computed(() => `per-run ${evLabel.value}`);
+
 const cols = computed<Column[]>(() =>
   [
     { key: "peptidoform", label: "Peptidoform" },
@@ -60,6 +70,7 @@ const cols = computed<Column[]>(() =>
 const evCols = computed<Column[]>(() =>
   [
     { key: "run_file_name", label: "Run" },
+    { key: "scan_no", label: "Scan", num: true, fmt: (v: any) => (v == null ? "" : String(v)) },
     { key: "charge", label: "z", num: true },
     { key: "rt_min", label: "RT (min)", num: true, fmt: (v: any) => (v == null ? "" : Number(v).toFixed(2)) },
     { key: "observed_mz", label: "m/z", num: true, fmt: (v: any) => (v == null ? "" : Number(v).toFixed(4)) },
@@ -136,12 +147,14 @@ async function openPeptide(row: Record<string, any>) {
   evBusy.value = true;
   evRows.value = [];
   try {
-    const E = ev;
+    const E = evSrc.value!;
     const has = (c: string) => E.cols.has(c);
     const isum = intensitySumExpr(E);
     const pfCol = has("peptidoform") ? "peptidoform" : E.seq;
+    const scanList = /\[\]|list/i.test(E.types.scan ?? "");
     const sel = [
       has("run_file_name") ? "run_file_name" : null,
+      has("scan") ? (scanList ? "scan[1] AS scan_no" : "scan AS scan_no") : null,
       has("charge") ? "charge" : null,
       has("rt") ? "rt / 60.0 AS rt_min" : null,
       has("observed_mz") ? "observed_mz" : null,
@@ -151,12 +164,22 @@ async function openPeptide(row: Record<string, any>) {
     ].filter(Boolean);
     const r = await runSql(
       `SELECT ${sel.join(", ")} FROM ${ident(E.table)} WHERE ${targetWhere(E)} AND ${pfCol} = ${lit(String(row.peptidoform))}
-       ORDER BY ${has("run_file_name") ? "run_file_name" : "1"} LIMIT 5000`
+       ORDER BY ${has("run_file_name") ? "run_file_name" : "1"}${has("posterior_error_probability") ? ", posterior_error_probability" : ""} LIMIT 5000`
     );
-    evRows.value = objects(r);
+    evRows.value = objects(r).map((x, i) => ({ ...x, _k: i }));
   } finally {
     evBusy.value = false;
   }
+}
+
+function openSpectrum(row: Record<string, any>) {
+  if (!spectra.value || !focus.value) return;
+  spectrum.value = {
+    peptidoform: focus.value,
+    run_file_name: row.run_file_name ?? null,
+    scan: row.scan_no ?? null,
+    charge: row.charge ?? null,
+  };
 }
 
 watch(
@@ -170,6 +193,7 @@ watch(
 
 onMounted(async () => {
   if (!ev) return;
+  hasSpectra(props.t.psm).then((v) => (spectra.value = v && !!props.t.psm?.cols.has("peptidoform"))).catch(() => {});
   if (ev.cols.has("modifications")) {
     try {
       const r = await cachedSql(
@@ -200,7 +224,7 @@ onMounted(async () => {
         <option value="prefix">starts with</option>
         <option value="exact">exact</option>
       </select>
-      <select v-if="modNames.length" v-model="mod" title="Only peptides carrying this modification">
+      <select v-if="modNames.length" v-model="mod" title="Only peptidoforms carrying this modification">
         <option value="">any modification</option>
         <option v-for="m in modNames" :key="m" :value="m">{{ m }}</option>
       </select>
@@ -213,7 +237,7 @@ onMounted(async () => {
       <span v-else>
         {{ rows.length.toLocaleString() }}{{ truncated ? "+" : "" }} peptidoforms
         <template v-if="truncated"> (top {{ LIMIT }} by {{ evName }} — refine the search)</template>
-        · {{ (elapsed / 1000).toFixed(2) }} s · target {{ evName }} · click a row for its per-run evidence, a protein to open it
+        · {{ (elapsed / 1000).toFixed(2) }} s · target {{ evName }} · click a peptidoform for its {{ spectra ? "PSMs and spectra" : evDetail }}, a protein to open it
       </span>
     </div>
     <div v-if="error" class="error">⚠ {{ error }}</div>
@@ -226,7 +250,7 @@ onMounted(async () => {
         :selected="focus"
         clickable
         max-height="calc(100vh - 290px)"
-        :file-name="`${fileBase}_peptides${q ? '_' + q : ''}${mod ? '_' + mod : ''}`"
+        :file-name="`${fileBase}_peptidoforms${q ? '_' + q : ''}${mod ? '_' + mod : ''}`"
         @row="openPeptide"
       >
         <template #cell-peptidoform="{ row }">
@@ -243,9 +267,29 @@ onMounted(async () => {
           <button class="xs" @click="focus = null">✕</button>
         </div>
         <div v-if="evBusy" class="muted"><span class="spinner"></span></div>
-        <ReportTable v-else :columns="evCols" :rows="evRows" max-height="calc(100vh - 340px)" :file-name="`${fileBase}_${focus}_evidence`" />
+        <div v-if="!evBusy" class="muted hint">
+          {{ evRows.length.toLocaleString() }}{{ evRows.length >= 5000 ? "+" : "" }} {{ evLabel }}<template v-if="spectra"> · click a PSM to view its annotated spectrum</template>
+        </div>
+        <ReportTable
+          v-if="!evBusy"
+          :columns="evCols"
+          :rows="evRows"
+          row-key="_k"
+          :clickable="spectra"
+          max-height="calc(100vh - 360px)"
+          :file-name="`${fileBase}_${focus}_${spectra ? 'psms' : evName}`"
+          @row="openSpectrum"
+        />
       </div>
     </div>
+    <SpectrumViewer
+      v-if="spectrum && t.psm"
+      :psm="t.psm"
+      :target="spectrum"
+      :accession="accession"
+      :file-base="fileBase"
+      @close="spectrum = null"
+    />
   </div>
 </template>
 
@@ -304,5 +348,8 @@ button.xs {
 }
 .pad {
   padding: 18px;
+}
+.hint {
+  font-size: 11px;
 }
 </style>

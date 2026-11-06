@@ -32,7 +32,7 @@ const expanded = ref<Record<string, boolean>>({});
 
 const Examples = [
   "SELECT * FROM {table} LIMIT 50",
-  "SELECT anchor_protein, COUNT(*) AS peptides FROM {table} WHERE anchor_protein IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 20",
+  "SELECT anchor_protein, COUNT(*) AS n FROM {table} WHERE anchor_protein IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 20",
   "SELECT run_file_name, COUNT(*) AS n FROM {table} GROUP BY 1 ORDER BY 2 DESC",
   "SELECT charge, COUNT(*) AS n FROM {table} GROUP BY 1 ORDER BY 1",
 ];

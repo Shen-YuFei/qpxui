@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
-import { ensureViewReady, runSql, type QueryResult } from "../lib/duck";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { describeTable, ensureViewReady, runSql, type QueryResult } from "../lib/duck";
 import { isStructured, formatCompact, scalarText } from "../lib/format";
 import type { ViewInfo } from "../lib/api";
+import type { TableRef } from "../lib/report";
+import { lit, ident } from "../lib/report";
+import { state } from "../store";
 import PTMTip from "./PTMTip.vue";
 import StructuredView from "./StructuredView.vue";
+import SpectrumViewer, { type PsmKey } from "./SpectrumViewer.vue";
 import {
   badgeTooltip,
   hasInlineMods,
@@ -36,11 +40,31 @@ const expanded = ref<Record<string, boolean>>({});
 // cells fall back to the plain scalar/structured rendering.
 const ptmOn = ref(true);
 
+// Per-peak arrays of a QPX psm row. They hold hundreds of values each, so they
+// are shown as a short "N peaks" summary and moved after the other columns.
+const PEAK_COLS = new Set(["mz_array", "intensity_array", "charge_array", "ion_type_array", "ion_mobility_array"]);
+const showPeaks = ref(true);
+const colTypes = ref<Record<string, string>>({});
+const colNames = ref<string[]>([]);
+const hasPeakCols = computed(() => colNames.value.some((c) => PEAK_COLS.has(c.toLowerCase())));
+
+function selectList(): string {
+  if (!colNames.value.length) return "*";
+  const plain = colNames.value.filter((c) => !PEAK_COLS.has(c.toLowerCase()));
+  const peaks = showPeaks.value ? colNames.value.filter((c) => PEAK_COLS.has(c.toLowerCase())) : [];
+  return [...plain, ...peaks].map(ident).join(", ");
+}
+
 async function load() {
   loading.value = true;
   error.value = "";
   try {
     table.value = await ensureViewReady(props.view);
+    if (!colNames.value.length) {
+      const desc = await describeTable(table.value);
+      colNames.value = desc.map((d) => d.name);
+      colTypes.value = Object.fromEntries(desc.map((d) => [d.name.toLowerCase(), d.type]));
+    }
     const c = await runSql(`SELECT COUNT(*) AS n FROM "${table.value}"`);
     total.value = Number((c.rows[0]?.[0] as any) ?? 0);
 
@@ -48,7 +72,7 @@ async function load() {
     const orderClause = sortCol.value ? ` ORDER BY "${sortCol.value}" ${sortDir.value}` : "";
     const off = page.value * pageSize;
     result.value = await runSql(
-      `SELECT * FROM "${table.value}"${whereClause}${orderClause} LIMIT ${limit.value} OFFSET ${off}`
+      `SELECT ${selectList()} FROM "${table.value}"${whereClause}${orderClause} LIMIT ${limit.value} OFFSET ${off}`
     );
   } catch (e: any) {
     error.value = String(e);
@@ -58,6 +82,215 @@ async function load() {
 }
 
 onMounted(load);
+watch(showPeaks, () => load());
+
+function isPeakCol(j: number): boolean {
+  return PEAK_COLS.has((result.value.columns[j] ?? "").toLowerCase());
+}
+function peakSummary(v: unknown): string {
+  if (!Array.isArray(v)) return "∅";
+  return v.length ? `${v.length.toLocaleString()} peaks` : "no peaks";
+}
+
+// ---- Right-click cell menu ----
+const menu = ref<{ x: number; y: number; i: number; j: number } | null>(null);
+const msg = ref("");
+const spectrum = ref<PsmKey | null>(null);
+
+const psmRef = computed<TableRef | null>(() => {
+  if (props.view.view !== "psm") return null;
+  const cols = new Set(Object.keys(colTypes.value));
+  if (!cols.has("peptidoform") || !cols.has("mz_array") || !cols.has("intensity_array")) return null;
+  return { view: props.view, table: table.value, cols, types: colTypes.value, seq: "sequence" };
+});
+
+function rowValue(i: number, col: string): unknown {
+  const j = result.value.columns.findIndex((c) => c.toLowerCase() === col);
+  return j >= 0 ? result.value.rows[i]?.[j] : undefined;
+}
+
+/** Why the selected row cannot open the spectrum viewer, or "" when it can. */
+const spectrumBlock = computed<string>(() => {
+  if (!menu.value || !psmRef.value) return "Spectra need a psm view with peptidoform and peak arrays";
+  const pf = rowValue(menu.value.i, "peptidoform");
+  if (typeof pf !== "string" || !pf) return "This PSM has no peptidoform";
+  if (showPeaks.value) {
+    const mz = rowValue(menu.value.i, "mz_array");
+    if (!Array.isArray(mz) || !mz.length) return "This PSM has no stored peaks";
+  }
+  return "";
+});
+
+function openMenu(ev: MouseEvent, i: number, j: number) {
+  const w = 220;
+  const h = 170;
+  menu.value = {
+    x: Math.min(ev.clientX, window.innerWidth - w - 8),
+    y: Math.min(ev.clientY, window.innerHeight - h - 8),
+    i,
+    j,
+  };
+}
+function closeMenu() {
+  menu.value = null;
+}
+
+function viewSpectrum() {
+  const m = menu.value;
+  const blocked = spectrumBlock.value;
+  closeMenu();
+  if (!m || blocked) return;
+  const scan = rowValue(m.i, "scan");
+  const charge = rowValue(m.i, "charge");
+  const run = rowValue(m.i, "run_file_name");
+  spectrum.value = {
+    peptidoform: String(rowValue(m.i, "peptidoform")),
+    run_file_name: run == null ? null : String(run),
+    scan: Array.isArray(scan) ? (scan[0] as number) ?? null : ((scan as number) ?? null),
+    charge: (charge as number) ?? null,
+  };
+}
+
+function cellText(v: unknown): string {
+  return isStructured(v) ? JSON.stringify(v) : v == null ? "" : String(v);
+}
+async function copyCell() {
+  const m = menu.value;
+  closeMenu();
+  if (!m) return;
+  await copy(cellText(result.value.rows[m.i]?.[m.j]), "Value copied");
+}
+async function copyRow() {
+  const m = menu.value;
+  closeMenu();
+  if (!m) return;
+  const cols = result.value.columns;
+  const row = result.value.rows[m.i] ?? [];
+  await copy(JSON.stringify(Object.fromEntries(cols.map((c, j) => [c, row[j]])), null, 2), "Row copied as JSON");
+}
+async function copy(text: string, ok: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    flash(ok);
+  } catch {
+    flash("Copy failed");
+  }
+}
+function flash(s: string) {
+  msg.value = s;
+  setTimeout(() => {
+    if (msg.value === s) msg.value = "";
+  }, 1800);
+}
+
+/** Only scalar cells can become a WHERE filter. */
+const canFilter = computed(() => {
+  const m = menu.value;
+  if (!m) return false;
+  const v = result.value.rows[m.i]?.[m.j];
+  return v == null || !isStructured(v);
+});
+function filterBy() {
+  const m = menu.value;
+  closeMenu();
+  if (!m) return;
+  const col = result.value.columns[m.j];
+  const v = result.value.rows[m.i]?.[m.j];
+  const cond = v == null ? `${ident(col)} IS NULL` : typeof v === "string" ? `${ident(col)} = ${lit(v)}` : `${ident(col)} = ${v}`;
+  where.value = where.value.trim() ? `${where.value.trim()} AND ${cond}` : cond;
+}
+function expandCell() {
+  const m = menu.value;
+  closeMenu();
+  if (m) toggle(m.i, m.j);
+}
+const menuStructured = computed(() => {
+  const m = menu.value;
+  return !!m && isStructured(result.value.rows[m.i]?.[m.j]);
+});
+
+function onKey(e: KeyboardEvent) {
+  if (e.key === "Escape") closeMenu();
+}
+
+// ---- Always-visible horizontal scrollbar ----
+// Native scrollbars are overlays on macOS (hidden until you scroll), so the
+// table gets its own track + thumb pinned under it.
+const scroller = ref<HTMLElement | null>(null);
+const track = ref<HTMLElement | null>(null);
+const sx = ref({ left: 0, client: 1, width: 1 });
+const hasHScroll = computed(() => sx.value.width > sx.value.client + 1);
+const thumbPct = computed(() => Math.max(4, (sx.value.client / sx.value.width) * 100));
+const thumbLeft = computed(() => {
+  const max = sx.value.width - sx.value.client;
+  return max > 0 ? (sx.value.left / max) * (100 - thumbPct.value) : 0;
+});
+function syncScroll() {
+  const s = scroller.value;
+  if (s) sx.value = { left: s.scrollLeft, client: s.clientWidth, width: s.scrollWidth };
+}
+let drag: { x: number; left: number } | null = null;
+function thumbDown(e: PointerEvent) {
+  const s = scroller.value;
+  if (!s) return;
+  drag = { x: e.clientX, left: s.scrollLeft };
+  (e.target as HTMLElement).setPointerCapture(e.pointerId);
+}
+function thumbMove(e: PointerEvent) {
+  const s = scroller.value;
+  const t = track.value;
+  if (!drag || !s || !t) return;
+  const free = t.clientWidth * (1 - thumbPct.value / 100);
+  if (free <= 0) return;
+  s.scrollLeft = drag.left + ((e.clientX - drag.x) / free) * (s.scrollWidth - s.clientWidth);
+}
+function thumbUp() {
+  drag = null;
+}
+function trackDown(e: PointerEvent) {
+  const s = scroller.value;
+  const t = track.value;
+  if (!s || !t || e.target !== t) return;
+  const r = t.getBoundingClientRect();
+  const frac = (e.clientX - r.left) / r.width;
+  s.scrollLeft = frac * s.scrollWidth - s.clientWidth / 2;
+}
+
+/** Scroll a column into view (and flash its header). */
+const jumpCol = ref("");
+function jumpTo(col: string) {
+  jumpCol.value = "";
+  const s = scroller.value;
+  const j = result.value.columns.indexOf(col);
+  const th = s?.querySelectorAll("thead th")[j] as HTMLElement | undefined;
+  if (!s || !th) return;
+  s.scrollLeft = th.offsetLeft - 24;
+  th.classList.add("flash-col");
+  setTimeout(() => th.classList.remove("flash-col"), 1200);
+}
+
+let ro: ResizeObserver | null = null;
+watch(scroller, (el, old) => {
+  if (old) ro?.unobserve(old);
+  if (el) {
+    ro ??= new ResizeObserver(syncScroll);
+    ro.observe(el);
+    const tbl = el.querySelector("table");
+    if (tbl) ro.observe(tbl);
+    syncScroll();
+  }
+});
+watch(result, () => requestAnimationFrame(syncScroll));
+
+onMounted(() => {
+  window.addEventListener("keydown", onKey);
+  window.addEventListener("blur", closeMenu);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", onKey);
+  window.removeEventListener("blur", closeMenu);
+  ro?.disconnect();
+});
 watch(() => [props.view.path, where.value], () => {
   page.value = 0;
   load();
@@ -137,7 +370,26 @@ function isModsCell(j: number): boolean {
         <input type="checkbox" v-model="ptmOn" />
         <span>PTMs</span>
       </label>
+      <label
+        v-if="hasPeakCols"
+        class="ptm-toggle"
+        title="Peak arrays (mz_array, intensity_array, …) are shown last as 'N peaks'. Untick to hide them and skip reading them."
+      >
+        <input type="checkbox" v-model="showPeaks" />
+        <span>Peak arrays</span>
+      </label>
+      <select
+        v-if="result.columns.length > 6"
+        v-model="jumpCol"
+        class="jump"
+        title="Scroll to a column"
+        @change="jumpTo(jumpCol)"
+      >
+        <option value="">Jump to column…</option>
+        <option v-for="c in result.columns" :key="c" :value="c">{{ c }}</option>
+      </select>
       <div class="muted info">
+        <span v-if="msg" class="flash">{{ msg }} · </span>
         {{ total.toLocaleString() }} rows · showing {{ shown.toLocaleString() }}
         <span v-if="result.truncated">(truncated)</span>
       </div>
@@ -150,7 +402,7 @@ function isModsCell(j: number): boolean {
 
     <div v-if="error" class="error pad">⚠ {{ error }}</div>
     <div v-else-if="loading" class="pad muted">Querying… <span class="spinner"></span></div>
-    <div class="scroll" v-else>
+    <div class="scroll" v-else ref="scroller" @scroll="syncScroll">
       <table>
         <thead>
           <tr>
@@ -165,10 +417,18 @@ function isModsCell(j: number): boolean {
             <td
               v-for="(v, j) in row"
               :key="j"
-              :class="{ num: typeof v === 'number', 'mono': typeof v === 'string' }"
+              :class="{ num: typeof v === 'number', 'mono': typeof v === 'string', active: menu && menu.i === i && menu.j === j }"
+              @contextmenu.prevent="openMenu($event, i, j)"
             >
+              <!-- Peak arrays: "N peaks" summary, click to expand -->
+              <template v-if="isPeakCol(j) && !expanded[cellKey(i, j)]">
+                <span class="peaks" :title="Array.isArray(v) ? formatCompact(v) : 'null'" @click="Array.isArray(v) && toggle(i, j)">
+                  {{ peakSummary(v) }}<template v-if="Array.isArray(v) && v.length"> ▸</template>
+                </span>
+              </template>
+
               <!-- PTM-enhanced peptide / peptidoform sequence -->
-              <template v-if="ptmOn && segsFor(i, j)">
+              <template v-else-if="ptmOn && segsFor(i, j)">
                 <span class="ptm-seq">
                   <template v-for="(seg, k) in segsFor(i, j)" :key="k">
                     <span v-if="!seg.modified && !seg.terminal" class="ptm-aa">{{ seg.text }}</span>
@@ -230,14 +490,61 @@ function isModsCell(j: number): boolean {
         </tbody>
       </table>
     </div>
+    <div v-if="!loading && !error && hasHScroll" ref="track" class="hbar" title="Drag to scroll columns" @pointerdown="trackDown">
+      <div
+        class="hthumb"
+        :style="{ width: thumbPct + '%', left: thumbLeft + '%' }"
+        @pointerdown.stop="thumbDown"
+        @pointermove="thumbMove"
+        @pointerup="thumbUp"
+        @pointercancel="thumbUp"
+      ></div>
+    </div>
+
+    <template v-if="menu">
+      <div class="menu-backdrop" @click="closeMenu" @contextmenu.prevent="closeMenu"></div>
+      <div class="menu" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" role="menu">
+        <button
+          v-if="psmRef"
+          role="menuitem"
+          :disabled="!!spectrumBlock"
+          :title="spectrumBlock || 'Open the annotated spectrum of this PSM'"
+          @click="viewSpectrum"
+        >
+          <span class="mi">📈</span> View spectrum
+          <span v-if="spectrumBlock" class="why">{{ spectrumBlock }}</span>
+        </button>
+        <button v-if="menuStructured" role="menuitem" @click="expandCell">
+          <span class="mi">{{ expanded[cellKey(menu.i, menu.j)] ? "▾" : "▸" }}</span>
+          {{ expanded[cellKey(menu.i, menu.j)] ? "Collapse cell" : "Expand cell" }}
+        </button>
+        <button role="menuitem" @click="copyCell"><span class="mi">⧉</span> Copy value</button>
+        <button role="menuitem" @click="copyRow"><span class="mi">⧉</span> Copy row (JSON)</button>
+        <button v-if="canFilter" role="menuitem" @click="filterBy">
+          <span class="mi">⏷</span> Filter: {{ result.columns[menu.j] }} = this
+        </button>
+      </div>
+    </template>
+
+    <SpectrumViewer
+      v-if="spectrum && psmRef"
+      :psm="psmRef"
+      :target="spectrum"
+      :accession="state.selectedDataset?.prefix"
+      :file-base="state.selectedDataset?.prefix"
+      @close="spectrum = null"
+    />
   </div>
 </template>
 
 <style scoped>
+/* The table scrolls inside a box bounded by the window, so the horizontal
+   scrollbar always sits at the bottom of the panel, not after the last row. */
 .table-wrap {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
 }
 .toolbar {
   display: flex;
@@ -281,7 +588,103 @@ function isModsCell(j: number): boolean {
 }
 .scroll {
   flex: 1;
+  min-height: 0;
   overflow: auto;
+}
+.scroll::-webkit-scrollbar:horizontal {
+  display: none;
+  height: 0;
+}
+.hbar {
+  position: relative;
+  flex: none;
+  height: 14px;
+  background: var(--bg-soft);
+  border-top: 1px solid var(--border);
+  cursor: pointer;
+}
+.hthumb {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+  cursor: grab;
+  touch-action: none;
+}
+.hthumb:hover,
+.hthumb:active {
+  background: var(--accent);
+}
+.jump {
+  font-size: 12px;
+  max-width: 190px;
+}
+th.flash-col {
+  background: color-mix(in srgb, var(--accent) 35%, var(--bg-soft));
+  transition: background 0.3s;
+}
+td.active {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+.peaks {
+  color: var(--accent);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.flash {
+  color: var(--accent);
+}
+.menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+.menu {
+  position: fixed;
+  z-index: 41;
+  min-width: 200px;
+  max-width: 320px;
+  padding: 4px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+}
+.menu button {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 6px 10px;
+  border-radius: 5px;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.menu button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.menu button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.menu .mi {
+  width: 16px;
+  text-align: center;
+}
+.menu .why {
+  flex-basis: 100%;
+  padding-left: 22px;
+  font-size: 10px;
+  color: var(--muted, var(--text));
 }
 table {
   border-collapse: collapse;

@@ -134,7 +134,7 @@ onMounted(async () => {
     <template v-else>
       <p class="muted note">
         <span v-if="busy">Counting modifications… <span class="spinner"></span> · </span>
-        Colours follow your PTM colour settings. Click a modification in the table to list its peptides.
+        Colours follow your PTM colour settings. Click a modification in the table to list its peptidoforms.
       </p>
       <div class="grid">
         <ChartCard title="Modification landscape" :subtitle="`Distinct ${metricName} carrying each modification. Hover for the per-residue split.`" :spec="landscape" :loading="busy" :file-base="fileBase" :height="Math.max(220, Math.min(30, mods.length) * 24 + 40)">

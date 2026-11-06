@@ -52,7 +52,10 @@ export function formatCompact(v: unknown): string {
   }
   if (Array.isArray(v)) {
     if (!v.length) return "∅ (empty list)";
-    if (v.every((x) => !isStructured(x))) return `[${v.map(scalarText).join(", ")}]`;
+    if (v.every((x) => !isStructured(x))) {
+      if (v.length <= 8) return `[${v.map(scalarText).join(", ")}]`;
+      return `[${v.slice(0, 3).map(scalarText).join(", ")}, …] (${v.length.toLocaleString()} values)`;
+    }
     return `• ${v.length} item(s)`;
   }
   if (isStructured(v)) {

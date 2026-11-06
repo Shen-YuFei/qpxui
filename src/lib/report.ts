@@ -97,11 +97,40 @@ export function cachedSql(ds: DatasetInfo, key: string, sql: string, maxRows = 1
 export function clearReportCache() {
   tablesCache.clear();
   sqlCache.clear();
+  spectraCache.clear();
 }
 
 /** Peptide-level evidence table: features if present, PSMs otherwise. */
 export function evidence(t: DatasetTables): TableRef | undefined {
   return t.feature ?? t.psm;
+}
+
+const spectraCache = new Map<string, Promise<boolean>>();
+
+/** Does the psm view carry fragment spectra (non-null `mz_array`)? Answered
+ * from the parquet footer statistics, so no column data is read. */
+export function hasSpectra(ref: TableRef | undefined): Promise<boolean> {
+  if (!ref || !ref.cols.has("mz_array") || !ref.cols.has("intensity_array")) return Promise.resolve(false);
+  let p = spectraCache.get(ref.table);
+  if (!p) {
+    p = (async () => {
+      try {
+        const r = await runSql(
+          `SELECT sum(num_values)::BIGINT, sum(coalesce(stats_null_count, 0))::BIGINT, count(stats_null_count)::BIGINT, count(*)::BIGINT
+           FROM parquet_metadata(${lit(`${ref.table}.parquet`)}) WHERE path_in_schema LIKE 'mz_array%'`
+        );
+        const [vals, nulls, withStats, chunks] = (r.rows[0] ?? []).map(Number);
+        if (chunks > 0 && withStats === chunks) return vals > nulls;
+      } catch {
+        /* fall through to a data probe */
+      }
+      const r = await runSql(`SELECT 1 FROM ${ident(ref.table)} WHERE len(mz_array) > 0 LIMIT 1`, 1);
+      return r.rows.length > 0;
+    })();
+    p.catch(() => spectraCache.delete(ref.table));
+    spectraCache.set(ref.table, p);
+  }
+  return p;
 }
 
 /** WHERE clause keeping target (non-decoy) rows only. */

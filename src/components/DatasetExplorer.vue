@@ -81,10 +81,10 @@ const viewIcon: Record<string, string> = {
 <template>
   <div class="tree">
     <form v-if="hasReport(state.selectedDataset)" class="search" @submit.prevent="runSearch">
-      <input v-model="q" placeholder="Search protein, gene or peptide…" title="Searches the selected dataset" />
+      <input v-model="q" placeholder="Search protein, gene or peptide sequence…" title="Searches the selected dataset" />
       <div class="scope">
         <label><input v-model="scope" type="radio" value="proteins" /> Proteins</label>
-        <label><input v-model="scope" type="radio" value="peptides" /> Peptides</label>
+        <label><input v-model="scope" type="radio" value="peptides" /> Peptidoforms</label>
         <button type="submit" class="xs go">Search</button>
       </div>
     </form>
@@ -108,7 +108,7 @@ const viewIcon: Record<string, string> = {
           class="view report-link"
           :class="{ active: state.page === 'report' }"
           @click="openReport()"
-          title="Dataset report: KPIs, QC charts, PTMs, samples, protein and peptide search"
+          title="Dataset report: KPIs, QC charts, PTMs, samples, protein and peptidoform search"
         >
           <span class="vi">📈</span>
           <span class="vname">Report &amp; search</span>

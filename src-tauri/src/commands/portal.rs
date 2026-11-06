@@ -202,6 +202,8 @@ pub struct PortalDataset {
     pub dataset_ref: Option<String>,
     #[serde(default, rename(deserialize = "px_url", serialize = "pxUrl"))]
     pub px_url: Option<String>,
+    #[serde(default, rename(deserialize = "collection_title", serialize = "collectionTitle"))]
+    pub collection_title: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -255,8 +257,11 @@ pub async fn portal_registry(page_size: Option<usize>) -> Result<Vec<PortalDatas
         .await?;
         all.extend(page.datasets);
     }
-    all.sort_by(|a, b| a.accession.cmp(&b.accession));
-    all.dedup_by(|a, b| a.accession == b.accession);
+    // One accession can hold several runs (e.g. PXD014877 has one per
+    // organism), so the run ref, not the accession, identifies an entry.
+    let key = |d: &PortalDataset| d.dataset_ref.clone().unwrap_or_else(|| d.accession.clone());
+    all.sort_by(|a, b| a.accession.cmp(&b.accession).then_with(|| key(a).cmp(&key(b))));
+    all.dedup_by(|a, b| key(a) == key(b));
     Ok(all)
 }
 

@@ -41,6 +41,7 @@ export interface PortalDataset {
   totalSize?: number | null;
   datasetRef?: string | null;
   pxUrl?: string | null;
+  collectionTitle?: string | null;
 }
 
 export interface StreamHandle {
