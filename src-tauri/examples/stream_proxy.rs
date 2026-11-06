@@ -7,6 +7,10 @@
 async fn main() {
     env_logger::init();
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.is_empty() || (!args[0].starts_with("http") && args.len() < 2) {
+        eprintln!("usage: stream_proxy <bucket> <key> | <https-url> [<url>...]");
+        std::process::exit(2);
+    }
     let (paths, h) = if args[0].starts_with("http") {
         (args.clone(), qpxui_lib::stream_register_http(&args).await.unwrap())
     } else {

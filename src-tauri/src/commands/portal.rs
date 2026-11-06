@@ -21,6 +21,28 @@ use tauri::AppHandle;
 const BASE: &str = "https://browse.quantms.org";
 const DATASETS_ROOT: &str = "/quantms/datasets/";
 
+/// File and folder names taken from URLs must stay inside the cache folder.
+fn safe_component(s: &str) -> bool {
+    !s.is_empty()
+        && s != "."
+        && !s.contains("..")
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
+/// Cache folder for one run of a dataset (`<PXD>/<run-hash>`), so runs of the
+/// same accession that share file names do not overwrite each other.
+fn run_cache_dir(root: &std::path::Path, url: &str) -> PathBuf {
+    let rest = url
+        .strip_prefix(BASE)
+        .and_then(|r| r.strip_prefix(DATASETS_ROOT))
+        .unwrap_or("");
+    let mut dir = root.to_path_buf();
+    for seg in rest.split('/').take(2).filter(|s| safe_component(s)) {
+        dir.push(seg);
+    }
+    dir
+}
+
 fn cache_root() -> Result<PathBuf, String> {
     let base = dirs::cache_dir()
         .or_else(dirs::data_local_dir)
@@ -348,10 +370,15 @@ async fn portal_cache_views_impl(
                 .next()
                 .ok_or_else(|| format!("bad url {url}"))?
                 .to_string();
+            if !safe_component(&name) {
+                return Err(format!("unsafe file name in {url}"));
+            }
             let (_, view, format) = crate::qpx::parse_filename(&name).unwrap_or_else(|| {
                 (String::new(), String::new(), "parquet".to_string())
             });
-            let local = root.join(&name);
+            let dir = run_cache_dir(&root, &url);
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            let local = dir.join(&name);
             let size = if local.exists() {
                 std::fs::metadata(&local).map(|m| m.len()).unwrap_or(0)
             } else {

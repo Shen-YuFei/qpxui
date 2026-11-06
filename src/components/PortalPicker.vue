@@ -116,12 +116,19 @@ async function selectDataset(ds: PortalDataset | null) {
     // Prefer the resolved run ref; fall back to the bare code (which the
     // backend resolves by scanning the run sub-folders).
     const ref = ds.datasetRef ?? ds.accession;
-    views.value = await api.portalListViews(ref);
+    const v = await api.portalListViews(ref);
+    // A slower reply for an earlier click must not replace the current list.
+    if (selected.value === ds) views.value = v;
   } catch (e: any) {
-    error.value = String(e);
+    if (selected.value === ds) error.value = String(e);
   } finally {
-    busy.value = false;
+    if (selected.value === ds) busy.value = false;
   }
+}
+
+/** Runs of one accession are separate datasets, so key them by the run ref. */
+function portalName(ds: PortalDataset): string {
+  return ds.datasetRef ?? ds.accession;
 }
 
 async function loadSelection() {
@@ -138,7 +145,7 @@ async function loadSelection() {
       const local = await api.portalCacheViews(sel.map((v) => v.path), downloadId.value);
       const ds: DatasetInfo = {
         prefix: selected.value.accession,
-        path: `quantms portal / ${selected.value.accession}`,
+        path: `quantms portal / ${portalName(selected.value)}`,
         views: local.sort((a, b) => a.view.localeCompare(b.view)),
         sourceKind: "portal",
       };
@@ -173,7 +180,7 @@ function streamSelection() {
   }
   const ds: DatasetInfo = {
     prefix: selected.value.accession,
-    path: `quantms portal / ${selected.value.accession}`,
+    path: `quantms portal / ${portalName(selected.value)}`,
     views: sel.map((v) => ({ ...v })).sort((a, b) => a.view.localeCompare(b.view)),
     sourceKind: "portal",
   };

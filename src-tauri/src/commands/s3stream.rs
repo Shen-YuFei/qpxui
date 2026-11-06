@@ -236,7 +236,11 @@ async fn resolve(client: &reqwest::Client, url: &str) -> Result<String, String> 
         .map_err(|e| format!("resolve {url}: {e}"))?;
     if resp.status().is_redirection() {
         if let Some(loc) = resp.headers().get(reqwest::header::LOCATION).and_then(|v| v.to_str().ok()) {
-            return Ok(loc.to_string());
+            // Location may be relative to the requested URL.
+            return reqwest::Url::parse(url)
+                .and_then(|base| base.join(loc))
+                .map(|u| u.to_string())
+                .map_err(|e| format!("resolve {url}: bad Location {loc}: {e}"));
         }
     }
     if resp.status().is_success() {
@@ -461,6 +465,10 @@ pub async fn register_http(urls: &[String]) -> Result<BTreeMap<String, StreamHan
         .map_err(|e| e.to_string())?;
     let mut out = BTreeMap::new();
     for url in urls {
+        // Only the quantms portal: the proxy must not fetch arbitrary hosts.
+        if !url.starts_with("https://browse.quantms.org/") {
+            return Err(format!("{url}: only https://browse.quantms.org files can be streamed"));
+        }
         let id = object_id(url);
         let existing = p.objects.lock().unwrap().get(&id).cloned();
         let obj = match existing {

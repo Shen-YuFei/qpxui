@@ -55,7 +55,10 @@ function selectList(): string {
   return [...plain, ...peaks].map(ident).join(", ");
 }
 
+let loadSeq = 0;
 async function load() {
+  const id = ++loadSeq;
+  closeMenu();
   loading.value = true;
   error.value = "";
   try {
@@ -66,18 +69,20 @@ async function load() {
       colTypes.value = Object.fromEntries(desc.map((d) => [d.name.toLowerCase(), d.type]));
     }
     const c = await runSql(`SELECT COUNT(*) AS n FROM "${table.value}"`);
+    if (id !== loadSeq) return;
     total.value = Number((c.rows[0]?.[0] as any) ?? 0);
 
     const whereClause = where.value.trim() ? ` WHERE ${where.value.trim()}` : "";
-    const orderClause = sortCol.value ? ` ORDER BY "${sortCol.value}" ${sortDir.value}` : "";
+    const orderClause = sortCol.value ? ` ORDER BY ${ident(sortCol.value)} ${sortDir.value}` : "";
     const off = page.value * pageSize;
-    result.value = await runSql(
+    const res = await runSql(
       `SELECT ${selectList()} FROM "${table.value}"${whereClause}${orderClause} LIMIT ${limit.value} OFFSET ${off}`
     );
+    if (id === loadSeq) result.value = res;
   } catch (e: any) {
-    error.value = String(e);
+    if (id === loadSeq) error.value = String(e);
   } finally {
-    loading.value = false;
+    if (id === loadSeq) loading.value = false;
   }
 }
 
@@ -196,7 +201,11 @@ function filterBy() {
   if (!m) return;
   const col = result.value.columns[m.j];
   const v = result.value.rows[m.i]?.[m.j];
-  const cond = v == null ? `${ident(col)} IS NULL` : typeof v === "string" ? `${ident(col)} = ${lit(v)}` : `${ident(col)} = ${v}`;
+  const cond = v == null ? `${ident(col)} IS NULL` : typeof v === "string"
+        ? `${ident(col)} = ${lit(v)}`
+        : typeof v === "number" && Number.isFinite(v) && Number.isSafeInteger(Math.trunc(v))
+          ? `${ident(col)} = ${v}`
+          : `CAST(${ident(col)} AS VARCHAR) = ${lit(String(v))}`;
   where.value = where.value.trim() ? `${where.value.trim()} AND ${cond}` : cond;
 }
 function expandCell() {

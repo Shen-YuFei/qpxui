@@ -1,5 +1,6 @@
 import { reactive } from "vue";
 import type { DatasetInfo, ViewInfo } from "./lib/api";
+import { clearReportCache } from "./lib/report";
 
 // Simple reactive store (no Pinia needed for this scale).
 export const state = reactive({
@@ -46,6 +47,7 @@ export function openProtein(acc: string) {
 }
 
 export function reset() {
+  clearReportCache();
   state.datasets = [];
   state.sourceKind = "none";
   state.selectedDataset = null;
@@ -62,6 +64,7 @@ export function reset() {
 }
 
 export function loadDatasets(datasets: DatasetInfo[], kind: string) {
+  clearReportCache();
   state.datasets = datasets;
   state.sourceKind = kind;
   state.selectedDataset = datasets[0] ?? null;

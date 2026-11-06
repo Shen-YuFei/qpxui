@@ -141,8 +141,10 @@ async function search() {
   }
 }
 
+let evSeq = 0;
 async function openPeptide(row: Record<string, any>) {
   if (!ev) return;
+  const id = ++evSeq;
   focus.value = row.peptidoform;
   evBusy.value = true;
   evRows.value = [];
@@ -166,9 +168,10 @@ async function openPeptide(row: Record<string, any>) {
       `SELECT ${sel.join(", ")} FROM ${ident(E.table)} WHERE ${targetWhere(E)} AND ${pfCol} = ${lit(String(row.peptidoform))}
        ORDER BY ${has("run_file_name") ? "run_file_name" : "1"}${has("posterior_error_probability") ? ", posterior_error_probability" : ""} LIMIT 5000`
     );
+    if (id !== evSeq) return;
     evRows.value = objects(r).map((x, i) => ({ ...x, _k: i }));
   } finally {
-    evBusy.value = false;
+    if (id === evSeq) evBusy.value = false;
   }
 }
 
