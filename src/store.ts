@@ -23,7 +23,7 @@ export const state = reactive({
   proteinFocus: null as string | null,
 });
 
-export type ReportTab = "overview" | "qc" | "ptms" | "samples" | "proteins" | "peptides";
+export type ReportTab = "overview" | "qc" | "ptms" | "samples" | "proteins" | "peptides" | "quant";
 
 /** Open the dataset report, optionally on a given tab. */
 export function openReport(tab?: ReportTab) {

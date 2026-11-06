@@ -9,6 +9,10 @@ const props = defineProps<{
   title: string;
   subtitle?: string;
   spec?: ChartSpec | null;
+  /** Ready-made ECharts option (heatmaps, scatter…) instead of a spec. */
+  option?: any;
+  /** CSV text for `option` charts. */
+  csv?: () => string;
   loading?: boolean;
   error?: string;
   /** Prefix for exported file names (e.g. the dataset accession). */
@@ -25,9 +29,10 @@ const msg = ref("");
 const option = computed(() => {
   // Re-read the CSS variables whenever the theme changes.
   void settings.theme;
+  if (props.option) return props.option;
   return props.spec ? buildOption(props.spec, chartTheme()) : null;
 });
-const empty = computed(() => !!props.spec && (!props.spec.labels.length || !props.spec.series.length));
+const empty = computed(() => !props.option && !!props.spec && (!props.spec.labels.length || !props.spec.series.length));
 const name = computed(() => `${props.fileBase ? props.fileBase + "_" : ""}${props.title}`);
 
 function flash(text: string) {
@@ -48,9 +53,10 @@ async function exportPng() {
 }
 
 async function exportCsv() {
-  if (!props.spec) return;
+  const text = props.csv ? props.csv() : props.spec ? specToCsv(props.spec) : "";
+  if (!text) return;
   try {
-    const p = await saveText(name.value, specToCsv(props.spec));
+    const p = await saveText(name.value, text);
     if (p) flash("Saved");
   } catch (e) {
     flash(String(e));
@@ -69,12 +75,12 @@ async function exportCsv() {
         <span v-if="msg" class="muted msg">{{ msg }}</span>
         <slot name="actions" />
         <button class="xs" :disabled="!option || empty" title="Save chart as PNG" @click="exportPng">PNG</button>
-        <button class="xs" :disabled="!spec || empty" title="Save chart data as CSV" @click="exportCsv">CSV</button>
+        <button class="xs" :disabled="(!spec && !csv) || empty" title="Save chart data as CSV" @click="exportCsv">CSV</button>
       </div>
     </div>
     <div class="body" :style="{ height: (height ?? 260) + 'px' }">
       <div v-if="error" class="state error">⚠ {{ error }}</div>
-      <div v-else-if="loading || !spec" class="state muted"><span class="spinner"></span></div>
+      <div v-else-if="loading || (!spec && !option)" class="state muted"><span class="spinner"></span></div>
       <div v-else-if="empty" class="state muted">No data</div>
       <VChart v-else ref="chart" :option="option" autoresize class="chart" />
     </div>

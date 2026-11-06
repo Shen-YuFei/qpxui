@@ -20,6 +20,7 @@ import ReportPTMs from "./report/ReportPTMs.vue";
 import ReportSamples from "./report/ReportSamples.vue";
 import ReportProteins from "./report/ReportProteins.vue";
 import ReportPeptides from "./report/ReportPeptides.vue";
+import ReportQuant from "./report/ReportQuant.vue";
 
 const props = defineProps<{ ds: DatasetInfo }>();
 
@@ -38,6 +39,7 @@ const TABS: { id: ReportTab; label: string }[] = [
   { id: "ptms", label: "PTMs" },
   { id: "samples", label: "Samples" },
   { id: "proteins", label: "Proteins" },
+  { id: "quant", label: "Quantification" },
   { id: "peptides", label: "Peptidoforms" },
 ];
 
@@ -53,6 +55,7 @@ const tabs = computed(() => {
     samples: !!(t.sample || t.run),
     proteins: !!(t.pg || (ev && proteinExpr(ev))),
     peptides: !!ev,
+    quant: !!(t.pg?.cols.has("intensities") || t.feature?.cols.has("intensities")),
   };
   return TABS.filter((x) => ok[x.id]);
 });
@@ -233,6 +236,7 @@ const descOpen = ref(false);
           <ReportPTMs v-else-if="state.reportTab === 'ptms'" :key="ds.path + ds.prefix + 'ptm'" :ds="ds" :t="tables" :file-base="fileBase" />
           <ReportSamples v-else-if="state.reportTab === 'samples'" :key="ds.path + ds.prefix + 'smp'" :ds="ds" :t="tables" :file-base="fileBase" />
           <ReportProteins v-else-if="state.reportTab === 'proteins'" :key="ds.path + ds.prefix + 'prot'" :ds="ds" :t="tables" :file-base="fileBase" />
+          <ReportQuant v-else-if="state.reportTab === 'quant'" :key="ds.path + ds.prefix + 'quant'" :ds="ds" :t="tables" :file-base="fileBase" />
           <ReportPeptides v-else :key="ds.path + ds.prefix + 'pep'" :ds="ds" :t="tables" :file-base="fileBase" :accession="accession" />
         </KeepAlive>
       </section>
