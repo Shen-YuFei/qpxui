@@ -9,3 +9,13 @@ pub fn read_file_bytes(path: String) -> Result<String, String> {
     let bytes = std::fs::read(&path).map_err(|e| format!("failed to read {path}: {e}"))?;
     Ok(B64_STANDARD.encode(&bytes))
 }
+
+/// Write base64-encoded bytes to a path chosen by the user in a save dialog
+/// (chart PNG / CSV exports from the report views).
+#[tauri::command]
+pub fn write_file_bytes(path: String, base64: String) -> Result<(), String> {
+    let bytes = B64_STANDARD
+        .decode(base64.trim())
+        .map_err(|e| format!("invalid export payload: {e}"))?;
+    std::fs::write(&path, bytes).map_err(|e| format!("failed to write {path}: {e}"))
+}

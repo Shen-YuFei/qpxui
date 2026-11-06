@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 
 export interface ViewInfo {
   name: string;
@@ -94,6 +94,11 @@ export const api = {
   cancelDownload: (id: string) => invoke<void>("cancel_download", { id }),
 
   readFileBytes: (path: string) => invoke<string>("read_file_bytes", { path }),
+  writeFileBytes: (path: string, base64: string) =>
+    invoke<void>("write_file_bytes", { path, base64 }),
+  /** Native save dialog; resolves to null when cancelled. */
+  chooseSavePath: (defaultPath: string, name: string, extensions: string[]) =>
+    save({ defaultPath, filters: [{ name, extensions }] }) as Promise<string | null>,
 
   // ---- quantms portal (public example source over HTTPS) ----
   portalDatasets: (limit?: number) => invoke<string[]>("portal_datasets", { limit }),

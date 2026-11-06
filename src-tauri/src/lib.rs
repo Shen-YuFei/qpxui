@@ -13,6 +13,7 @@ pub fn run() {
             commands::sources::scan_folder,
             commands::sources::scan_collection,
             commands::io::read_file_bytes,
+            commands::io::write_file_bytes,
             commands::s3::list_s3,
             commands::s3::cache_s3_views,
             commands::s3::presign_s3_urls,

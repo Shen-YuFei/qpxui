@@ -5,6 +5,7 @@ import { applyTheme } from "./lib/settings";
 import SourcePicker from "./components/SourcePicker.vue";
 import DatasetExplorer from "./components/DatasetExplorer.vue";
 import ViewPanel from "./components/ViewPanel.vue";
+import ReportView from "./components/ReportView.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
 
 const hasData = computed(() => state.datasets.length > 0);
@@ -41,7 +42,12 @@ function newSource() {
           <DatasetExplorer />
         </aside>
         <section class="content">
-          <ViewPanel />
+          <ReportView
+            v-if="state.page === 'report' && state.selectedDataset"
+            :key="state.selectedDataset.path + state.selectedDataset.prefix"
+            :ds="state.selectedDataset"
+          />
+          <ViewPanel v-else />
         </section>
       </template>
     </main>

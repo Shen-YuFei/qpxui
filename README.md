@@ -44,6 +44,28 @@ For a loaded view you get three tabs:
 - **Query** — write **SQL** against the view (DuckDB dialect, the same engine the qpx CLI uses),
   or run one of the quick-example queries.
 
+### Dataset report & search
+
+Selecting a dataset that has a `feature`, `psm` or `pg` view opens its **report** (also reachable
+from **📈 Report & search** in the sidebar). The header shows the project metadata, KPI cards and a
+**Cite this data** box (copy, BibTeX, RIS). Tabs appear only when the dataset has the data for them:
+
+- **Overview** — identifications per run, charge, peptide length, missed cleavages, peptides per
+  protein group, precursor mass error, retention time, intensity, PEP and q-value distributions.
+- **QC** — per-run identifications, median intensity and mass error per run (to spot drift),
+  per-sample intensity boxplots (TMT channels mapped to samples via the run view), and a per-run table.
+- **PTMs** — modification landscape in your PTM colours, sites by residue, modifications per
+  peptide. Click a modification to list its peptides.
+- **Samples** — sample metadata facets and a filterable sample table.
+- **Proteins** — search by accession, protein or gene name. A detail pane shows UniProt links,
+  per-run evidence and the PTM-coloured peptides.
+- **Peptides** — sequence search (contains / starts with / exact, or peptidoform text such as
+  `M[Oxidation]`), with modification and charge filters and per-run evidence for each peptidoform.
+
+The sidebar search box searches the selected dataset. An upper-case amino-acid string of 8 or more
+residues is treated as a peptide. Every chart and table exports to PNG/CSV. Queries read only the
+columns they need and leave out decoys, so streamed S3/portal datasets download just those column chunks.
+
 ---
 
 ## Architecture

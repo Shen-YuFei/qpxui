@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { state } from "../store";
+import { hasReport, openReport, searchFor, state } from "../store";
 import { api, type StreamStat, type ViewInfo } from "../lib/api";
 
 const datasets = computed(() => state.datasets);
@@ -41,11 +41,25 @@ function fmt(n: number): string {
 
 function selectView(v: ViewInfo) {
   state.selectedView = v;
+  state.page = "view";
 }
 
 function selectDataset(d: (typeof state.datasets)[number]) {
+  if (state.selectedDataset !== d) state.proteinFocus = null;
   state.selectedDataset = d;
   if (d.views.length) state.selectedView = d.views[0];
+  state.page = hasReport(d) ? "report" : "view";
+}
+
+// ---- search box (searches the selected dataset) ----
+const q = ref("");
+const scope = ref<"proteins" | "peptides">("proteins");
+function runSearch() {
+  const s = q.value.trim();
+  // An upper-case amino-acid string of 8+ residues is a peptide, not a gene.
+  const sc = /^[ACDEFGHIKLMNPQRSTVWY]{8,}$/.test(s) ? "peptides" : scope.value;
+  scope.value = sc;
+  searchFor(sc, s);
 }
 
 const viewIcon: Record<string, string> = {
@@ -66,6 +80,15 @@ const viewIcon: Record<string, string> = {
 
 <template>
   <div class="tree">
+    <form v-if="hasReport(state.selectedDataset)" class="search" @submit.prevent="runSearch">
+      <input v-model="q" placeholder="Search protein, gene or peptide…" title="Searches the selected dataset" />
+      <div class="scope">
+        <label><input v-model="scope" type="radio" value="proteins" /> Proteins</label>
+        <label><input v-model="scope" type="radio" value="peptides" /> Peptides</label>
+        <button type="submit" class="xs go">Search</button>
+      </div>
+    </form>
+
     <div class="tree-title">Datasets</div>
 
     <div v-for="d in datasets" :key="d.path + d.prefix" class="ds">
@@ -81,10 +104,20 @@ const viewIcon: Record<string, string> = {
 
       <div v-if="state.selectedDataset === d" class="views">
         <div
+          v-if="hasReport(d)"
+          class="view report-link"
+          :class="{ active: state.page === 'report' }"
+          @click="openReport()"
+          title="Dataset report: KPIs, QC charts, PTMs, samples, protein and peptide search"
+        >
+          <span class="vi">📈</span>
+          <span class="vname">Report &amp; search</span>
+        </div>
+        <div
           v-for="v in d.views"
           :key="v.path"
           class="view"
-          :class="{ active: state.selectedView?.path === v.path }"
+          :class="{ active: state.page === 'view' && state.selectedView?.path === v.path }"
           @click="selectView(v)"
           :title="`${v.name} · ${fmt(v.sizeBytes)}`"
         >
@@ -174,6 +207,40 @@ button.xs {
 .stream {
   font-size: 10px;
   white-space: nowrap;
+}
+.search {
+  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.search input[type="text"],
+.search > input {
+  width: 100%;
+  font-size: 12px;
+  padding: 7px 9px;
+}
+.scope {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+}
+.scope label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+}
+.scope input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+.go {
+  margin-left: auto;
+}
+.report-link .vname {
+  font-weight: 600;
 }
 .ok {
   color: var(--ok);
