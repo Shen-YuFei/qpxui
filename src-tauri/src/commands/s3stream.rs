@@ -52,6 +52,10 @@ enum Source {
     /// redirect to a short-lived signed URL on S3-compatible storage; we keep
     /// the resolved URL and re-resolve when it expires.
     Http { client: reqwest::Client, url: String, resolved: Mutex<Option<String>> },
+    /// A local parquet file (or one already downloaded to the cache). Served
+    /// straight from disk, so DuckDB reads only the ranges it needs instead of
+    /// the whole file being copied into the webview.
+    Local { path: std::path::PathBuf },
 }
 
 struct Object {
@@ -301,6 +305,12 @@ async fn fetch(obj: &Object, start: u64, end: u64) -> Result<Bytes, String> {
                 .map_err(|e| format!("S3 range get {key}: {}", aws_sdk_s3::error::DisplayErrorContext(e)))?;
             out.body.collect().await.map_err(|e| e.to_string())?.into_bytes()
         }
+        Source::Local { path } => {
+            let path = path.clone();
+            tokio::task::spawn_blocking(move || read_local(&path, start, end))
+                .await
+                .map_err(|e| e.to_string())??
+        }
         Source::Http { client, url, resolved } => {
             let resp = http_range(client, url, resolved, &range).await?;
             let full = resp.status().as_u16() == 200;
@@ -320,9 +330,23 @@ async fn fetch(obj: &Object, start: u64, end: u64) -> Result<Bytes, String> {
     Ok(data)
 }
 
+fn read_local(path: &std::path::Path, start: u64, end: u64) -> Result<Bytes, String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path).map_err(|e| format!("open {}: {e}", path.display()))?;
+    f.seek(SeekFrom::Start(start)).map_err(|e| e.to_string())?;
+    let mut buf = vec![0u8; (end - start + 1) as usize];
+    f.read_exact(&mut buf).map_err(|e| format!("read {}: {e}", path.display()))?;
+    Ok(Bytes::from(buf))
+}
+
 /// Serve [start, end] from the block cache, fetching missing blocks from S3 in
 /// as few contiguous range requests as possible.
 async fn read_range(p: &Proxy, id: &str, obj: &Object, start: u64, end: u64) -> Result<Bytes, String> {
+    // Local files are already one seek away (and in the OS page cache); keep
+    // the block cache for remote objects.
+    if matches!(obj.source, Source::Local { .. }) {
+        return fetch(obj, start, end).await;
+    }
     let (first, last) = (start / BLOCK, end / BLOCK);
     let mut blocks: BTreeMap<u64, Bytes> = BTreeMap::new();
     {
@@ -505,12 +529,65 @@ pub async fn register_http(urls: &[String]) -> Result<BTreeMap<String, StreamHan
     Ok(out)
 }
 
+/// Register local parquet files with the proxy so DuckDB can range-read them
+/// lazily. Only regular `.parquet` files are accepted. A file that changed on
+/// disk since it was registered (e.g. re-downloaded) gets a fresh entry.
+pub async fn register_local(paths: &[String]) -> Result<BTreeMap<String, StreamHandle>, String> {
+    let p = proxy().await?;
+    let mut out = BTreeMap::new();
+    for path in paths {
+        let pb = std::path::PathBuf::from(path);
+        let is_parquet = pb
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("parquet"));
+        if !is_parquet {
+            return Err(format!("{path}: only .parquet files can be opened lazily"));
+        }
+        let meta = std::fs::metadata(&pb).map_err(|e| format!("{path}: {e}"))?;
+        if !meta.is_file() {
+            return Err(format!("{path}: not a file"));
+        }
+        let last_modified = meta.modified().ok().map(httpdate::fmt_http_date);
+        let id = object_id(&format!("file://{path}"));
+        let fresh = p
+            .objects
+            .lock()
+            .unwrap()
+            .get(&id)
+            .is_some_and(|o| o.size == meta.len() && o.last_modified == last_modified);
+        if !fresh {
+            let o = Arc::new(Object {
+                path: path.clone(),
+                size: meta.len(),
+                last_modified,
+                source: Source::Local { path: pb.clone() },
+                fetched: AtomicU64::new(0),
+                requests: AtomicU64::new(0),
+            });
+            p.objects.lock().unwrap().insert(id.clone(), o);
+        }
+        let size = meta.len();
+        // The URL's last segment is cosmetic; keep it URL-safe.
+        let name: String = pb
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("file.parquet")
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || "._-".contains(c) { c } else { '_' })
+            .collect();
+        out.insert(path.clone(), handle_for(&p, &id, &name, size));
+    }
+    Ok(out)
+}
+
 /// Bytes actually pulled per streamed view (keyed by its `s3://` / https path).
 pub fn stats() -> BTreeMap<String, StreamStat> {
     let Some(p) = PROXY.get() else { return BTreeMap::new() };
     let objects = p.objects.lock().unwrap();
     objects
         .values()
+        .filter(|o| !matches!(o.source, Source::Local { .. }))
         .map(|o| {
             (
                 o.path.clone(),
@@ -538,6 +615,35 @@ pub async fn stream_http_urls(urls: Vec<String>) -> Result<BTreeMap<String, Stre
 }
 
 #[tauri::command]
+pub async fn stream_local_files(paths: Vec<String>) -> Result<BTreeMap<String, StreamHandle>, String> {
+    register_local(&paths).await
+}
+
+#[tauri::command]
 pub fn stream_s3_stats() -> BTreeMap<String, StreamStat> {
     stats()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_ranges_and_header_parsing() {
+        let dir = std::env::temp_dir().join(format!("qpxui-range-{}", random_token()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("x.parquet");
+        std::fs::write(&f, b"0123456789").unwrap();
+        assert_eq!(&read_local(&f, 2, 5).unwrap()[..], b"2345");
+        assert_eq!(parse_range("bytes=-3", 10), Some((7, 9)));
+        assert_eq!(parse_range("bytes=4-", 10), Some((4, 9)));
+        assert_eq!(parse_range("bytes=20-30", 10), None);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn register_local_rejects_non_parquet() {
+        let err = register_local(&["/etc/hosts".to_string()]).await.unwrap_err();
+        assert!(err.contains("only .parquet"));
+    }
 }
