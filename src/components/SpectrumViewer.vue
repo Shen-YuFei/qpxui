@@ -11,6 +11,16 @@ import { savePng, saveText } from "../lib/export";
 import { settings } from "../lib/settings";
 import { ident, lit, objects, type TableRef } from "../lib/report";
 import {
+  KOINA_MODELS,
+  fetchUsi,
+  koinaPredict,
+  koinaSequence,
+  pickKoinaModel,
+  similarity,
+  theoretical,
+  type MirrorSpectrum,
+} from "../lib/mirror";
+import {
   annotatePeaks,
   fragmentIons,
   ionKey,
@@ -46,6 +56,19 @@ const losses = ref(true);
 const showLabels = ref(true);
 const chart = ref<InstanceType<typeof VChart> | null>(null);
 const msg = ref("");
+
+// ---- Mirror (reference) spectrum, drawn downwards ----
+type MirrorMode = "none" | "psm" | "theoretical" | "predicted" | "usi";
+const mirrorMode = ref<MirrorMode>("none");
+const mirror = ref<MirrorSpectrum | null>(null);
+const mirrorBusy = ref(false);
+const mirrorError = ref("");
+const otherPsms = ref<Record<string, any>[]>([]);
+const otherIdx = ref<number>(-1);
+const koinaModel = ref(KOINA_MODELS[0].id);
+const nce = ref(27);
+const usiInput = ref("");
+let mirrorAbort: AbortController | null = null;
 
 const hasStored = computed(() => Array.isArray(rec.value?.ion_type_array) && rec.value!.ion_type_array.some((x: unknown) => x));
 const charge = computed(() => Number(rec.value?.charge ?? props.target.charge ?? 2) || 2);
@@ -101,6 +124,101 @@ const stats = computed(() => {
 });
 
 const theoMz = computed(() => precursorMz(parsed.value, charge.value));
+
+const koinaWhy = computed(() => {
+  const m = KOINA_MODELS.find((x) => x.id === koinaModel.value)!;
+  return koinaSequence(parsed.value, m).why ?? "";
+});
+
+/** Similarity between the PSM and the mirror (not for the theoretical ladder,
+ * whose intensities are arbitrary). */
+const sim = computed(() => {
+  if (!mirror.value || mirrorMode.value === "theoretical" || !peaks.value.length) return null;
+  const t: Tolerance = source.value === "file" ? { value: tolUnit.value === "Da" ? 0.02 : 20, unit: tolUnit.value } : tol.value;
+  return similarity(peaks.value, mirror.value.peaks, t);
+});
+
+function psmLabel(r: Record<string, any>): string {
+  const sc = Array.isArray(r.scan) ? r.scan[0] : r.scan;
+  const parts = [r.run_file_name ? String(r.run_file_name) : "", sc != null ? `scan ${sc}` : "", r.charge != null ? `${r.charge}+` : ""];
+  if (r.posterior_error_probability != null) parts.push(`PEP ${Number(r.posterior_error_probability).toExponential(1)}`);
+  return parts.filter(Boolean).join(" · ");
+}
+
+async function listOtherPsms() {
+  const P = props.psm;
+  const want = ["run_file_name", "scan", "charge", "posterior_error_probability"].filter((c) => P.cols.has(c));
+  const order = P.cols.has("posterior_error_probability") ? " ORDER BY posterior_error_probability" : "";
+  const pf = String(rec.value?.peptidoform ?? props.target.peptidoform);
+  const r = await runSql(`SELECT ${want.map(ident).join(", ")} FROM ${ident(P.table)} WHERE peptidoform = ${lit(pf)}${order} LIMIT 201`, 201);
+  const curScan = scan.value;
+  const curRun = rec.value?.run_file_name ?? props.target.run_file_name;
+  otherPsms.value = objects(r).filter((x) => {
+    const sc = Array.isArray(x.scan) ? x.scan[0] : x.scan;
+    return !(sc == curScan && (x.run_file_name ?? null) == (curRun ?? null) && (x.charge == null || x.charge == charge.value));
+  });
+}
+
+async function loadMirror() {
+  mirrorAbort?.abort();
+  mirror.value = null;
+  mirrorError.value = "";
+  if (mirrorMode.value === "none" || !rec.value) return;
+  const ctrl = (mirrorAbort = new AbortController());
+  mirrorBusy.value = true;
+  try {
+    let out: MirrorSpectrum | null = null;
+    if (mirrorMode.value === "theoretical") {
+      out = theoretical(parsed.value, Math.max(1, Math.min(2, charge.value - 1)));
+    } else if (mirrorMode.value === "predicted") {
+      const m = KOINA_MODELS.find((x) => x.id === koinaModel.value)!;
+      if (koinaWhy.value) return;
+      out = await koinaPredict(parsed.value, charge.value, m, Number(nce.value) || 27, ctrl.signal);
+    } else if (mirrorMode.value === "usi") {
+      if (!usiInput.value.trim()) return;
+      out = await fetchUsi(usiInput.value, tol.value, { parsed: parsed.value, charge: charge.value }, ctrl.signal);
+    } else if (mirrorMode.value === "psm") {
+      if (!otherPsms.value.length) await listOtherPsms();
+      if (otherIdx.value < 0 && otherPsms.value.length) otherIdx.value = 0;
+      const o = otherPsms.value[otherIdx.value];
+      if (!o) throw new Error("No other PSM of this peptidoform in the psm view.");
+      out = await loadOtherPsm(o);
+    }
+    if (!ctrl.signal.aborted) mirror.value = out;
+  } catch (e: any) {
+    if (e?.name !== "AbortError") mirrorError.value = String(e?.message ?? e);
+  } finally {
+    if (mirrorAbort === ctrl) mirrorBusy.value = false;
+  }
+}
+
+async function loadOtherPsm(o: Record<string, any>): Promise<MirrorSpectrum> {
+  const P = props.psm;
+  const sc = Array.isArray(o.scan) ? o.scan[0] : o.scan;
+  const parts = [`peptidoform = ${lit(String(rec.value?.peptidoform ?? props.target.peptidoform))}`];
+  if (o.run_file_name != null) parts.push(`run_file_name = ${lit(String(o.run_file_name))}`);
+  if (sc != null) parts.push(/\[\]|list/i.test(P.types.scan ?? "") ? `list_contains(scan, ${Number(sc)})` : `scan = ${Number(sc)}`);
+  if (o.charge != null) parts.push(`charge = ${Number(o.charge)}`);
+  const r = await runSql(`SELECT mz_array, intensity_array, charge FROM ${ident(P.table)} WHERE ${parts.join(" AND ")} LIMIT 1`, 1);
+  const row = objects(r)[0];
+  if (!row || !Array.isArray(row.mz_array) || !row.mz_array.length) throw new Error("That PSM has no stored peaks.");
+  const z = Number(row.charge ?? charge.value) || 2;
+  const ionsO = fragmentIons(parsed.value, Math.max(1, Math.min(2, z - 1)), true);
+  const pk = annotatePeaks((row.mz_array as number[]).map(Number), ((row.intensity_array ?? []) as number[]).map(Number), ionsO, tol.value);
+  return { peaks: pk, label: `PSM · ${psmLabel(o)}` };
+}
+
+watch(mirrorMode, (m) => {
+  if (m === "predicted") koinaModel.value = pickKoinaModel(parsed.value).id;
+  if (m === "usi" && !usiInput.value) usiInput.value = usi.value;
+  loadMirror();
+});
+watch([koinaModel, otherIdx], () => {
+  if (mirrorMode.value === "predicted" || mirrorMode.value === "psm") loadMirror();
+});
+watch(tol, () => {
+  if (mirrorMode.value === "psm" || mirrorMode.value === "usi") loadMirror();
+});
 const proforma = computed(() => toProForma(parsed.value));
 
 const pxd = computed(() => {
@@ -168,7 +286,11 @@ const option = computed(() => {
   const grey = settings.theme === "light" ? "#94a3b8" : "#64748b";
   const mi = maxInt.value;
   const pts = peaks.value.map((p, i) => ({ p, i, rel: (p.intensity / mi) * 100 }));
-  const xMax = Math.max(...peaks.value.map((p) => p.mz), theoMz.value) * 1.04;
+  const mir = mirror.value?.peaks ?? [];
+  const mmi = mir.reduce((m, p) => Math.max(m, p.intensity), 0) || 1;
+  const mpts = mir.map((p, i) => ({ p, i, rel: -(p.intensity / mmi) * 100 }));
+  const hasMirror = mpts.length > 0;
+  const xMax = Math.max(...peaks.value.map((p) => p.mz), ...mir.map((p) => p.mz), theoMz.value) * 1.04;
 
   const stick = (name: string, color: string, sel: typeof pts) => ({
     name,
@@ -187,6 +309,15 @@ const option = computed(() => {
   const un = pts.filter((x) => !x.p.ion);
   const bb = pts.filter((x) => x.p.ion?.type === "b");
   const yy = pts.filter((x) => x.p.ion?.type === "y");
+  const mun = mpts.filter((x) => !x.p.ion);
+  const mbb = mpts.filter((x) => x.p.ion?.type === "b");
+  const myy = mpts.filter((x) => x.p.ion?.type === "y");
+  const mtips = [...mpts].sort((a, b) => a.rel - b.rel).map((x) => ({
+    value: [x.p.mz, x.rel],
+    idx: x.i,
+    mirror: true,
+    label: x.p.ion && showLabels.value ? { show: true, formatter: x.p.ion.label, color: colorOf(x.p), position: "bottom" } : { show: false },
+  }));
   // Invisible hover targets + labels at the stick tips, most intense first so
   // they win when labels overlap.
   const tips = [...pts].sort((a, b) => b.rel - a.rel).map((x) => ({
@@ -208,9 +339,11 @@ const option = computed(() => {
       trigger: "item",
       confine: true,
       formatter: (prm: any) => {
-        const pk = peaks.value[prm.data?.idx];
+        const isM = !!prm.data?.mirror;
+        const pk = isM ? mir[prm.data?.idx] : peaks.value[prm.data?.idx];
         if (!pk) return "";
-        const lines = [`m/z <b>${pk.mz.toFixed(4)}</b>`, `intensity ${pk.intensity.toExponential(3)} (${((pk.intensity / mi) * 100).toFixed(1)}%)`];
+        const lines = [`m/z <b>${pk.mz.toFixed(4)}</b>`, `intensity ${pk.intensity.toExponential(3)} (${((pk.intensity / (isM ? mmi : mi)) * 100).toFixed(1)}%)`];
+        if (isM) lines.unshift(`<span style="opacity:.7">${escapeHtml(mirror.value?.label ?? "mirror")}</span>`);
         if (pk.ion) {
           lines.unshift(`<b style="color:${colorOf(pk)}">${escapeHtml(pk.ion.label)}</b>`);
           if (Number.isFinite(pk.ion.mz)) lines.push(`theoretical ${pk.ion.mz.toFixed(4)}`);
@@ -219,6 +352,12 @@ const option = computed(() => {
         return lines.join("<br/>");
       },
     },
+    graphic: hasMirror
+      ? [
+          { type: "text", right: 24, top: 24, style: { text: "PSM", fill: dim, fontSize: 11 } },
+          { type: "text", right: 24, top: "57%", style: { text: mirror.value?.label ?? "", fill: dim, fontSize: 11, align: "right" } },
+        ]
+      : [],
     grid: [
       { left: 56, right: 18, top: 22, height: "62%" },
       { left: 56, right: 18, top: "76%", bottom: 58 },
@@ -228,7 +367,12 @@ const option = computed(() => {
       { type: "value", min: 0, max: Math.ceil(xMax), gridIndex: 1, name: "m/z", nameLocation: "middle", nameGap: 22, nameTextStyle: { color: dim }, axisLabel: { color: dim, showMaxLabel: false }, axisLine: { lineStyle: { color: border } }, splitLine: { show: false } },
     ],
     yAxis: [
-      { type: "value", min: 0, max: 112, gridIndex: 0, name: "Relative intensity (%)", nameLocation: "middle", nameGap: 38, nameTextStyle: { color: dim }, axisLabel: { color: dim, formatter: (v: number) => (v > 100 ? "" : String(v)) }, splitLine: { lineStyle: { color: border, opacity: 0.4 } } },
+      {
+        type: "value", min: hasMirror ? -125 : 0, max: hasMirror ? 125 : 112, interval: hasMirror ? 25 : undefined, gridIndex: 0,
+        name: "Relative intensity (%)", nameLocation: "middle", nameGap: 38, nameTextStyle: { color: dim },
+        axisLabel: { color: dim, formatter: (v: number) => (Math.abs(v) > 100 || (hasMirror && v % 50 !== 0) ? "" : String(Math.abs(v))) },
+        splitLine: { lineStyle: { color: border, opacity: 0.4 } },
+      },
       { type: "value", gridIndex: 1, min: -errMax, max: errMax, name: tolUnit.value, nameLocation: "middle", nameGap: 38, nameTextStyle: { color: dim }, axisLabel: { color: dim, formatter: (v: number) => (Math.abs(v) < 1e-9 ? "0" : v.toPrecision(2)) }, splitNumber: 2, splitLine: { lineStyle: { color: border, opacity: 0.4 } } },
     ],
     dataZoom: [
@@ -239,6 +383,26 @@ const option = computed(() => {
       stick("unmatched", grey, un),
       stick("b", B_COLOR, bb),
       stick("y", Y_COLOR, yy),
+      ...(hasMirror
+        ? [
+            stick("mirror unmatched", grey, mun),
+            stick("mirror b", B_COLOR, mbb),
+            stick("mirror y", Y_COLOR, myy),
+            {
+              name: "mirror peaks",
+              type: "scatter",
+              xAxisIndex: 0,
+              yAxisIndex: 0,
+              symbolSize: 7,
+              itemStyle: { color: "rgba(0,0,0,0)" },
+              emphasis: { scale: false, itemStyle: { color: dim } },
+              label: { position: "bottom", fontSize: 10, distance: 2 },
+              labelLayout: { hideOverlap: true },
+              data: mtips,
+              markLine: { silent: true, symbol: "none", lineStyle: { color: border, width: 1 }, label: { show: false }, data: [{ yAxis: 0 }] },
+            },
+          ]
+        : []),
       {
         name: "peaks",
         type: "scatter",
@@ -288,6 +452,10 @@ async function load() {
     if (!row) throw new Error("PSM not found in the psm view.");
     if (!Array.isArray(row.mz_array) || !row.mz_array.length) throw new Error("This PSM has no stored peaks (mz_array is empty).");
     rec.value = row;
+    otherPsms.value = [];
+    otherIdx.value = -1;
+    const nceCv = Number(cvOf(row, "normalized collision energy"));
+    if (Number.isFinite(nceCv) && nceCv > 0) nce.value = Math.round(nceCv);
     const z = Number(row.charge ?? 2) || 2;
     maxCharge.value = Math.max(1, Math.min(2, z - 1));
     source.value = Array.isArray(row.ion_type_array) && row.ion_type_array.some((x: unknown) => x) ? "file" : "computed";
@@ -301,6 +469,7 @@ async function load() {
   } finally {
     loading.value = false;
   }
+  if (rec.value) loadMirror();
 }
 
 /** `cv_params` as name -> value. Files store it as a list of
@@ -465,6 +634,45 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
           </span>
         </div>
 
+        <div class="controls mirror-row">
+          <label title="Draw a reference spectrum mirrored below the PSM">
+            Mirror
+            <select v-model="mirrorMode">
+              <option value="none">none</option>
+              <option value="psm">another PSM of this peptidoform</option>
+              <option value="predicted">predicted (Koina)</option>
+              <option value="usi">spectrum by USI</option>
+              <option value="theoretical">theoretical b/y ions</option>
+            </select>
+          </label>
+          <template v-if="mirrorMode === 'psm'">
+            <select v-model.number="otherIdx" class="wide" :disabled="!otherPsms.length">
+              <option v-if="!otherPsms.length" :value="-1">{{ mirrorBusy ? "searching…" : "no other PSM" }}</option>
+              <option v-for="(o, k) in otherPsms.slice(0, 200)" :key="k" :value="k">{{ psmLabel(o) }}</option>
+            </select>
+            <span v-if="otherPsms.length" class="muted">{{ otherPsms.length > 200 ? "200+" : otherPsms.length }} other PSMs</span>
+          </template>
+          <template v-else-if="mirrorMode === 'predicted'">
+            <select v-model="koinaModel" title="Prediction model served by Koina (koina.wilhelmlab.org)">
+              <option v-for="m in KOINA_MODELS" :key="m.id" :value="m.id">{{ m.label }}</option>
+            </select>
+            <label v-if="KOINA_MODELS.find((m) => m.id === koinaModel)?.ce">NCE
+              <input v-model.number="nce" type="number" min="10" max="50" class="num" @change="loadMirror" />
+            </label>
+            <span v-if="koinaWhy" class="warn">{{ koinaWhy }}</span>
+            <span v-else class="muted" title="The peptide sequence is sent to koina.wilhelmlab.org">via Koina</span>
+          </template>
+          <template v-else-if="mirrorMode === 'usi'">
+            <input v-model="usiInput" class="mono usi-in" placeholder="mzspec:PXD…:run:scan:N:PEPTIDE/2" @keyup.enter="loadMirror" />
+            <button class="xs" :disabled="mirrorBusy" @click="loadMirror">Load</button>
+          </template>
+          <span v-if="mirrorBusy" class="muted"><span class="spinner"></span></span>
+          <span v-if="mirrorError" class="error">⚠ {{ mirrorError }}</span>
+          <span v-if="sim" class="sim" title="Cosine of square-root intensities after one-to-one peak matching; SA = normalised spectral angle">
+            cosine <b>{{ sim.cosine.toFixed(3) }}</b> · SA <b>{{ sim.angle.toFixed(3) }}</b> · {{ sim.matched }} matched peaks
+          </span>
+        </div>
+
         <div class="coverage mono" title="Matched b (blue, below) and y (red, above) ions without neutral losses">
           <template v-for="(c, k) in coverage" :key="k">
             <span class="aa" :class="{ mod: c.mod }">{{ c.aa }}</span>
@@ -616,6 +824,24 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
 .stats {
   margin-left: auto;
 }
+.mirror-row .wide {
+  max-width: 520px;
+}
+.usi-in {
+  flex: 1;
+  min-width: 320px;
+  font-size: 11px;
+}
+.sim {
+  margin-left: auto;
+  color: var(--text-dim);
+}
+.sim b {
+  color: var(--accent);
+}
+.error {
+  color: var(--danger, #ef4444);
+}
 .coverage {
   display: flex;
   flex-wrap: wrap;
@@ -658,7 +884,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   border-bottom: 2px solid #3b82f6;
 }
 .chartbox {
-  height: 430px;
+  height: 470px;
 }
 .chart {
   width: 100%;

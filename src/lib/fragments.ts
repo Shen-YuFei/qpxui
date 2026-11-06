@@ -77,6 +77,23 @@ export function modMass(token: string): number | null {
   return BY_NAME.get(base) ?? (/^[+-]?\d+(\.\d+)?$/.test(t) ? Number(t) : null);
 }
 
+const ID_BY_NAME = new Map<string, number>();
+for (const [id, , ...names] of MODS) for (const n of names) ID_BY_NAME.set(n.toLowerCase(), id);
+
+/** UNIMOD id of a modification token (name, accession or mass shift), or null. */
+export function modUnimodId(token: string): number | null {
+  const t = token.trim();
+  const acc = /^UNIMOD:(\d+)$/i.exec(t);
+  if (acc) return Number(acc[1]);
+  const name = t.replace(/^(U|M):/i, "").replace(/#.*$/, "");
+  const id = ID_BY_NAME.get(name.toLowerCase()) ?? ID_BY_NAME.get(name.replace(/\s*\([^)]*\)\s*$/, "").toLowerCase());
+  if (id !== undefined) return id;
+  const m = modMass(t);
+  if (m === null) return null;
+  for (const [mid, mass] of MODS) if (Math.abs(mass - m) < 0.01) return mid;
+  return null;
+}
+
 export interface ParsedPeptide {
   residues: string[];
   /** Summed modification mass per residue. */

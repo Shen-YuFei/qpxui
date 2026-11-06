@@ -4,6 +4,7 @@ import { use } from "echarts/core";
 import { BarChart, BoxplotChart, CustomChart, LineChart, ScatterChart } from "echarts/charts";
 import {
   DataZoomComponent,
+  GraphicComponent,
   GridComponent,
   LegendComponent,
   MarkLineComponent,
@@ -13,7 +14,7 @@ import { CanvasRenderer } from "echarts/renderers";
 
 use([
   BarChart, LineChart, BoxplotChart, ScatterChart, CustomChart,
-  GridComponent, TooltipComponent, LegendComponent, DataZoomComponent, MarkLineComponent, CanvasRenderer,
+  GraphicComponent, GridComponent, TooltipComponent, LegendComponent, DataZoomComponent, MarkLineComponent, CanvasRenderer,
 ]);
 
 export interface ChartSeries {
