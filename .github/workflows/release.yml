@@ -39,7 +39,7 @@ jobs:
 
       - name: Linux system dependencies
         if: startsWith(matrix.platform, 'ubuntu')
-        timeout-minutes: 15
+        timeout-minutes: 20
         env:
           DEBIAN_FRONTEND: noninteractive
         # The Azure Ubuntu mirror sometimes stalls on large packages
