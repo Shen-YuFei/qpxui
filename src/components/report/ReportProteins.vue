@@ -275,7 +275,7 @@ const accessionLinks = computed(() => {
         <span v-else>
           {{ rows.length.toLocaleString() }}{{ truncated ? "+" : "" }} {{ pg ? "protein group" : "protein" }}{{ rows.length === 1 ? "" : "s" }}
           <template v-if="truncated"> (first {{ LIMIT }} shown — refine the search)</template>
-          · {{ (elapsed / 1000).toFixed(2) }} s · from {{ pg ? "protein groups (pg)" : evName }} · click a protein for its peptides and per-run evidence
+          · {{ (elapsed / 1000).toFixed(2) }} s · from {{ pg ? "protein groups (pg)" : evName }} · click a protein for its peptidoforms and per-run evidence
         </span>
       </div>
       <div v-if="error" class="error">⚠ {{ error }}</div>
@@ -325,10 +325,10 @@ const accessionLinks = computed(() => {
         <ChartCard v-if="perRun" title="Per-run evidence" :subtitle="`${evName} and peptides of this protein in each run.`" :spec="perRun" :file-base="`${fileBase}_${focus}`" :height="200" />
         <div class="sec">
           <div class="sec-head">
-            <h3>Peptides</h3>
+            <h3>Peptidoforms</h3>
             <button class="xs" :disabled="!peptides.length" @click="pepTable?.exportCsv()">CSV</button>
           </div>
-          <ReportTable ref="pepTable" :columns="pepCols" :rows="peptides" clickable max-height="360px" :file-name="`${fileBase}_${focus}_peptides`" @row="(r) => searchFor('peptides', String(r.sequence ?? r.peptidoform))">
+          <ReportTable ref="pepTable" :columns="pepCols" :rows="peptides" clickable max-height="360px" :file-name="`${fileBase}_${focus}_peptidoforms`" @row="(r) => searchFor('peptides', String(r.sequence ?? r.peptidoform))">
             <template #cell-peptidoform="{ row }">
               <PeptideSeq :peptidoform="row.peptidoform" :sequence="row.sequence" :modifications="row.modifications" />
             </template>

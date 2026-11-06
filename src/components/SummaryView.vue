@@ -68,6 +68,10 @@ async function runCard(label: string, sql: string, key: string): Promise<any> {
   return { label, key, option: barOption(labels, values, label) };
 }
 
+// QPX row unit for each view, used in chart titles.
+const ROW_UNIT: Record<string, string> = { psm: "PSMs", feature: "features", pg: "protein groups" };
+const unit = () => ROW_UNIT[props.view.view] ?? "rows";
+
 async function buildSummaries() {
   busy.value = true;
   error.value = "";
@@ -83,10 +87,10 @@ async function buildSummaries() {
   }
   if (names.has("anchor_protein") || names.has("pg_accessions")) {
     const col = names.has("anchor_protein") ? "anchor_protein" : "pg_accessions";
-    push(await runCard("Top protein groups by peptide count", `SELECT ${col} AS k, COUNT(*) AS n FROM "${t}" WHERE ${col} IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 25`, "protein"));
+    push(await runCard(`Top ${col === "anchor_protein" ? "anchor proteins" : "protein groups"} by ${unit()}`, `SELECT ${col} AS k, COUNT(*) AS n FROM "${t}" WHERE ${col} IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 25`, "protein"));
   }
   if (names.has("run_file_name")) {
-    push(await runCard("Features / PSMs per run", `SELECT run_file_name AS k, COUNT(*) AS n FROM "${t}" GROUP BY 1 ORDER BY 2 DESC LIMIT 25`, "run"));
+    push(await runCard(`${unit()[0].toUpperCase()}${unit().slice(1)} per run`, `SELECT run_file_name AS k, COUNT(*) AS n FROM "${t}" GROUP BY 1 ORDER BY 2 DESC LIMIT 25`, "run"));
   }
   if (names.has("peptide_qvalue") || names.has("posterior_error_probability")) {
     const col = names.has("peptide_qvalue") ? "peptide_qvalue" : "posterior_error_probability";

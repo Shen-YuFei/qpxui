@@ -51,6 +51,8 @@ const evBusy = ref(false);
 const spectra = ref(false);
 const spectrum = ref<PsmKey | null>(null);
 const evSrc = computed(() => (spectra.value && props.t.psm ? props.t.psm : ev));
+const evLabel = computed(() => (evSrc.value === props.t.psm ? "PSMs" : "features"));
+const evDetail = computed(() => `per-run ${evLabel.value}`);
 
 const cols = computed<Column[]>(() =>
   [
@@ -222,7 +224,7 @@ onMounted(async () => {
         <option value="prefix">starts with</option>
         <option value="exact">exact</option>
       </select>
-      <select v-if="modNames.length" v-model="mod" title="Only peptides carrying this modification">
+      <select v-if="modNames.length" v-model="mod" title="Only peptidoforms carrying this modification">
         <option value="">any modification</option>
         <option v-for="m in modNames" :key="m" :value="m">{{ m }}</option>
       </select>
@@ -235,7 +237,7 @@ onMounted(async () => {
       <span v-else>
         {{ rows.length.toLocaleString() }}{{ truncated ? "+" : "" }} peptidoforms
         <template v-if="truncated"> (top {{ LIMIT }} by {{ evName }} — refine the search)</template>
-        · {{ (elapsed / 1000).toFixed(2) }} s · target {{ evName }} · click a row for its per-run evidence{{ spectra ? " and spectra" : "" }}, a protein to open it
+        · {{ (elapsed / 1000).toFixed(2) }} s · target {{ evName }} · click a peptidoform for its {{ spectra ? "PSMs and spectra" : evDetail }}, a protein to open it
       </span>
     </div>
     <div v-if="error" class="error">⚠ {{ error }}</div>
@@ -248,7 +250,7 @@ onMounted(async () => {
         :selected="focus"
         clickable
         max-height="calc(100vh - 290px)"
-        :file-name="`${fileBase}_peptides${q ? '_' + q : ''}${mod ? '_' + mod : ''}`"
+        :file-name="`${fileBase}_peptidoforms${q ? '_' + q : ''}${mod ? '_' + mod : ''}`"
         @row="openPeptide"
       >
         <template #cell-peptidoform="{ row }">
@@ -265,7 +267,9 @@ onMounted(async () => {
           <button class="xs" @click="focus = null">✕</button>
         </div>
         <div v-if="evBusy" class="muted"><span class="spinner"></span></div>
-        <div v-if="spectra && !evBusy" class="muted hint">Click a PSM to view its annotated spectrum.</div>
+        <div v-if="!evBusy" class="muted hint">
+          {{ evRows.length.toLocaleString() }}{{ evRows.length >= 5000 ? "+" : "" }} {{ evLabel }}<template v-if="spectra"> · click a PSM to view its annotated spectrum</template>
+        </div>
         <ReportTable
           v-if="!evBusy"
           :columns="evCols"
@@ -273,7 +277,7 @@ onMounted(async () => {
           row-key="_k"
           :clickable="spectra"
           max-height="calc(100vh - 360px)"
-          :file-name="`${fileBase}_${focus}_evidence`"
+          :file-name="`${fileBase}_${focus}_${spectra ? 'psms' : evName}`"
           @row="openSpectrum"
         />
       </div>

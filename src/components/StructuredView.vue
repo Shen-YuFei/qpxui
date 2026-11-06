@@ -47,7 +47,7 @@ const kind = computed<string>(() => {
 const kindHint = computed<string>(() => {
   switch (kind.value) {
     case "scores":
-      return "peptide / PSM scores — higher/lower-is-better marked ▲/▼";
+      return "scores — higher/lower-is-better marked ▲/▼";
     case "modifications":
       return "post-translational modifications, colour-coded";
     case "list":

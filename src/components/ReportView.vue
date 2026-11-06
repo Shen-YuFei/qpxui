@@ -38,7 +38,7 @@ const TABS: { id: ReportTab; label: string }[] = [
   { id: "ptms", label: "PTMs" },
   { id: "samples", label: "Samples" },
   { id: "proteins", label: "Proteins" },
-  { id: "peptides", label: "Peptides" },
+  { id: "peptides", label: "Peptidoforms" },
 ];
 
 // Only show tabs the dataset's views can support.
