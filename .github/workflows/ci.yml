@@ -32,10 +32,17 @@ jobs:
         timeout-minutes: 15
         env:
           DEBIAN_FRONTEND: noninteractive
+        # The Azure Ubuntu mirror sometimes stalls on large packages
+        # (libwebkit2gtk); fail fast on a stalled download and retry.
         run: |
-          sudo apt-get update -o Acquire::Retries=3
-          sudo apt-get install -y --no-install-recommends \
-            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          APT="-o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          for i in 1 2 3; do
+            sudo apt-get $APT update &&
+            timeout 300 sudo apt-get $APT install -y --no-install-recommends \
+              libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf && break
+            [ "$i" = 3 ] && exit 1
+            echo "apt attempt $i failed, retrying"; sleep 15
+          done
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
         with:
