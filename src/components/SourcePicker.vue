@@ -82,30 +82,35 @@ async function openFolder() {
     <div v-if="busy" class="muted">Working… <span class="spinner"></span></div>
     <div v-if="state.error">{{ state.error }}</div>
 
-    <S3Picker v-if="showS3" style="margin-top: 24px" />
-    <PortalPicker v-if="showPortal" style="margin-top: 24px" />
+    <S3Picker v-if="showS3" style="margin-top: 20px" />
+    <PortalPicker v-if="showPortal" style="margin-top: 20px" />
   </div>
 </template>
 
 <style scoped>
 .picker {
-  max-width: 860px;
+  max-width: 1680px;
   margin: 0 auto;
-  padding: 40px 24px;
+  padding: 28px 32px;
 }
 h2 {
   margin: 0 0 6px;
 }
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
-  margin-top: 26px;
+  margin-top: 20px;
+}
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 .card {
   text-align: left;
-  padding: 18px;
-  min-height: 120px;
+  padding: 16px 18px;
+  min-height: 92px;
   background: var(--bg-soft);
   display: flex;
   flex-direction: column;
