@@ -15,6 +15,8 @@ const props = defineProps<{
   csv?: () => string;
   loading?: boolean;
   error?: string;
+  /** Message shown instead of the chart (e.g. too few samples). */
+  emptyText?: string;
   /** Prefix for exported file names (e.g. the dataset accession). */
   fileBase?: string;
   height?: number;
@@ -80,6 +82,7 @@ async function exportCsv() {
     </div>
     <div class="body" :style="{ height: (height ?? 260) + 'px' }">
       <div v-if="error" class="state error">⚠ {{ error }}</div>
+      <div v-else-if="emptyText" class="state muted">{{ emptyText }}</div>
       <div v-else-if="loading || (!spec && !option)" class="state muted"><span class="spinner"></span></div>
       <div v-else-if="empty" class="state muted">No data</div>
       <VChart v-else ref="chart" :option="option" autoresize class="chart" />

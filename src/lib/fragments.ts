@@ -66,7 +66,10 @@ for (const [id, mass, ...names] of MODS) {
  * ProForma prefixes ("U:Oxidation") and mass shifts ("+15.9949"). */
 export function modMass(token: string): number | null {
   let t = token.trim();
-  if (/^[+-]\d/.test(t)) return Number(t);
+  if (/^[+-]\d/.test(t)) {
+    const v = Number(t.replace(/#.*$/, "").trim());
+    return Number.isFinite(v) ? v : null;
+  }
   const acc = /^UNIMOD:(\d+)$/i.exec(t);
   if (acc) return BY_ID.get(Number(acc[1])) ?? null;
   t = t.replace(/^(U|M|Obs|Formula):/i, "").replace(/#.*$/, "");
@@ -182,7 +185,12 @@ export function parsePeptidoform(pf: string): ParsedPeptide {
 
 /** ProForma 2.0 text (as used in USIs) for a parsed peptide. */
 export function toProForma(p: ParsedPeptide): string {
-  const br = (names: string[]) => names.map((x) => `[${x}]`).join("");
+  // Prefer UNIMOD accessions; drop "(site)" suffixes ProForma does not allow.
+  const tok = (x: string) => {
+    const id = modUnimodId(x);
+    return id != null ? `UNIMOD:${id}` : x.replace(/\s*\([^)]*\)\s*$/, "");
+  };
+  const br = (names: string[]) => names.map((x) => `[${tok(x)}]`).join("");
   const nt = p.ntermNames.length ? `${br(p.ntermNames)}-` : "";
   const ct = p.ctermNames.length ? `-${br(p.ctermNames)}` : "";
   return nt + p.residues.map((r, k) => r + br(p.modNames[k])).join("") + ct;
@@ -221,7 +229,7 @@ export function ionKey(type: string, num: number, loss: string, charge: number):
 }
 
 /** Theoretical b/y fragment ions (b1…b(n-1), y1…y(n-1)). */
-export function fragmentIons(p: ParsedPeptide, maxCharge: number, losses: boolean): FragmentIon[] {
+export function fragmentIons(p: ParsedPeptide, maxCharge: number, losses: boolean, anyLoss = false): FragmentIon[] {
   const n = p.residues.length;
   const res = p.residues.map((r, k) => (RESIDUE[r] ?? 0) + p.mods[k]);
   const lossList: [Loss, number][] = losses ? [["", 0], ["-H2O", H2O], ["-NH3", NH3]] : [["", 0]];
@@ -232,12 +240,18 @@ export function fragmentIons(p: ParsedPeptide, maxCharge: number, losses: boolea
   let y = H2O + p.cterm;
   const yNeutral: number[] = [];
   for (let k = n - 1; k > 0; k--) yNeutral.push((y += res[k]));
+  // Neutral losses only for fragments holding a residue that can lose them:
+  // water from S/T/E/D, ammonia from R/K/N/Q.
+  const can = (loss: Loss, seq: string[]) =>
+    loss === "" || anyLoss || seq.some((r) => (loss === "-H2O" ? "STED" : "RKNQ").includes(r));
   for (let z = 1; z <= maxCharge; z++) {
     for (const [loss, lm] of lossList) {
       for (let k = 0; k < n - 1; k++) {
         const num = k + 1;
-        ions.push({ type: "b", num, charge: z, loss, mz: (bNeutral[k] - lm + z * PROTON) / z, label: ionLabel("b", num, loss, z) });
-        ions.push({ type: "y", num, charge: z, loss, mz: (yNeutral[k] - lm + z * PROTON) / z, label: ionLabel("y", num, loss, z) });
+        if (can(loss, p.residues.slice(0, num)))
+          ions.push({ type: "b", num, charge: z, loss, mz: (bNeutral[k] - lm + z * PROTON) / z, label: ionLabel("b", num, loss, z) });
+        if (can(loss, p.residues.slice(n - num)))
+          ions.push({ type: "y", num, charge: z, loss, mz: (yNeutral[k] - lm + z * PROTON) / z, label: ionLabel("y", num, loss, z) });
       }
     }
   }

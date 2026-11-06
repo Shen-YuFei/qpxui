@@ -49,6 +49,8 @@ const contaminant = ref<Uint8Array>(new Uint8Array());
 const byRunOnly = ref(false);
 /** Run channels left out because the run view maps no sample to them. */
 const unmapped = ref(0);
+/** The long-format result hit the row cap, so the matrix is incomplete. */
+const truncated = ref(false);
 const meta = ref<Map<string, Record<string, any>>>(new Map());
 
 const normalise = ref(true);
@@ -97,6 +99,7 @@ onMounted(async () => {
   if (!src) return;
   try {
     const r = await cachedSql(props.ds, `quant.${srcKind}`, matrixSql(src), 5_000_000);
+    if (r.truncated) truncated.value = true;
     const [ip, ig, ic, icol, iv, ibr] = ["protein", "gene", "cont", "col", "v", "by_run"].map((c) => r.columns.indexOf(c));
     const iun = r.columns.indexOf("unmapped");
     const cols = new Map<string, number>();
@@ -544,7 +547,8 @@ const sourceText = computed(() => {
       : "run channels mapped to samples via the run view (fractions summed)"
     : "one column per run (and channel)";
   const skip = unmapped.value ? ` ${unmapped.value} run channels without a sample in the run view were left out.` : "";
-  return `${what}; ${cols}; log2${normalise.value ? ", median-normalised" : ""}.${skip}`;
+  const cut = truncated.value ? " ⚠ The matrix is too large and was truncated at 5 million values; some proteins/samples are incomplete." : "";
+  return `${what}; ${cols}; log2${normalise.value ? ", median-normalised" : ""}.${skip}${cut}`;
 });
 </script>
 
@@ -595,6 +599,7 @@ const sourceText = computed(() => {
           :subtitle="`Pearson r of log2 abundance, ${filteredRows.length.toLocaleString()} proteins; clustered (average linkage).`"
           :option="corrOption"
           :csv="corrCsv"
+          :empty-text="matrix.samples.length < 2 ? `Needs at least 2 ${colUnit}.` : ''"
           :file-base="fileBase"
           :height="Math.min(620, Math.max(320, matrix.samples.length * 14 + 120))"
         />
@@ -604,6 +609,7 @@ const sourceText = computed(() => {
           :subtitle="pcaRes ? `${pcaRes.used.toLocaleString()} proteins, mean-centred; missing values set to the protein mean.` : 'Needs at least 3 samples.'"
           :option="pcaOption"
           :csv="pcaCsv"
+          :empty-text="matrix.samples.length < 3 ? `Needs at least 3 ${colUnit}.` : ''"
           :file-base="fileBase"
           :height="Math.min(620, Math.max(320, matrix.samples.length * 14 + 120))"
         >
@@ -642,6 +648,7 @@ const sourceText = computed(() => {
           :subtitle="focusRow ? `${focus} · quantified in ${focusRow.n} of ${matrix.samples.length} ${colUnit}${groupBy ? ' · lines = group means' : ''}` : 'Pick a protein.'"
           :option="profileOption"
           :csv="profileCsv"
+          :empty-text="focus ? '' : 'Pick a protein.'"
           :file-base="`${fileBase}_${focusRow?.gene ?? focus ?? ''}`"
           :height="420"
         />
