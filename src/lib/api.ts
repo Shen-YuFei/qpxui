@@ -88,6 +88,9 @@ export const api = {
   /** Register public portal (https) files with the backend range proxy. */
   streamHttpUrls: (urls: string[]) =>
     invoke<Record<string, StreamHandle>>("stream_http_urls", { urls }),
+  /** Register local parquet files with the range proxy (lazy reads from disk). */
+  streamLocalFiles: (paths: string[]) =>
+    invoke<Record<string, StreamHandle>>("stream_local_files", { paths }),
   /** Bytes actually fetched per streamed view (keyed by its s3:// or https path). */
   streamS3Stats: () => invoke<Record<string, StreamStat>>("stream_s3_stats"),
 

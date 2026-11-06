@@ -48,7 +48,11 @@ async function doInit() {
     filesystem: { reliableHeadRequests: true, allowFullHTTPReads: false, forceFullHTTPReads: false },
   });
   conn = await d.connect();
+  // Prefetch whole column chunks of a row group in one go instead of many
+  // small reads: far fewer round trips for streamed (remote) parquet files.
+  await conn.query("SET prefetch_all_parquet_files = true");
   db = d;
+  if (import.meta.env.DEV) (window as any).__duck = { db: d, conn };
 }
 
 function safeName(name: string): string {
@@ -59,7 +63,8 @@ function safeName(name: string): string {
 
 /** Register a view's parquet file and expose it as a DuckDB table.
  *
- * Local files (and files already downloaded to cache) are loaded as buffers.
+ * Local files (and files already downloaded to cache) are range-read from
+ * disk through the backend proxy (falling back to a whole-file buffer).
  * Remote S3 views (`s3://…`) are registered *lazily*: the Rust backend runs a
  * 127.0.0.1 range proxy that fetches byte ranges from S3 with the user's
  * credentials, and DuckDB's HTTP file system asks it only for the ranges a
@@ -83,17 +88,30 @@ export async function ensureViewReady(view: ViewInfo): Promise<string> {
       url = (await api.presignS3Urls(bucket, [view.path]))[view.path];
     }
     if (!url) throw new Error(`could not open ${view.path} for streaming`);
-    // directIO = true: no whole-file buffering, every read is a range request.
-    await db!.registerFileURL(fileKey, url, duckdb.DuckDBDataProtocol.HTTP, true);
+    // Still range requests only (allowFullHTTPReads is off), but with
+    // directIO = false duckdb-wasm keeps the ranges it read, so later queries
+    // over the same columns don't go back to the network.
+    await db!.registerFileURL(fileKey, url, duckdb.DuckDBDataProtocol.HTTP, false);
   } else if (/^https?:\/\//.test(view.path)) {
     // Public portal file: same lazy range proxy, fetched over HTTPS.
     const url = (await api.streamHttpUrls([view.path]))[view.path]?.url;
     if (!url) throw new Error(`could not open ${view.path} for streaming`);
-    await db!.registerFileURL(fileKey, url, duckdb.DuckDBDataProtocol.HTTP, true);
+    await db!.registerFileURL(fileKey, url, duckdb.DuckDBDataProtocol.HTTP, false);
   } else {
-    const b64 = await api.readFileBytes(view.path);
-    const bytes = base64ToUint8(b64);
-    await db!.registerFileBuffer(fileKey, bytes);
+    // Local parquet: range-read from disk through the same proxy, so big
+    // files open instantly and only the touched column chunks are read.
+    let url: string | undefined;
+    try {
+      url = (await api.streamLocalFiles([view.path]))[view.path]?.url;
+    } catch (e) {
+      console.warn("local range proxy unavailable, loading the whole file", e);
+    }
+    if (url) {
+      await db!.registerFileURL(fileKey, url, duckdb.DuckDBDataProtocol.HTTP, false);
+    } else {
+      const bytes = base64ToUint8(await api.readFileBytes(view.path));
+      await db!.registerFileBuffer(fileKey, bytes);
+    }
   }
   await conn!.query(
     `CREATE OR REPLACE VIEW "${table}" AS SELECT * FROM read_parquet('${fileKey}')`
@@ -205,6 +223,12 @@ function normalize(v: unknown): unknown {
   return String(v);
 }
 
+/** Dev builds keep a log of query timings in `window.__qlog`. */
+function logQuery(sql: string, ms: number, rows: number) {
+  const w = window as any;
+  (w.__qlog ??= []).push({ ms: Math.round(ms), rows, sql: sql.replace(/\s+/g, " ").trim() });
+}
+
 type QueryResultType = Awaited<ReturnType<duckdb.AsyncDuckDBConnection["query"]>>;
 
 export async function runSql(
@@ -213,11 +237,17 @@ export async function runSql(
 ): Promise<QueryResult> {
   await init();
   let res: QueryResultType;
+  const t0 = performance.now();
+  const w = window as any;
+  if (import.meta.env.DEV) w.__qpending = (w.__qpending ?? 0) + 1;
   try {
     res = await conn!.query(sql);
   } catch (e) {
     throw new Error(guardError(e));
+  } finally {
+    if (import.meta.env.DEV) w.__qpending--;
   }
+  if (import.meta.env.DEV) logQuery(sql, performance.now() - t0, res.numRows);
   let objects: Record<string, unknown>[] = [];
   try {
     objects = res.toArray() as Record<string, unknown>[];

@@ -20,6 +20,7 @@ pub fn run() {
             commands::s3stream::stream_s3_urls,
             commands::s3stream::stream_s3_stats,
             commands::s3stream::stream_http_urls,
+            commands::s3stream::stream_local_files,
             commands::transfers::cancel_download,
             commands::portal::portal_datasets,
             commands::portal::portal_registry,
