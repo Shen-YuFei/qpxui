@@ -1,13 +1,39 @@
 # QPX UI
 
-A **local desktop viewer** for the [QPX (Quantitative Proteomics eXchange)](https://github.com/bigbio/qpx)
-format, built with [Tauri v2](https://v2.tauri.app/), **Vue 3 + TypeScript + Vite**,
-and [DuckDB](https://duckdb.org) (running in-browser via `duckdb-wasm`).
+[![CI](https://github.com/bigbio/qpxui/actions/workflows/ci.yml/badge.svg)](https://github.com/bigbio/qpxui/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/bigbio/qpxui?include_prereleases)](https://github.com/bigbio/qpxui/releases/latest)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-QPX datasets are folders of `<prefix>.<view>.parquet` files (e.g.
-`PXD021013.feature.parquet`, `PXD021013.pg.parquet`, `PXD021013.dataset.parquet`). This app lets
-you browse, query interactively, and summarise that data **entirely on your machine** — you can
-open a single file, a dataset folder, a collection of many projects, or a remote S3 bucket.
+A **desktop viewer for [QPX](https://github.com/bigbio/qpx) (Quantitative Proteomics eXchange)
+data**. You can open a local file or folder, an S3 bucket, or any reanalysed dataset on the
+[quantms portal](https://portal.quantms.org). Each dataset gets a report with QC charts and
+statistics, plus protein and peptide search, a data browser and a SQL console.
+
+QPX datasets are folders of `<prefix>.<view>.parquet` files (`PXD014414.feature.parquet`,
+`PXD014414.pg.parquet`, `PXD014414.run.parquet`, …). QPX UI runs [DuckDB](https://duckdb.org)
+inside the app, so every query runs on your machine. Remote files are **streamed lazily**: only
+the parquet footer and the column chunks a query needs are fetched, never the whole file.
+
+Built with [Tauri v2](https://v2.tauri.app/) (Rust), Vue 3 + TypeScript + Vite, `duckdb-wasm` and ECharts.
+
+---
+
+## Contents
+
+- [Install](#install)
+- [Quick start](#quick-start)
+- [Features](#features)
+  - [Data sources](#data-sources)
+  - [Dataset report](#dataset-report)
+  - [Protein & peptide search](#protein--peptide-search)
+  - [Browse, summary & SQL](#browse-summary--sql)
+  - [PTMs, settings & export](#ptms-settings--export)
+- [Streaming from S3 and the portal](#streaming-from-s3-and-the-portal)
+- [Development](#development)
+- [Architecture](#architecture)
+- [Releasing](#releasing)
+- [Limitations](#limitations)
+- [License](#license)
 
 ---
 
@@ -18,222 +44,264 @@ Download the installer for your platform from the
 
 | Platform | File | Notes |
 |----------|------|-------|
-| macOS (Apple Silicon / Intel) | `qpxui_<version>_aarch64.dmg` / `_x64.dmg` | Open the `.dmg` and drag **qpxui** to Applications. |
-| Windows | `qpxui_<version>_x64-setup.exe` or `.msi` | Run the installer (uses the WebView2 runtime that ships with Windows 10/11). |
-| Linux | `.AppImage`, `.deb`, `.rpm` | `chmod +x *.AppImage && ./qpxui*.AppImage`, or install the `.deb`/`.rpm`. |
+| macOS, Apple Silicon | `qpxui_<version>_aarch64.dmg` | Open the `.dmg` and drag **qpxui** to Applications. |
+| macOS, Intel | `qpxui_<version>_x64.dmg` | Same as above. |
+| Windows 10/11 | `qpxui_<version>_x64-setup.exe` or `.msi` | Uses the WebView2 runtime that ships with Windows. |
+| Linux | `.AppImage`, `.deb`, `.rpm` | `chmod +x qpxui*.AppImage && ./qpxui*.AppImage`, or install the package. |
 
-> **macOS unsigned-app note:** the builds aren't notarized yet, so the first launch may say the
-> app "is damaged" or "can't be opened". Right-click the app → **Open**, or run
+> **macOS: the app is not notarized yet.** The first launch may say the app "is damaged" or
+> "can't be opened". Right-click the app → **Open**, or run
 > `xattr -dr com.apple.quarantine /Applications/qpxui.app`.
+
+---
+
+## Quick start
+
+1. Launch QPX UI and pick a source:
+   - **🌍 Quantms portal**: pick a reanalysed dataset (for example `PXD014414`), then press **⚡ Stream**.
+   - **🗂️ Folder / collection**: a folder with one dataset, or with many `PXD*/` dataset folders.
+   - **📄 Single file**: one `*.parquet` view; the files next to it are picked up too.
+   - **☁️ S3 bucket**: a bucket/prefix, read with your AWS credentials.
+2. The **dataset report** opens. Browse the tabs, or type a protein, gene or peptide into the
+   search box in the sidebar.
+3. Click any view in the sidebar (`feature`, `psm`, `pg`, …) to browse its rows, chart its columns,
+   or query it with SQL.
 
 ---
 
 ## Features
 
+### Data sources
+
 | Source | What it does |
 |--------|--------------|
-| **Single file** | Open one `*.parquet` view and its sibling views in the same folder. |
-| **Folder / collection** | Point at one QPX dataset folder, or a folder tree holding many projects (`PXD*/`). |
-| **S3 bucket** | List datasets in a bucket/prefix via your AWS credential chain, download the chosen parquet views to a local cache once, then query offline. |
+| **Single file** | Opens one `*.parquet` view plus its sibling views from the same folder. |
+| **Folder / collection** | Opens one QPX dataset folder, or a folder tree holding many projects. |
+| **S3 bucket** | Lists datasets under a bucket/prefix using your AWS credentials. You can stream the files lazily or download them to a local cache. S3-compatible stores (MinIO, Ceph) work too. |
+| **Quantms portal** | Searchable list of the datasets on [portal.quantms.org](https://portal.quantms.org) (title, organism, instrument, counts). You can stream a dataset lazily or download it to a local cache. No account needed. |
 
-For a loaded view you get three tabs:
+Downloads show progress and can be cancelled. While you stream, the sidebar shows how much of each
+file has actually been fetched (for example `⚡ 16 MB / 170 MB`).
 
-- **Browse** — paginated table (500 rows/page) with column sorting and a live `WHERE` filter.
-- **Summary** — auto-generated charts: charge/peptide distributions, top protein groups,
-  per-run counts, q-value distributions, plus a histogram for any numeric column.
-- **Query** — write **SQL** against the view (DuckDB dialect, the same engine the qpx CLI uses),
-  or run one of the quick-example queries.
+### Dataset report
 
-### Dataset report & search
+Selecting a dataset that has a `feature`, `psm` or `pg` view opens its report. It works like the
+portal's Dataset Explorer, but runs locally on any QPX data. You can also reach it from
+**📈 Report & search** in the sidebar.
 
-Selecting a dataset that has a `feature`, `psm` or `pg` view opens its **report** (also reachable
-from **📈 Report & search** in the sidebar). The header shows the project metadata, KPI cards and a
-**Cite this data** box (copy, BibTeX, RIS). Tabs appear only when the dataset has the data for them:
+- **Header**: title, description, organisms, instruments, enzymes, software, and PRIDE/PubMed
+  links. **Cite this data** copies a citation or saves it as BibTeX or RIS.
+- **Headline counts**: protein groups, peptides, features, PSMs, runs and samples.
 
-- **Overview** — identifications per run, charge, peptide length, missed cleavages, peptides per
-  protein group, precursor mass error, retention time, intensity, PEP and q-value distributions.
-- **QC** — per-run identifications, median intensity and mass error per run (to spot drift),
-  per-sample intensity boxplots (TMT channels mapped to samples via the run view), and a per-run table.
-- **PTMs** — modification landscape in your PTM colours, sites by residue, modifications per
-  peptide. Click a modification to list its peptides.
-- **Samples** — sample metadata facets and a filterable sample table.
-- **Proteins** — search by accession, protein or gene name. A detail pane shows UniProt links,
-  per-run evidence and the PTM-coloured peptides.
-- **Peptides** — sequence search (contains / starts with / exact, or peptidoform text such as
-  `M[Oxidation]`), with modification and charge filters and per-run evidence for each peptidoform.
+The report has these tabs. A tab only appears when the dataset has the data for it:
 
-The sidebar search box searches the selected dataset. An upper-case amino-acid string of 8 or more
-residues is treated as a peptide. Every chart and table exports to PNG/CSV. Queries read only the
-columns they need and leave out decoys, so streamed S3/portal datasets download just those column chunks.
+| Tab | Contents |
+|-----|----------|
+| **Overview** | Identifications per run. Distributions of precursor charge, peptide length, missed cleavages, peptides per protein group, precursor mass error (ppm), retention time, intensity, posterior error probability and peptide q-value. |
+| **QC** | Identifications per run (features, peptides, proteins, protein groups). Median intensity and median mass error per run, to spot loading or calibration drift. Intensity distribution per sample (TMT channels are matched to samples through the run view). A per-run table with sample, fraction and instrument. |
+| **PTMs** | How often each modification occurs (counted by peptidoforms, peptides or features), drawn in your PTM colours. Modified sites by residue, modifications per peptide, and a table; click a modification to list its peptides. |
+| **Samples** | Charts of the sample metadata (organism, tissue, disease, cell line, sex, …) and a filterable sample table showing which runs and channels each sample was measured in. |
+| **Proteins / Peptides** | Search; see below. |
+
+Statistics are computed over target rows only (decoys left out). Histograms show the central 99%
+of values, and the mass-error histogram also drops extreme outliers such as isotope-error matches.
+Results are cached, so switching tabs is instant.
+
+### Protein & peptide search
+
+- **Proteins**: search by accession, protein name or gene name (for example `P04637`, `ALBU`, `EGFR`).
+  The search runs on the protein-group (`pg`) view when there is one, and otherwise on the
+  proteins in the feature or PSM view. Clicking a protein shows:
+  - UniProt links, peptidoform, peptide and feature counts;
+  - a per-run evidence chart;
+  - its PTM-coloured peptides;
+  - its protein group in each run.
+- **Peptides**: search by sequence (*contains*, *starts with* or *exact*), or by peptidoform text
+  such as `M[Oxidation]` or `UNIMOD:21`. Filters for modification and minimum charge are available.
+  Clicking a peptidoform shows every observation of it (run, charge, RT, m/z, ppm, PEP, intensity),
+  and its protein links open the protein.
+- The **sidebar search box** searches the selected dataset. An upper-case amino-acid string of 8 or
+  more residues is searched as a peptide.
+
+### Browse, summary & SQL
+
+Click a view in the sidebar to work with its rows directly:
+
+- **Browse**: a table showing 500 rows per page, with column sorting and a live SQL `WHERE` filter.
+  Nested cells (lists and structs) can be expanded.
+- **Summary**: automatic charts per column, and a histogram for any numeric column.
+- **Query**: SQL (DuckDB dialect, the same engine as `qpxc query sql`) against the registered
+  views, with example queries to start from.
+
+### PTMs, settings & export
+
+- Peptides and peptidoforms are colour-coded by modification, with short codes and tooltips
+  (name, CV accession, residue, position).
+- **⚙ Settings**: dark or light theme, and a colour for each PTM, which every table and chart uses.
+- **Export**: every chart can be saved as PNG or CSV, and every table as CSV, through the system
+  save dialog.
+
+---
+
+## Streaming from S3 and the portal
+
+**⚡ Stream** queries files where they are stored, without downloading them:
+
+- The Rust backend runs a local HTTP range proxy on `127.0.0.1` (`src-tauri/src/commands/s3stream.rs`).
+- DuckDB reads only the parquet footer plus the column chunks and row groups each query touches.
+- The proxy fetches just those byte ranges, in 4 MB requests, 8 in parallel. It keeps them in a
+  512 MB in-memory cache of 256 KB blocks, so repeated queries don't refetch.
+- **S3**: requests are signed with the default AWS credential chain (environment variables,
+  `~/.aws/credentials`, SSO profile or IAM role). Credentials never reach the webview, and buckets
+  need no CORS setup.
+
+  ```bash
+  AWS_PROFILE=myprofile AWS_REGION=eu-west-1 open -a qpxui    # macOS
+  AWS_ENDPOINT_URL=http://localhost:9000 qpxui                # MinIO / S3-compatible
+  ```
+- **Portal**: the proxy follows the portal's redirect to a short-lived signed storage URL, and gets
+  a new one when it expires.
+
+**Download to cache** instead fetches whole files once (with progress and cancel), for fully
+offline use. Cached files are kept in the OS cache folder (`~/Library/Caches/qpxui/` on macOS,
+`~/.cache/qpxui/` on Linux, `%LOCALAPPDATA%\qpxui\` on Windows).
+
+---
+
+## Development
+
+**Prerequisites**
+
+- Node.js 20+ and npm
+- Rust (stable) via [rustup](https://rustup.rs)
+- Tauri system dependencies:
+  - macOS: Xcode Command Line Tools (`xcode-select --install`);
+  - Windows: [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/) and MSVC build tools;
+  - Linux: `libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf`
+    (see the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)).
+
+**Run and build**
+
+```bash
+npm install
+npm run tauri dev      # run the app with hot reload (also compiles the Rust backend)
+npm run tauri build    # installers for this platform → src-tauri/target/release/bundle/
+```
+
+**Checks** (the same ones CI runs on every PR):
+
+```bash
+npx vue-tsc --noEmit           # type-check the frontend
+npx vite build                 # build the frontend
+(cd src-tauri && cargo check)  # check the backend
+```
+
+**Sample data**
+
+```bash
+node scripts/fetch-sample.mjs   # small example feature/psm views → ./sample
+pip install "qpx[all]"          # or convert your own search results to QPX
+qpxc convert diann --report-path report.tsv --sdrf-file data.sdrf.tsv --output-folder ./sample/PXD000000
+```
+
+Many reanalysed datasets (e.g. `PXD014414`) can be opened directly with the **Quantms portal** source.
 
 ---
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│  WebView (Vue 3 + Vite + duckdb-wasm)                       │
-│  ┌────────────┐  ┌────────────┐  ┌────────────┐ ┌─────────┐ │
-│  │ SourcePicker│  │  Explorer  │  │  Summary   │ │  Query  │ │
-│  │ file/folder/│  │ (views)    │  │ (ECharts)  │ │  (SQL)  │ │
-│  │  S3         │  └─────┬──────┘  └─────┬──────┘ └────┬────┘ │
-│  └──────┬──────┘        │               │             │      │
-│         │   Tauri IPC (invoke)          │             │      │
-└─────────┼───────────────────────────────┼─────────────┼──────┘
-          ▼                               ▼             ▼
-┌──────────────────────────────────────────────────────────────┐
-│  Tauri (Rust) backend                                          │
-│  • open_file / scan_folder / scan_collection  (QPX discovery) │
-│  • read_file_bytes                         (base64 → bytes)   │
-│  • list_s3 / cache_s3_views  (aws-sdk-s3, rustls)             │
-└──────────────────────────────────────────────────────────────┘
-              (query engine: DuckDB runs inside the webview)
+┌───────────────────────────────────────────────────────────────────┐
+│ WebView: Vue 3 + duckdb-wasm + ECharts                            │
+│  SourcePicker · PortalPicker · S3Picker                           │
+│  DatasetExplorer (sidebar, search box)                            │
+│  ReportView ─ Overview · QC · PTMs · Samples · Proteins · Peptides│
+│  ViewPanel  ─ Browse · Summary · Query                            │
+│        all SQL runs here, in DuckDB (wasm)                        │
+└──────────────┬─────────────────────────────────┬──────────────────┘
+               │ Tauri IPC                        │ HTTP range reads
+┌──────────────▼─────────────────────────────────▼──────────────────┐
+│ Rust backend                                                      │
+│  sources.rs   QPX discovery (file / folder / collection)          │
+│  io.rs        read local files, write exports                     │
+│  s3.rs        list / download S3 objects (aws-sdk-s3, rustls)     │
+│  portal.rs    quantms portal registry, listing, downloads         │
+│  s3stream.rs  127.0.0.1 range proxy with block cache (S3 + HTTP)  │
+│  transfers.rs progress events and cancellation                    │
+└───────────────────────────────────────────────────────────────────┘
 ```
 
-Design notes:
-- **Local file access + S3** live in Rust; **all SQL / summarisation / charting** happens in the
-  webview with DuckDB, so queries are interactive and nothing leaves your machine (except the
-  one-time S3 downloads you explicitly trigger).
-- S3 views are downloaded into the OS cache dir (`~/Library/Caches/qpxui/s3-cache`), so
-  subsequent queries are offline.
-- The DuckDB WASM + worker binaries are bundled locally via Vite (no CDN) — the app works offline.
+Report queries are built in `src/lib/report.ts`:
 
----
+- They select only the columns they need and adapt to each dataset's schema: `anchor_protein`
+  vs `protein_accessions`, a struct- or list-typed `pg_accessions`, and LFQ or TMT `intensities`.
+- If the `sequence` column contains modification names, the plain sequence is derived from the
+  peptidoform instead.
 
-## Prerequisites
-
-- **Node.js 20+** and npm (or your preferred package manager)
-- **Rust** toolchain (rustup): `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
-- **Tauri system dependencies** — on macOS only Xcode Command Line Tools are needed
-  (`xcode-select --install`). On Windows install [WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/);
-  on Linux the [webkit2gtk stack](https://v2.tauri.app/start/prerequisites/).
-
----
-
-## Getting started
-
-```bash
-# 1. install JS deps
-npm install
-
-# 2. build & run the desktop app (compiles the Rust backend too)
-npm run tauri dev
-```
-
-To produce a distributable bundle (`.app` / `.msi` / `.deb`…):
-
-```bash
-npm run tauri build
-```
-
-The bundled binaries are written to `src-tauri/target/release/bundle/`.
-
----
-
-## Getting sample QPX data
-
-Any of these give you real parquet views to play with:
-
-```bash
-# (a) quick: a tiny example dataset shipped with this repo
-node scripts/fetch-sample.mjs        # downloads a small PXD example folder into ./sample
-
-# (b) convert your own MaxQuant / DIA-NN / Spectronaut output:
-pip install "qpx[all]"
-qpxc convert diann --report-path report.tsv --sdrf-file data.sdrf.tsv --output-folder ./sample/PXD000000
-qpxc convert maxquant --msms-file msms.txt --output-folder ./sample/PXD000000
-```
-
-> Pre-converted datasets (e.g. `PXD014414`) are also published through the
-> [quantms QPX explore](https://portal.quantms.org/apps/qpx-explore) portal — download the
-> folder's `*.parquet` files into one directory and open that directory in the app.
-
----
-
-## S3 usage
-
-The S3 mode uses the **default AWS credential chain** (env vars, `~/.aws/credentials`, or an IAM
-role — as configured for the AWS SDK). Example:
-
-```
-AWS_PROFILE=myprod AWS_REGION=eu-west-1 npm run tauri dev
-```
-
-In the app: **New source → S3 bucket**, enter the bucket name and an optional prefix, click
-**List**, tick the views you want, then choose:
-
-- **⚡ Stream (lazy, no download)**: query the files in place. The Rust backend runs a
-  `127.0.0.1` HTTP range proxy (`src-tauri/src/commands/s3stream.rs`). DuckDB reads only the
-  parquet footer plus the column chunks / row groups each query touches, and the proxy fetches
-  just those byte ranges from S3 with your credentials, keeping them in a 512 MB in-memory block
-  cache. Buckets need no CORS setup, and credentials never reach the webview. The sidebar shows
-  how much of each file has actually been fetched (e.g. `⚡ 16 MB / 170 MB`).
-- **Download to cache**: fetch whole files once (with progress + cancel) for fully offline use.
-
-S3-compatible stores (MinIO, Ceph, …) work via `AWS_ENDPOINT_URL=http://host:9000`.
-
-The **quantms portal** source has the same two buttons. Streaming portal files goes through the
-same proxy: it follows the portal's redirect to a short-lived signed storage URL (and re-resolves
-it when it expires), then fetches only the byte ranges each query needs. No credentials needed.
-Large reads are split into 4 MB range requests fetched 8 at a time.
-
----
-
-## Notes & limitations
-
-- The reference qpx query engine is DuckDB; this app uses DuckDB too, so `SELECT`, aggregations,
-  `list/struct` slicing, etc. behave like `qpxc query sql`.
-- Matrices in AnnData/HDF5 format (`.ae.h5ad`, `.de.h5ad`, `.h5mu`) are listed but not yet
-  rendered — the current viewer focuses on the Parquet views. That can be extended later.
-- Large views (especially `mz`/spectra) are loaded into the webview's memory when queried; for
-  very large files the DuckDB WASM engine may be limited. Paging/Browse helps keep memory in check.
-- Icons are generated from `src-tauri/icons/icon-source.png` (drawn by `scripts/make-icon.py`)
-  with `npx tauri icon src-tauri/icons/icon-source.png`.
-
-## Releasing
-
-Push a version tag. The `Release` GitHub Actions workflow then builds the macOS (arm64 + x64),
-Windows and Linux installers and attaches them to a draft release:
-
-```bash
-git tag v0.1.0 && git push origin v0.1.0
-```
-
----
-
-## Project layout
+<details>
+<summary>Project layout</summary>
 
 ```
 qpxui/
-├── index.html
-├── vite.config.ts
 ├── src/
-│   ├── App.vue                  # shell: topbar + sidebar + panel
-│   ├── store.ts                 # reactive app state
+│   ├── App.vue                    # shell: top bar, sidebar, main panel
+│   ├── store.ts                   # app state (datasets, page, report tab, search)
 │   ├── lib/
-│   │   ├── api.ts               # Tauri IPC wrappers + types
-│   │   └── duck.ts              # DuckDB init + query helpers
+│   │   ├── api.ts                 # Tauri IPC wrappers + types
+│   │   ├── duck.ts                # DuckDB init, view registration, queries
+│   │   ├── report.ts              # report SQL helpers, dataset table registry, search
+│   │   ├── charts.ts              # ECharts option builder, CSV export
+│   │   ├── export.ts              # save dialog helpers (PNG / CSV / BibTeX)
+│   │   ├── ptm.ts, settings.ts    # PTM parsing/colours, theme + settings
+│   │   └── useSlots.ts            # sequential chart loading with progress
 │   └── components/
-│       ├── SourcePicker.vue     # open file / folder / collection
-│       ├── S3Picker.vue         # S3 list + load
-│       ├── DatasetExplorer.vue  # sidebar: datasets + views
-│       ├── ViewPanel.vue        # tabs: Browse / Summary / Query
-│       ├── DataTable.vue        # paginated, sortable table w/ WHERE
-│       ├── SummaryView.vue      # auto-summary charts (ECharts)
-│       └── QueryView.vue        # SQL editor + results
-├── scripts/
-│   └── fetch-sample.mjs         # downloads a small example dataset
-└── src-tauri/
-    ├── Cargo.toml
-    ├── tauri.conf.json
-    ├── capabilities/default.json
-    ├── icons/icon.png
-    └── src/
-        ├── main.rs / lib.rs     # Tauri bootstrap
-        ├── qpx/mod.rs           # QPX filename/discovery logic
-        └── commands/            # Rust commands (sources, io, s3)
+│       ├── ReportView.vue         # report header, counts, citation, tabs
+│       ├── report/                # Overview, QC, PTMs, Samples, Proteins, Peptides
+│       ├── ChartCard.vue, ReportTable.vue, PeptideSeq.vue
+│       ├── SourcePicker.vue, PortalPicker.vue, S3Picker.vue
+│       ├── DatasetExplorer.vue    # sidebar: search, datasets, views
+│       ├── ViewPanel.vue, DataTable.vue, SummaryView.vue, QueryView.vue
+│       └── SettingsPanel.vue, StructuredView.vue, PTMTip.vue
+├── src-tauri/
+│   ├── tauri.conf.json, Cargo.toml, capabilities/
+│   └── src/{lib.rs, qpx/, commands/}
+├── scripts/                       # fetch-sample.mjs, make-icon.py
+└── .github/workflows/             # ci.yml (PR checks), release.yml (installers)
 ```
+</details>
+
+---
+
+## Releasing
+
+1. Bump the version in `package.json`, `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`.
+2. Merge to `main`, then push a tag:
+
+   ```bash
+   git tag v0.1.1 && git push origin v0.1.1
+   ```
+
+3. The **Release** workflow builds:
+   - macOS arm64 and x64 (both on Apple Silicon runners; x64 is cross-compiled);
+   - Windows x64;
+   - Linux x64.
+
+   It attaches the installers to a **draft** release. Review the draft and publish it.
+
+App icons are generated from `src-tauri/icons/icon-source.png` (drawn by `scripts/make-icon.py`)
+with `npx tauri icon src-tauri/icons/icon-source.png`.
+
+---
+
+## Limitations
+
+- AnnData/HDF5 matrices (`.ae.h5ad`, `.de.h5ad`, `.h5mu`) are listed but not yet rendered; the
+  viewer focuses on the Parquet views.
+- Local files are loaded into the webview's memory when first queried. Very large local views
+  (e.g. spectra in `mz`) may hit the limits of DuckDB-wasm, so streaming is preferable for big
+  remote files.
+- The builds are not code-signed yet (see the macOS note under [Install](#install)).
 
 ## License
 
-Apache-2.0.
+[Apache-2.0](LICENSE)
