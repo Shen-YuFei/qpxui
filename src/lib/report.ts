@@ -275,6 +275,28 @@ export function listText(v: unknown, max = 3): string {
   return String(v);
 }
 
+/** SQL pieces that map a run (`x.r`) and channel label (`x.i.label`) to a
+ * sample through the run view: by (run, label) for multiplexed data, by run
+ * alone when the run holds a single sample (label-free labels rarely match).
+ * `ctes` continues a `WITH x AS (…)`, `joins` follows `FROM x`, and `col`
+ * names the sample, falling back to the run (and channel). The joins are
+ * aliased `m` (run, label) and `m1` (single-sample run). */
+export function sampleMapSql(run: TableRef | undefined): { ctes: string; joins: string; col: string; mapped: boolean } {
+  const R = run?.cols.has("samples") ? run : undefined;
+  // Channel names differ between converters ("TMT131" vs "TMT131N", case, spaces).
+  const norm = (e: string) => `regexp_replace(upper(replace(${e}, ' ', '')), '^TMT131N$', 'TMT131')`;
+  const fallback = `CASE WHEN x.i.label IS NULL OR x.i.label IN ('LFQ', 'label free sample') THEN x.r ELSE x.r || ' · ' || x.i.label END`;
+  if (!R) return { ctes: "", joins: "", col: fallback, mapped: false };
+  return {
+    ctes: `, m AS (SELECT run_file_name AS r, ${norm("s.label")} AS l, min(s.sample_accession) AS sa
+              FROM (SELECT run_file_name, unnest(samples) AS s FROM ${ident(R.table)}) GROUP BY 1, 2),
+         m1 AS (SELECT r, min(sa) AS sa FROM m GROUP BY r HAVING count(DISTINCT sa) = 1)`,
+    joins: `LEFT JOIN m ON m.r = x.r AND m.l = ${norm("x.i.label")} LEFT JOIN m1 ON m1.r = x.r`,
+    col: `coalesce(m.sa, m1.sa, ${fallback})`,
+    mapped: true,
+  };
+}
+
 /** Column definition for ReportTable. */
 export interface Column {
   key: string;
