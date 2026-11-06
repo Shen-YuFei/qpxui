@@ -16,6 +16,8 @@ the parquet footer and the column chunks a query needs are fetched, never the wh
 
 Built with [Tauri v2](https://v2.tauri.app/) (Rust), Vue 3 + TypeScript + Vite, `duckdb-wasm` and ECharts.
 
+![Dataset report for PXD014414: headline counts and identification QC](docs/screenshots/report-overview.png)
+
 ---
 
 ## Contents
@@ -25,6 +27,7 @@ Built with [Tauri v2](https://v2.tauri.app/) (Rust), Vue 3 + TypeScript + Vite, 
 - [Features](#features)
   - [Data sources](#data-sources)
   - [Dataset report](#dataset-report)
+  - [Quantification](#quantification)
   - [Protein & peptide search](#protein--peptide-search)
   - [Spectrum viewer](#spectrum-viewer)
   - [Browse, summary & SQL](#browse-summary--sql)
@@ -102,11 +105,33 @@ The report has these tabs. A tab only appears when the dataset has the data for 
 | **QC** | Identifications per run (features, peptides, proteins, protein groups). Median intensity and median mass error per run, to spot loading or calibration drift. Intensity distribution per sample (TMT channels are matched to samples through the run view). A per-run table with sample, fraction and instrument. |
 | **PTMs** | How often each modification occurs (counted by peptidoforms, peptides or features), drawn in your PTM colours. Modified sites by residue, modifications per peptide, and a table; click a modification to list its peptides. |
 | **Samples** | Charts of the sample metadata (organism, tissue, disease, cell line, sex, …) and a filterable sample table showing which runs and channels each sample was measured in. |
-| **Proteins / Peptides** | Search; see below. |
+| **Proteins / Peptidoforms** | Search; see below. |
+| **Quantification** | Protein × sample abundance matrix, sample correlation, PCA and per-protein profiles; see below. |
 
 Statistics are computed over target rows only (decoys left out). Histograms show the central 99%
 of values, and the mass-error histogram also drops extreme outliers such as isotope-error matches.
 Results are cached, so switching tabs is instant.
+
+![QC tab: identifications, median intensity and mass error per run, intensity per sample](docs/screenshots/report-qc.png)
+
+### Quantification
+
+The **Quantification** tab appears when the `pg` view (or, failing that, the `feature` view) has
+`intensities`. It builds a protein × sample matrix of log2 abundances:
+
+- **Source**: protein-group intensities from `pg`, or feature intensities summed per anchor protein.
+- **Columns**: run channels are mapped to samples through the run view's `samples` (TMT/iTRAQ
+  channels are matched by label, fractions are summed); otherwise there is one column per run.
+- **Options**: median normalisation, include/exclude contaminants, the minimum fraction of samples
+  a protein must be quantified in, and **colour by** a sample attribute (disease, tissue, …).
+- **Charts**: abundance distribution and proteins quantified per sample; a Pearson **sample
+  correlation** heatmap ordered by average-linkage clustering; **PCA** with selectable components and
+  variance explained.
+- **Abundance profile**: pick a protein from the table to see its abundance in every sample,
+  coloured by group, with group means.
+- **Export**: every chart as PNG/CSV, and the whole log2 matrix as CSV (**Matrix CSV**).
+
+![Quantification tab: sample correlation, PCA coloured by disease and a protein abundance profile](docs/screenshots/quantification.png)
 
 ### Protein & peptide search
 
@@ -115,12 +140,15 @@ Results are cached, so switching tabs is instant.
   proteins in the feature or PSM view. Clicking a protein shows:
   - UniProt links, peptidoform, peptide and feature counts;
   - a per-run evidence chart;
-  - its PTM-coloured peptides;
+  - its PTM-coloured peptidoforms;
   - its protein group in each run.
-- **Peptides**: search by sequence (*contains*, *starts with* or *exact*), or by peptidoform text
+- **Peptidoforms**: search by sequence (*contains*, *starts with* or *exact*), or by peptidoform text
   such as `M[Oxidation]` or `UNIMOD:21`. Filters for modification and minimum charge are available.
   Clicking a peptidoform shows every observation of it (run, charge, RT, m/z, ppm, PEP, intensity),
   and its protein links open the protein.
+
+![Protein view: per-run evidence, PTM-coloured peptidoforms and the protein group in each run](docs/screenshots/protein.png)
+
 - The **sidebar search box** searches the selected dataset. An upper-case amino-acid string of 8 or
   more residues is searched as a peptide.
 
@@ -135,7 +163,20 @@ PSMs, and clicking one opens an annotated spectrum in the style of the PRIDE USI
 - annotations either **from the file** (spectrum_utils labels stored in `ion_type_array`) or
   **computed** here, with an adjustable tolerance (ppm or Da), fragment charge and H₂O/NH₃ losses;
 - the PSM's USI (`mzspec:PXD…:run:scan:N:peptidoform/z`), with a link to the PRIDE USI viewer;
+- **mirror spectra** to check an identification against a reference drawn upside down:
+  - another PSM of the same peptidoform;
+  - a predicted spectrum from [Koina](https://koina.wilhelmlab.org) (Prosit 2020 HCD,
+    AlphaPeptDeep, MS²PIP; the model is picked from the peptidoform's modifications);
+  - any spectrum by USI, fetched from PRIDE PROXI (ProteomeCentral as fallback);
+  - the theoretical b/y ladder.
+
+  Matched peaks are scored with the cosine of square-root intensities and the normalised spectral
+  angle;
 - PNG and CSV (peaks + annotations) export.
+
+![Spectrum viewer: annotated PSM mirrored against a Prosit prediction (cosine 0.71)](docs/screenshots/spectrum-mirror.png)
+
+Predictions and USI lookups need internet access; everything else is local.
 
 Only the selected PSM's row is read, so this also works on large streamed files. Whether a file
 has spectra is decided from the parquet footer statistics. π-MSNet file names
@@ -233,7 +274,8 @@ Many reanalysed datasets (e.g. `PXD014414`) can be opened directly with the **Qu
 │ WebView: Vue 3 + duckdb-wasm + ECharts                            │
 │  SourcePicker · PortalPicker · S3Picker                           │
 │  DatasetExplorer (sidebar, search box)                            │
-│  ReportView ─ Overview · QC · PTMs · Samples · Proteins · Peptides│
+│  ReportView ─ Overview · QC · PTMs · Samples · Proteins ·         │
+│               Quantification · Peptidoforms · SpectrumViewer      │
 │  ViewPanel  ─ Browse · Summary · Query                            │
 │        all SQL runs here, in DuckDB (wasm)                        │
 └──────────────┬─────────────────────────────────┬──────────────────┘
@@ -269,12 +311,16 @@ qpxui/
 │   │   ├── duck.ts                # DuckDB init, view registration, queries
 │   │   ├── report.ts              # report SQL helpers, dataset table registry, search
 │   │   ├── charts.ts              # ECharts option builder, CSV export
+│   │   ├── quant.ts               # normalisation, correlation, clustering, PCA
+│   │   ├── fragments.ts           # peptidoform parsing, fragment ions, annotation
+│   │   ├── mirror.ts              # Koina predictions, PROXI/USI, spectrum similarity
 │   │   ├── export.ts              # save dialog helpers (PNG / CSV / BibTeX)
 │   │   ├── ptm.ts, settings.ts    # PTM parsing/colours, theme + settings
 │   │   └── useSlots.ts            # sequential chart loading with progress
 │   └── components/
 │       ├── ReportView.vue         # report header, counts, citation, tabs
-│       ├── report/                # Overview, QC, PTMs, Samples, Proteins, Peptides
+│       ├── report/                # Overview, QC, PTMs, Samples, Proteins, Quant, Peptides
+│       ├── SpectrumViewer.vue     # annotated spectrum + mirror
 │       ├── ChartCard.vue, ReportTable.vue, PeptideSeq.vue
 │       ├── SourcePicker.vue, PortalPicker.vue, S3Picker.vue
 │       ├── DatasetExplorer.vue    # sidebar: search, datasets, views
@@ -296,7 +342,7 @@ qpxui/
 2. Merge to `main`, then push a tag:
 
    ```bash
-   git tag v0.1.1 && git push origin v0.1.1
+   git tag v0.2.0 && git push origin v0.2.0
    ```
 
 3. The **Release** workflow builds:

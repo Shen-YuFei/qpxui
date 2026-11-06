@@ -111,7 +111,8 @@ const spectraCache = new Map<string, Promise<boolean>>();
  * from the parquet footer statistics, so no column data is read. */
 export function hasSpectra(ref: TableRef | undefined): Promise<boolean> {
   if (!ref || !ref.cols.has("mz_array") || !ref.cols.has("intensity_array")) return Promise.resolve(false);
-  let p = spectraCache.get(ref.table);
+  const key = ref.view.path;
+  let p = spectraCache.get(key);
   if (!p) {
     p = (async () => {
       try {
@@ -127,8 +128,8 @@ export function hasSpectra(ref: TableRef | undefined): Promise<boolean> {
       const r = await runSql(`SELECT 1 FROM ${ident(ref.table)} WHERE len(mz_array) > 0 LIMIT 1`, 1);
       return r.rows.length > 0;
     })();
-    p.catch(() => spectraCache.delete(ref.table));
-    spectraCache.set(ref.table, p);
+    p.catch(() => spectraCache.delete(key));
+    spectraCache.set(key, p);
   }
   return p;
 }

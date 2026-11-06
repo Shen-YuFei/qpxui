@@ -36,13 +36,15 @@ jobs:
         # (libwebkit2gtk); fail fast on a stalled download and retry.
         run: |
           APT="-o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          PKGS="libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf"
+          # Only the download is time-limited: killing dpkg mid-install would break the retries.
           for i in 1 2 3; do
             sudo apt-get $APT update &&
-            timeout 300 sudo apt-get $APT install -y --no-install-recommends \
-              libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf && break
+            timeout 300 sudo apt-get $APT install -y --download-only --no-install-recommends $PKGS && break
             [ "$i" = 3 ] && exit 1
             echo "apt attempt $i failed, retrying"; sleep 15
           done
+          sudo apt-get $APT install -y --no-install-recommends $PKGS
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
         with:

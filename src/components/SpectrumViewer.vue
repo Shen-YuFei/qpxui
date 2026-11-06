@@ -81,7 +81,7 @@ const cv = computed<Record<string, string>>(() => cvMap(rec.value?.cv_params));
 
 const tol = computed<Tolerance>(() => ({ value: Number(tolValue.value) || 20, unit: tolUnit.value }));
 const ions = computed(() =>
-  fragmentIons(parsed.value, source.value === "file" ? Math.max(charge.value, 1) : maxCharge.value, losses.value || source.value === "file")
+  fragmentIons(parsed.value, source.value === "file" ? Math.max(charge.value, 1) : maxCharge.value, losses.value || source.value === "file", source.value === "file")
 );
 
 const peaks = computed<Peak[]>(() => {
@@ -186,7 +186,7 @@ async function loadMirror() {
     }
     if (!ctrl.signal.aborted) mirror.value = out;
   } catch (e: any) {
-    if (e?.name !== "AbortError") mirrorError.value = String(e?.message ?? e);
+    if (e?.name !== "AbortError" && !ctrl.signal.aborted) mirrorError.value = String(e?.message ?? e);
   } finally {
     if (mirrorAbort === ctrl) mirrorBusy.value = false;
   }
@@ -216,8 +216,12 @@ watch(mirrorMode, (m) => {
 watch([koinaModel, otherIdx], () => {
   if (mirrorMode.value === "predicted" || mirrorMode.value === "psm") loadMirror();
 });
+// Debounced: typing a tolerance must not refetch the USI on every keystroke.
+let tolTimer = 0;
 watch(tol, () => {
-  if (mirrorMode.value === "psm" || mirrorMode.value === "usi") loadMirror();
+  if (mirrorMode.value !== "psm" && mirrorMode.value !== "usi") return;
+  window.clearTimeout(tolTimer);
+  tolTimer = window.setTimeout(loadMirror, 600);
 });
 const proforma = computed(() => toProForma(parsed.value));
 
@@ -290,7 +294,7 @@ const option = computed(() => {
   const mmi = mir.reduce((m, p) => Math.max(m, p.intensity), 0) || 1;
   const mpts = mir.map((p, i) => ({ p, i, rel: -(p.intensity / mmi) * 100 }));
   const hasMirror = mpts.length > 0;
-  const xMax = Math.max(...peaks.value.map((p) => p.mz), ...mir.map((p) => p.mz), theoMz.value) * 1.04;
+  const xMax = [...peaks.value, ...mir].reduce((m, p) => Math.max(m, p.mz), theoMz.value) * 1.04;
 
   const stick = (name: string, color: string, sel: typeof pts) => ({
     name,
@@ -330,7 +334,8 @@ const option = computed(() => {
     idx: x.i,
     itemStyle: { color: colorOf(x.p) },
   }));
-  const errMax = Math.max(tol.value.value, ...errs.map((e) => Math.abs(Number(e.value[1])))) * 1.1;
+  const tolShown = source.value === "file" ? (tolUnit.value === "Da" ? 0.02 : 20) : tol.value.value;
+  const errMax = errs.reduce((m, e) => Math.max(m, Math.abs(Number(e.value[1]))), tolShown) * 1.1;
 
   return {
     animation: false,
@@ -440,7 +445,9 @@ function where(): string {
   return parts.join(" AND ");
 }
 
+let loadSeq = 0;
 async function load() {
+  const id = ++loadSeq;
   loading.value = true;
   error.value = "";
   try {
@@ -448,6 +455,7 @@ async function load() {
     const want = ["peptidoform", "charge", "run_file_name", "scan", "calculated_mz", "observed_mz", "posterior_error_probability",
       "rt", "cv_params", "mz_array", "intensity_array", "charge_array", "ion_type_array"].filter((c) => P.cols.has(c));
     const r = await runSql(`SELECT ${want.map(ident).join(", ")} FROM ${ident(P.table)} WHERE ${where()} LIMIT 1`, 1);
+    if (id !== loadSeq) return;
     const row = objects(r)[0];
     if (!row) throw new Error("PSM not found in the psm view.");
     if (!Array.isArray(row.mz_array) || !row.mz_array.length) throw new Error("This PSM has no stored peaks (mz_array is empty).");
@@ -460,16 +468,16 @@ async function load() {
     maxCharge.value = Math.max(1, Math.min(2, z - 1));
     source.value = Array.isArray(row.ion_type_array) && row.ion_type_array.some((x: unknown) => x) ? "file" : "computed";
     const analyzer = String(cvOf(row, "mass analyzer") ?? "");
-    if (/ITMS|ion trap/i.test(analyzer)) {
-      tolValue.value = 0.5;
-      tolUnit.value = "Da";
-    }
+    const trap = /ITMS|ion trap/i.test(analyzer);
+    tolValue.value = trap ? 0.5 : 20;
+    tolUnit.value = trap ? "Da" : "ppm";
+    if (mirrorMode.value === "usi") usiInput.value = usi.value;
   } catch (e: any) {
-    error.value = String(e?.message ?? e);
+    if (id === loadSeq) error.value = String(e?.message ?? e);
   } finally {
-    loading.value = false;
+    if (id === loadSeq) loading.value = false;
   }
-  if (rec.value) loadMirror();
+  if (id === loadSeq && rec.value) loadMirror();
 }
 
 /** `cv_params` as name -> value. Files store it as a list of

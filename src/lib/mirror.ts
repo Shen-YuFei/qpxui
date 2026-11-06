@@ -63,7 +63,7 @@ const KOINA_URL = "https://koina.wilhelmlab.org/v2/models";
 /** ProForma with UNIMOD accessions for a model, or a reason it cannot be predicted. */
 export function koinaSequence(p: ParsedPeptide, model: KoinaModel): { seq?: string; why?: string } {
   if (p.residues.length > model.maxLen) return { why: `${model.label} supports peptides up to ${model.maxLen} residues` };
-  if (p.cterm !== 0) return { why: `${model.label} does not support C-terminal modifications` };
+  if (p.ctermNames.length) return { why: `${model.label} does not support C-terminal modifications` };
   const ids = (names: string[]) => names.map((n) => [n, modUnimodId(n)] as const);
   let nt = "";
   for (const [name, id] of ids(p.ntermNames)) {
@@ -144,7 +144,8 @@ const PROXI = [
 
 /** Peptidoform and charge interpretation at the end of a USI, if present. */
 export function usiInterpretation(usi: string): { peptidoform: string; charge: number } | null {
-  const m = /:([^:]+)\/(\d+)$/.exec(usi.trim());
+  // The peptidoform may itself contain colons ("[UNIMOD:35]").
+  const m = /^mzspec:[^:]+:[^:]+:(?:scan|index|nativeId):[^:]+:(.+)\/(\d+)$/i.exec(usi.trim());
   return m ? { peptidoform: m[1], charge: Number(m[2]) } : null;
 }
 
@@ -161,7 +162,7 @@ export async function fetchUsi(
       const body = await res.json().catch(() => null);
       const sp = Array.isArray(body) ? body[0] : null;
       if (!res.ok || !sp?.mzs?.length) {
-        errs.push(`${new URL(base).host}: ${body?.title ?? body?.detail ?? res.statusText ?? "no spectrum"}`);
+        errs.push(`${new URL(base).host}: ${body?.title || body?.detail || (res.ok ? "no spectrum" : res.statusText || `HTTP ${res.status}`)}`);
         continue;
       }
       const mz = (sp.mzs as unknown[]).map(Number);
@@ -200,8 +201,9 @@ export function theoretical(p: ParsedPeptide, maxCharge: number): MirrorSpectrum
 export function similarity(a: Peak[], b: Peak[], tol: Tolerance): { cosine: number; angle: number; matched: number } {
   const A = a.map((p) => ({ mz: p.mz, w: Math.sqrt(Math.max(p.intensity, 0)) }));
   const B = b.map((p) => ({ mz: p.mz, w: Math.sqrt(Math.max(p.intensity, 0)) }));
-  const na = Math.hypot(...A.map((x) => x.w));
-  const nb = Math.hypot(...B.map((x) => x.w));
+  const norm = (xs: { w: number }[]) => Math.sqrt(xs.reduce((s, x) => s + x.w * x.w, 0));
+  const na = norm(A);
+  const nb = norm(B);
   if (!na || !nb) return { cosine: 0, angle: 0, matched: 0 };
   const pairs: [number, number, number][] = [];
   const sortedB = B.map((x, j) => ({ ...x, j })).sort((x, y) => x.mz - y.mz);
