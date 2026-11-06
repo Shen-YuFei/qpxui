@@ -54,13 +54,7 @@ const scan = computed(() => {
   const s = rec.value?.scan ?? props.target.scan;
   return Array.isArray(s) ? s[0] : s;
 });
-const cv = computed<Record<string, string>>(() => {
-  const out: Record<string, string> = {};
-  for (const p of (rec.value?.cv_params ?? []) as { cv_name?: string; cv_value?: string }[]) {
-    if (p?.cv_name) out[p.cv_name] = String(p.cv_value ?? "");
-  }
-  return out;
-});
+const cv = computed<Record<string, string>>(() => cvMap(rec.value?.cv_params));
 
 const tol = computed<Tolerance>(() => ({ value: Number(tolValue.value) || 20, unit: tolUnit.value }));
 const ions = computed(() =>
@@ -309,8 +303,46 @@ async function load() {
   }
 }
 
+/** `cv_params` as name -> value. Files store it as a list of
+ * {cv_name, cv_value} structs, a MAP, a plain struct or a JSON string. */
+function cvMap(raw: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  let v = raw;
+  if (typeof v === "string") {
+    try {
+      v = JSON.parse(v);
+    } catch {
+      return out;
+    }
+  }
+  if (Array.isArray(v)) {
+    for (const p of v as any[]) {
+      if (!p || typeof p !== "object") continue;
+      const k = p.cv_name ?? p.name ?? p.key;
+      if (k != null) out[String(k)] = String(p.cv_value ?? p.value ?? "");
+    }
+  } else if (v && typeof v === "object") {
+    for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+      if (x != null && typeof x !== "object") out[k] = String(x);
+    }
+  }
+  const norm: Record<string, string> = {};
+  for (const [k, x] of Object.entries(out)) {
+    const lk = k.toLowerCase();
+    norm[CV_ALIASES[lk] ?? lk] = x;
+  }
+  return norm;
+}
+
+// Equivalent cv_params keys across converters (π-MSNet uses PSI-MS names,
+// quantms uses short struct field names).
+const CV_ALIASES: Record<string, string> = {
+  "fragmentation method": "dissociation method",
+  "collision energy": "normalized collision energy",
+};
+
 function cvOf(row: Record<string, any>, name: string): string | undefined {
-  return ((row.cv_params ?? []) as { cv_name?: string; cv_value?: string }[]).find((p) => p?.cv_name === name)?.cv_value;
+  return cvMap(row.cv_params)[name];
 }
 
 function flash(t: string) {

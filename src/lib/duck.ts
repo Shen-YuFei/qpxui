@@ -175,6 +175,20 @@ function normalize(v: unknown): unknown {
     }
     return normalize(arr);
   }
+  if (v instanceof Map) {
+    const out: Record<string, unknown> = {};
+    for (const [k, val] of v) out[String(k)] = normalize(val);
+    return out;
+  }
+  // Arrow rows (StructRow / MapRow) expose toJSON() with the real fields.
+  if (typeof (v as { toJSON?: unknown }).toJSON === "function" && !(v instanceof Date)) {
+    try {
+      const j = (v as { toJSON: () => unknown }).toJSON();
+      if (j !== v) return normalize(j);
+    } catch {
+      /* fall through */
+    }
+  }
   // Typed arrays (Float64Array, Int32Array, …) have numeric-ish elements.
   if (ArrayBuffer.isView(v)) {
     return Array.from(v as unknown as ArrayLike<number>);
