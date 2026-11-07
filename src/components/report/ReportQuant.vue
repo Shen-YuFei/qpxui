@@ -2,7 +2,7 @@
 // Quantification: protein x sample abundance matrix built from the pg view
 // (or features summed per anchor protein), with intensity distributions,
 // sample-sample correlation, PCA and a per-protein abundance profile.
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import ChartCard from "../ChartCard.vue";
 import ReportTable from "../ReportTable.vue";
 import type { DatasetInfo } from "../../lib/api";
@@ -10,6 +10,8 @@ import { SERIES_COLORS, chartTheme, commonPrefix, escapeHtml, toCsv, type ChartS
 import { settings } from "../../lib/settings";
 import { saveText } from "../../lib/export";
 import { state } from "../../store";
+import { useLargeGate } from "../../lib/useLargeGate";
+import LargeGate from "./LargeGate.vue";
 import {
   cachedSql,
   ident,
@@ -45,6 +47,8 @@ const src: TableRef | undefined = hasInt(props.t.pg) ? props.t.pg : hasInt(props
 const srcKind = src === props.t.pg ? "pg" : "feature";
 
 const busy = ref(true);
+const { gate, check, release, dispose } = useLargeGate();
+onUnmounted(dispose);
 const error = ref("");
 const raw = ref<QuantMatrix | null>(null);
 const contaminant = ref<Uint8Array>(new Uint8Array());
@@ -86,8 +90,14 @@ WHERE x.i.intensity > 0
 GROUP BY x.p, col`;
 }
 
-onMounted(async () => {
+onMounted(() => {
   if (!src) return;
+  check([{ ref: src, cols: ["is_decoy", "anchor_protein", "protein_accessions", "pg_accessions", "gg_names", "run_file_name", "contaminant", "intensities"] }], build);
+});
+
+async function build() {
+  if (!src) return;
+  busy.value = true;
   try {
     const r = await cachedSql(props.ds, `quant.${srcKind}`, matrixSql(src), 5_000_000);
     if (r.truncated) truncated.value = true;
@@ -139,7 +149,7 @@ onMounted(async () => {
   } finally {
     busy.value = false;
   }
-});
+}
 
 /** Matrix after the contaminant filter and normalisation. */
 const matrix = computed<QuantMatrix | null>(() => {
@@ -537,6 +547,8 @@ const sourceText = computed(() => {
   <div>
     <div v-if="!src" class="muted pad">This dataset has no quantitative intensities (pg or feature view with <code>intensities</code>).</div>
     <div v-else-if="error" class="error pad">⚠ {{ error }}</div>
+    <div v-else-if="gate.checking" class="muted pad"><span class="spinner"></span></div>
+    <LargeGate v-else-if="gate.blocked" :bytes="gate.bytes" :size="gate.size" what="Building the protein × sample matrix" @go="release" />
     <div v-else-if="busy" class="muted pad">Building the protein × sample matrix… <span class="spinner"></span></div>
     <template v-else-if="matrix">
       <div class="bar">

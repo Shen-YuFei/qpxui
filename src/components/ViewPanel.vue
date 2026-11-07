@@ -11,19 +11,25 @@ const ready = ref<Record<string, boolean>>({});
 const loadingView = ref(false);
 const error = ref("");
 
+let seq = 0;
 async function activate() {
   const view = state.selectedView;
   if (!view) return;
+  const my = ++seq;
   tab.value = "browse";
   loadingView.value = true;
   error.value = "";
   try {
     await ensureViewReady(view);
+    if (my !== seq) return; // switched away while we were opening
     ready.value[view.path] = true;
   } catch (e: any) {
+    if (my !== seq) return;
+    // A switch abandoned this open; don't show "cancelled" over the new view.
+    if (String(e).includes("cancelled")) return;
     error.value = String(e);
   } finally {
-    loadingView.value = false;
+    if (my === seq) loadingView.value = false;
   }
 }
 

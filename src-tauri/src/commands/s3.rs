@@ -194,10 +194,13 @@ pub async fn cache_s3_views(
     bucket: String,
     paths: Vec<String>,
 ) -> Result<Vec<ViewInfo>, String> {
-    let token = xfers::begin(&cancel_id);
     let client = client_for_bucket(&bucket).await?;
     let root = cache_root()?;
     std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+
+    // Register the cancel token after the setup that can fail (credentials,
+    // region config), so a failed setup never leaks a registry entry.
+    let token = xfers::begin(&cancel_id);
 
     let result: Result<Vec<ViewInfo>, String> = (async {
         // Size everything still to fetch first, so a download that cannot
@@ -216,18 +219,22 @@ pub async fn cache_s3_views(
             let size = if local.exists() {
                 0
             } else {
-                client
-                    .head_object()
-                    .bucket(&bucket)
-                    .key(&key)
-                    .send()
-                    .await
-                    .map_err(|e| format!("S3 head {key}: {e}"))?
-                    .content_length()
-                    .unwrap_or(0)
-                    .max(0) as u64
+                let s3size = xfers::cancellable(&token, async {
+                    client
+                        .head_object()
+                        .bucket(&bucket)
+                        .key(&key)
+                        .send()
+                        .await
+                        .map_err(|e| format!("S3 head {key}: {e}"))
+                })
+                .await?
+                .content_length()
+                .unwrap_or(0)
+                .max(0) as u64;
+                s3size
             };
-            need += size;
+            need = need.saturating_add(size);
             plan.push((key, local, size));
         }
         xfers::ensure_space(&root, need)?;
@@ -249,13 +256,16 @@ pub async fn cache_s3_views(
                 // Already cached — no transfer needed.
                 std::fs::metadata(&local).map(|m| m.len()).unwrap_or(0)
             } else {
-                let mut resp = client
-                    .get_object()
-                    .bucket(&bucket)
-                    .key(&key)
-                    .send()
-                    .await
-                    .map_err(|e| format!("S3 get {key}: {e}"))?;
+                let mut resp = xfers::cancellable(&token, async {
+                    client
+                        .get_object()
+                        .bucket(&bucket)
+                        .key(&key)
+                        .send()
+                        .await
+                        .map_err(|e| format!("S3 get {key}: {e}"))
+                })
+                .await?;
 
                 // Stream to `<file>.part` (constant memory); the partial file
                 // is removed if we bail out on cancel or error.

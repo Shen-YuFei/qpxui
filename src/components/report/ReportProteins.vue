@@ -16,8 +16,11 @@ import {
   proteinMatchWhere,
   proteinTextWhere,
   targetWhere,
+  viewScale,
   type DatasetTables,
+  type ViewScale,
 } from "../../lib/report";
+import { fmtBytes } from "../../lib/format";
 import { runSql } from "../../lib/duck";
 import { searchFor, state } from "../../store";
 
@@ -36,6 +39,9 @@ const rows = ref<Record<string, any>[]>([]);
 const truncated = ref(false);
 const elapsed = ref(0);
 const listTable = ref<InstanceType<typeof ReportTable> | null>(null);
+// Big streamed files: no top-protein listing until the user searches.
+const scale = ref<ViewScale | null>(null);
+const waiting = ref(false);
 
 const listCols = computed<Column[]>(() => {
   const base: Column[] = [
@@ -98,6 +104,7 @@ GROUP BY 1 ORDER BY ${E.seq !== "NULL" ? "peptides DESC, " : ""}n_ev DESC LIMIT 
 
 async function search() {
   if (!pg && !(ev && prot)) return;
+  waiting.value = false;
   busy.value = true;
   error.value = "";
   const t0 = performance.now();
@@ -244,9 +251,21 @@ watch(
   }
 );
 
-onMounted(() => {
-  search();
+onMounted(async () => {
   if (focus.value) loadDetail(focus.value);
+  const src = pg ?? ev;
+  if (src && !q.value.trim()) {
+    try {
+      scale.value = await viewScale(src);
+    } catch {
+      scale.value = null;
+    }
+    if (scale.value?.large) {
+      waiting.value = true;
+      return;
+    }
+  }
+  search();
 });
 
 const accessionLinks = computed(() => {
@@ -272,6 +291,10 @@ const accessionLinks = computed(() => {
       </form>
       <div class="muted info">
         <span v-if="busy">Searching… <span class="spinner"></span></span>
+        <span v-else-if="waiting">
+          Large streamed {{ pg ? "protein-group" : evName }} view ({{ fmtBytes(scale!.bytes) }}, {{ scale!.rows.toLocaleString() }} rows): enter an accession or gene name to search.
+          Press Search with an empty box to list the top {{ LIMIT }} (reads the protein columns of the whole file).
+        </span>
         <span v-else>
           {{ rows.length.toLocaleString() }}{{ truncated ? "+" : "" }} {{ pg ? "protein group" : "protein" }}{{ rows.length === 1 ? "" : "s" }}
           <template v-if="truncated"> (first {{ LIMIT }} shown — refine the search)</template>

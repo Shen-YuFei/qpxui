@@ -98,6 +98,7 @@ export function clearReportCache() {
   tablesCache.clear();
   sqlCache.clear();
   spectraCache.clear();
+  scaleCache.clear();
 }
 
 /** Peptide-level evidence table: features if present, PSMs otherwise. */
@@ -132,6 +133,108 @@ export function hasSpectra(ref: TableRef | undefined): Promise<boolean> {
     spectraCache.set(key, p);
   }
   return p;
+}
+
+/** Streamed views at least this big (compressed) are "large": reports avoid
+ * whole-file scans until the user asks for something specific. */
+export const LARGE_STREAM_BYTES = 1024 ** 3;
+
+export interface ViewScale {
+  /** Read over the network (S3 or HTTPS) rather than from a local file. */
+  remote: boolean;
+  rows: number;
+  bytes: number;
+  /** Remote and big enough that a full scan costs a large download. */
+  large: boolean;
+  /** Leading sort columns from the QPX footer (`qpx.sort_order`), if any. */
+  sortedBy: string[];
+  /** Compressed bytes per top-level column, from the footer. */
+  colBytes: Record<string, number>;
+}
+
+const scaleCache = new Map<string, Promise<ViewScale>>();
+
+/** Size, row count and sort order of a view, from the parquet footer only. */
+export function viewScale(ref: Pick<TableRef, "view" | "table">): Promise<ViewScale> {
+  const key = ref.view.path;
+  let p = scaleCache.get(key);
+  if (!p) {
+    p = (async () => {
+      const remote = /^(s3|https?):\/\//.test(ref.view.path);
+      const file = lit(`${ref.table}.parquet`);
+      let rows = 0;
+      let bytes = ref.view.sizeBytes || 0;
+      const colBytes: Record<string, number> = {};
+      try {
+        const r = await runSql(`SELECT sum(num_rows)::BIGINT FROM parquet_file_metadata(${file})`, 1);
+        rows = Number(r.rows[0]?.[0] ?? 0);
+        const b = await runSql(
+          `SELECT lower(split_part(path_in_schema, ', ', 1)) AS c, sum(total_compressed_size)::BIGINT
+           FROM parquet_metadata(${file}) GROUP BY 1`,
+          10000
+        );
+        let total = 0;
+        for (const [c, n] of b.rows) {
+          colBytes[String(c)] = Number(n);
+          total += Number(n);
+        }
+        bytes = Math.max(bytes, total);
+      } catch {
+        /* keep the listing size */
+      }
+      let sortedBy: string[] = [];
+      try {
+        const r = await runSql(
+          `SELECT decode(value) FROM parquet_kv_metadata(${file}) WHERE decode(key) = 'qpx.sort_order' LIMIT 1`,
+          1
+        );
+        const v = r.rows[0]?.[0];
+        if (v != null) sortedBy = parseSortOrder(String(v));
+      } catch {
+        /* no footer key */
+      }
+      return { remote, rows, bytes, large: remote && bytes >= LARGE_STREAM_BYTES, sortedBy, colBytes };
+    })();
+    p.catch(() => scaleCache.delete(key));
+    scaleCache.set(key, p);
+  }
+  return p;
+}
+
+/** Compressed bytes a full scan of these columns reads (unknown columns count 0). */
+export function scanBytes(scale: ViewScale, cols: Iterable<string>): number {
+  let n = 0;
+  for (const c of new Set([...cols].map((x) => x.toLowerCase()))) n += scale.colBytes[c] ?? 0;
+  return n;
+}
+
+/** The large streamed views among these, with their scale (footer reads only). */
+export async function largeViews(refs: (TableRef | undefined)[]): Promise<{ ref: TableRef; scale: ViewScale }[]> {
+  const out: { ref: TableRef; scale: ViewScale }[] = [];
+  for (const ref of refs) {
+    if (!ref || !/^(s3|https?):\/\//.test(ref.view.path)) continue;
+    try {
+      const scale = await viewScale(ref);
+      if (scale.large) out.push({ ref, scale });
+    } catch {
+      /* treat as small */
+    }
+  }
+  return out;
+}
+
+/** Column names from a `qpx.sort_order` value: a JSON list of names or of
+ * `{column|name: …}` objects, or a comma-separated string. */
+export function parseSortOrder(v: string): string[] {
+  try {
+    const j = JSON.parse(v);
+    const list = Array.isArray(j) ? j : Array.isArray(j?.columns) ? j.columns : [];
+    return list
+      .map((x: any) => (typeof x === "string" ? x : Array.isArray(x) ? x[0] : x?.column ?? x?.name))
+      .filter((x: unknown): x is string => typeof x === "string");
+  } catch {
+    return v.split(",").map((x) => x.trim().split(/\s+/)[0]).filter(Boolean);
+  }
 }
 
 /** WHERE clause keeping target (non-decoy) rows only. */

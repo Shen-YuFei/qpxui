@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import ChartCard from "../ChartCard.vue";
 import ReportTable from "../ReportTable.vue";
 import type { Column } from "../../lib/report";
@@ -8,10 +8,14 @@ import type { ChartSpec } from "../../lib/charts";
 import { cachedSql, evidence, ident, objects, targetWhere, type DatasetTables } from "../../lib/report";
 import { ptmColor, shortCode } from "../../lib/ptm";
 import { searchFor } from "../../store";
+import { useLargeGate } from "../../lib/useLargeGate";
+import LargeGate from "./LargeGate.vue";
 
 const props = defineProps<{ ds: DatasetInfo; t: DatasetTables; fileBase: string }>();
 const ev = evidence(props.t);
 const evName = props.t.feature ? "features" : "PSMs";
+const { gate, check, release, dispose } = useLargeGate();
+onUnmounted(dispose);
 
 const busy = ref(true);
 const error = ref("");
@@ -78,11 +82,17 @@ const tableRows = computed(() =>
   }))
 );
 
-onMounted(async () => {
+onMounted(() => {
   if (!ev || !ev.cols.has("modifications")) {
     busy.value = false;
     return;
   }
+  check([{ ref: ev, cols: ["is_decoy", "modifications", "peptidoform", "sequence"] }], build);
+});
+
+async function build() {
+  if (!ev) return;
+  busy.value = true;
   const T = ident(ev.table);
   const W = targetWhere(ev);
   const pf = ev.cols.has("peptidoform") ? "peptidoform" : ev.seq;
@@ -124,13 +134,15 @@ onMounted(async () => {
   } finally {
     busy.value = false;
   }
-});
+}
 </script>
 
 <template>
   <div>
     <div v-if="!ev || !ev.cols.has('modifications')" class="muted pad">No `modifications` column in this dataset's feature/PSM view.</div>
     <div v-else-if="error" class="error pad">⚠ {{ error }}</div>
+    <LargeGate v-else-if="gate.blocked" :bytes="gate.bytes" :size="gate.size" what="Counting modifications" @go="release" />
+    <div v-else-if="gate.checking" class="muted pad"><span class="spinner"></span></div>
     <template v-else>
       <p class="muted note">
         <span v-if="busy">Counting modifications… <span class="spinner"></span> · </span>

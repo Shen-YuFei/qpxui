@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { api, type DatasetInfo, type S3Listing, type ViewInfo } from "../lib/api";
 import { loadDatasets } from "../store";
 import { installProgress, overall, progress } from "../lib/progress";
-import { confirmDownload, totalBytes } from "../lib/downloads";
+import { cancelDownload, confirmDownload, totalBytes, trackDownload, untrackDownload } from "../lib/downloads";
 
 const bucket = ref("");
 const prefix = ref("");
@@ -33,12 +33,16 @@ function clearProgressFor(files: string[]) {
 async function cancel() {
   if (!downloadId.value) return;
   cancelling.value = true;
-  try {
-    await api.cancelDownload(downloadId.value);
-  } catch {
-    /* already finished — fine */
-  }
+  await cancelDownload(downloadId.value);
 }
+
+// Leaving the picker ("New source", switching source) cancels its download,
+// and a download that still finishes must not load into the new source.
+let unmounted = false;
+onBeforeUnmount(() => {
+  unmounted = true;
+  void cancelDownload(downloadId.value);
+});
 
 onMounted(installProgress);
 
@@ -110,14 +114,19 @@ async function loadSelection() {
     const sel = selection();
     if (!sel.length) throw new Error("Select at least one view to load.");
     if (!(await confirmDownload(sel.map((s) => s.view), "s3"))) return;
+    // The user may have left this source while the dialog was open.
+    if (unmounted) return;
 
     // Download to cache (offline) with progress bars.
     const paths = sel.map((s) => s.view.path);
     const files = sel.map((s) => s.view.name);
     cancelling.value = false;
-    downloadId.value = generateId();
+    const id = generateId();
+    downloadId.value = id;
+    trackDownload(id);
     try {
-      const locals = await api.cacheS3Views(listing.value!.bucket, paths, downloadId.value);
+      const locals = await api.cacheS3Views(listing.value!.bucket, paths, id);
+      if (unmounted) return;
       const entries = sel.map((s, i) => ({ prefix: s.prefix, local: locals[i] }));
       loadDatasets(groupLocal(entries), "s3");
     } catch (e: any) {
@@ -129,7 +138,8 @@ async function loadSelection() {
         throw e;
       }
     } finally {
-      downloadId.value = "";
+      untrackDownload(id);
+      if (downloadId.value === id) downloadId.value = "";
       cancelling.value = false;
     }
   } catch (e: any) {

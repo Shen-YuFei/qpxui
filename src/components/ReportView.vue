@@ -11,7 +11,9 @@ import {
   objects,
   proteinExpr,
   targetWhere,
+  viewScale,
   type DatasetTables,
+  type TableRef,
 } from "../lib/report";
 import { saveText } from "../lib/export";
 import ReportOverview from "./report/ReportOverview.vue";
@@ -30,7 +32,15 @@ const loading = ref(true);
 const meta = ref<Record<string, any>>({});
 const runMeta = ref<{ instruments: string[]; enzymes: string[]; organisms: string[] }>({ instruments: [], enzymes: [], organisms: [] });
 
-interface Kpi { key: string; label: string; value: number | null; title?: string }
+interface Kpi {
+  key: string;
+  label: string;
+  value: number | null;
+  title?: string;
+  /** Deferred whole-file count on a large streamed view. */
+  defer?: () => Promise<number | null>;
+  busy?: boolean;
+}
 const kpis = ref<Kpi[]>([]);
 
 const TABS: { id: ReportTab; label: string }[] = [
@@ -94,6 +104,40 @@ async function count(key: string, sql: string): Promise<number | null> {
   }
 }
 
+/** Row count of a view from its parquet footer (no data read). */
+async function footerRows(ref: TableRef): Promise<number | null> {
+  try {
+    return (await viewScale(ref)).rows;
+  } catch {
+    return null;
+  }
+}
+
+async function isLarge(ref: TableRef | undefined): Promise<boolean> {
+  if (!ref) return false;
+  try {
+    return (await viewScale(ref)).large;
+  } catch {
+    return false;
+  }
+}
+
+async function compute(k: Kpi) {
+  const f = k.defer;
+  if (!f) return;
+  k.defer = undefined;
+  k.value = null;
+  k.title = undefined;
+  k.busy = true;
+  kpis.value = [...kpis.value];
+  try {
+    k.value = await f();
+  } finally {
+    k.busy = false;
+    kpis.value = [...kpis.value];
+  }
+}
+
 async function loadHeader(t: DatasetTables) {
   if (t.dataset) {
     try {
@@ -113,18 +157,27 @@ async function loadHeader(t: DatasetTables) {
     kpis.value = [...list];
   };
   const ev = evidence(t);
+  // Distinct counts read whole columns; on a large streamed view they wait
+  // for a click. Plain row counts come from the parquet footer.
+  const distinct = async (ref: TableRef, k: Omit<Kpi, "value">, key: string, sql: string) => {
+    const run = () => count(key, sql);
+    if (await isLarge(ref)) push({ ...k, value: null, defer: run, title: "Large streamed view: click to count (reads a whole column)" });
+    else push({ ...k, value: await run() });
+  };
+  const rows = async (ref: TableRef, key: string) =>
+    (await isLarge(ref)) ? footerRows(ref) : count(key, `SELECT count(*) FROM ${ident(ref.table)}`);
   if (t.pg) {
-    push({ key: "pg", label: "Protein groups", value: await count("kpi.pg", `SELECT count(DISTINCT anchor_protein) FROM ${ident(t.pg.table)} WHERE ${targetWhere(t.pg)}`), title: "Distinct anchor proteins (target) in the pg view" });
+    await distinct(t.pg, { key: "pg", label: "Protein groups", title: "Distinct anchor proteins (target) in the pg view" }, "kpi.pg", `SELECT count(DISTINCT anchor_protein) FROM ${ident(t.pg.table)} WHERE ${targetWhere(t.pg)}`);
   } else if (ev && proteinExpr(ev)) {
-    push({ key: "pg", label: "Proteins", value: await count("kpi.prot", `SELECT count(DISTINCT ${proteinExpr(ev)}) FROM ${ident(ev.table)} WHERE ${targetWhere(ev)}`) });
+    await distinct(ev, { key: "pg", label: "Proteins" }, "kpi.prot", `SELECT count(DISTINCT ${proteinExpr(ev)}) FROM ${ident(ev.table)} WHERE ${targetWhere(ev)}`);
   }
   if (ev && ev.seq !== "NULL") {
-    push({ key: "pep", label: "Peptides", value: await count("kpi.pep", `SELECT count(DISTINCT ${ev.seq}) FROM ${ident(ev.table)} WHERE ${targetWhere(ev)}`), title: "Distinct target peptide sequences" });
+    await distinct(ev, { key: "pep", label: "Peptides", title: "Distinct target peptide sequences" }, "kpi.pep", `SELECT count(DISTINCT ${ev.seq}) FROM ${ident(ev.table)} WHERE ${targetWhere(ev)}`);
   }
-  if (t.feature) push({ key: "feat", label: "Features", value: await count("kpi.feat", `SELECT count(*) FROM ${ident(t.feature.table)}`) });
-  if (t.psm) push({ key: "psm", label: "PSMs", value: await count("kpi.psm", `SELECT count(*) FROM ${ident(t.psm.table)}`) });
+  if (t.feature) push({ key: "feat", label: "Features", value: await rows(t.feature, "kpi.feat") });
+  if (t.psm) push({ key: "psm", label: "PSMs", value: await rows(t.psm, "kpi.psm") });
   if (t.run) push({ key: "run", label: "Runs", value: await count("kpi.run", `SELECT count(*) FROM ${ident(t.run.table)}`) });
-  else if (ev?.cols.has("run_file_name")) push({ key: "run", label: "Runs", value: await count("kpi.run2", `SELECT count(DISTINCT run_file_name) FROM ${ident(ev.table)}`) });
+  else if (ev?.cols.has("run_file_name")) await distinct(ev, { key: "run", label: "Runs" }, "kpi.run2", `SELECT count(DISTINCT run_file_name) FROM ${ident(ev.table)}`);
   if (t.sample) push({ key: "smp", label: "Samples", value: await count("kpi.smp", `SELECT count(*) FROM ${ident(t.sample.table)}`) });
 
   try {
@@ -217,7 +270,9 @@ const descOpen = ref(false);
         </div>
         <div class="kpis">
           <div v-for="k in kpis" :key="k.key" class="kpi" :title="k.title ?? (k.value ?? 0).toLocaleString()">
-            <div class="kv">{{ k.value === null ? "–" : fmtShort(k.value) }}</div>
+            <div v-if="k.defer" class="kv"><button class="xs" @click="compute(k)">count</button></div>
+            <div v-else-if="k.busy" class="kv"><span class="spinner"></span></div>
+            <div v-else class="kv">{{ k.value === null ? "–" : fmtShort(k.value) }}</div>
             <div class="kl">{{ k.label }}</div>
           </div>
           <div v-if="!kpis.length" class="muted"><span class="spinner"></span></div>

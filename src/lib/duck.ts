@@ -26,6 +26,50 @@ let db: duckdb.AsyncDuckDB | null = null;
 let conn: duckdb.AsyncDuckDBConnection | null = null;
 
 let initPromise: Promise<void> | null = null;
+/** Engine queries and registrations still running, and the engine they run on. */
+let pending = 0;
+let generation = 0;
+/** Rejections for in-flight `tracked` calls, so abandonment settles them. */
+const trackedCancels = new Set<(e: unknown) => void>();
+
+async function tracked<T>(fn: () => Promise<T>): Promise<T> {
+  const gen = generation;
+  pending++;
+  let rejectFn: (e: unknown) => void = () => {};
+  // `cancelled` settles as soon as abandonQueries() runs: a query that was
+  // running when the worker was killed would otherwise never resolve (duckdb-wasm
+  // terminate() leaves pending requests hanging forever), leaving loading flags
+  // stuck. Raced against the real work so a normal result still wins.
+  const cancelled = new Promise<never>((_, reject) => {
+    rejectFn = reject;
+    trackedCancels.add(reject);
+  });
+  try {
+    return await Promise.race([fn(), cancelled]);
+  } finally {
+    trackedCancels.delete(rejectFn);
+    if (gen === generation) pending--;
+  }
+}
+
+/** Stop whatever the engine is doing (duckdb-wasm runs one query at a time, so
+ * a long scan of the previous dataset would hold up the next one). Kills the
+ * worker when something is running; the next query starts a fresh engine.
+ * Returns true when it restarted, so callers drop tables and cached results. */
+export function abandonQueries(): boolean {
+  if (!pending || !db) return false;
+  const old = db;
+  db = null;
+  conn = null;
+  initPromise = null;
+  pending = 0;
+  generation++;
+  const toCancel = Array.from(trackedCancels);
+  trackedCancels.clear();
+  for (const r of toCancel) r(new Error("cancelled"));
+  void old.terminate().catch(() => {});
+  return true;
+}
 
 // Concurrent callers share one initialisation, so nobody sees a half-ready db.
 export function init(): Promise<void> {
@@ -75,6 +119,18 @@ export async function ensureViewReady(view: ViewInfo): Promise<string> {
   await init();
   const table = safeName(view.name);
   if (state.registered.has(view.path)) return table;
+  const gen = generation;
+  await tracked(() => register(view, table));
+  // The engine was restarted meanwhile: the table belongs to the old one.
+  if (gen !== generation) throw new Error("cancelled");
+  state.registered.add(view.path);
+  state.tableName[view.path] = table;
+  return table;
+}
+
+async function register(view: ViewInfo, table: string): Promise<void> {
+  // Bind this engine: a restart meanwhile must not touch the new one.
+  const { db, conn } = await initDb();
 
   const fileKey = `${table}.parquet`;
   if (view.path.startsWith("s3://")) {
@@ -91,12 +147,12 @@ export async function ensureViewReady(view: ViewInfo): Promise<string> {
     // Still range requests only (allowFullHTTPReads is off), but with
     // directIO = false duckdb-wasm keeps the ranges it read, so later queries
     // over the same columns don't go back to the network.
-    await db!.registerFileURL(fileKey, url, duckdb.DuckDBDataProtocol.HTTP, false);
+    await db.registerFileURL(fileKey, url, duckdb.DuckDBDataProtocol.HTTP, false);
   } else if (/^https?:\/\//.test(view.path)) {
     // Public portal file: same lazy range proxy, fetched over HTTPS.
     const url = (await api.streamHttpUrls([view.path]))[view.path]?.url;
     if (!url) throw new Error(`could not open ${view.path} for streaming`);
-    await db!.registerFileURL(fileKey, url, duckdb.DuckDBDataProtocol.HTTP, false);
+    await db.registerFileURL(fileKey, url, duckdb.DuckDBDataProtocol.HTTP, false);
   } else {
     // Local parquet: range-read from disk through the same proxy, so big
     // files open instantly and only the touched column chunks are read.
@@ -107,18 +163,20 @@ export async function ensureViewReady(view: ViewInfo): Promise<string> {
       console.warn("local range proxy unavailable, loading the whole file", e);
     }
     if (url) {
-      await db!.registerFileURL(fileKey, url, duckdb.DuckDBDataProtocol.HTTP, false);
+      await db.registerFileURL(fileKey, url, duckdb.DuckDBDataProtocol.HTTP, false);
     } else {
       const bytes = base64ToUint8(await api.readFileBytes(view.path));
-      await db!.registerFileBuffer(fileKey, bytes);
+      await db.registerFileBuffer(fileKey, bytes);
     }
   }
-  await conn!.query(
+  await conn.query(
     `CREATE OR REPLACE VIEW "${table}" AS SELECT * FROM read_parquet('${fileKey}')`
   );
-  state.registered.add(view.path);
-  state.tableName[view.path] = table;
-  return table;
+}
+
+async function initDb(): Promise<{ db: duckdb.AsyncDuckDB; conn: duckdb.AsyncDuckDBConnection }> {
+  await init();
+  return { db: db!, conn: conn! };
 }
 
 export function base64ToUint8(b64: string): Uint8Array {
@@ -241,7 +299,8 @@ export async function runSql(
   const w = window as any;
   if (import.meta.env.DEV) w.__qpending = (w.__qpending ?? 0) + 1;
   try {
-    res = await conn!.query(sql);
+    const c = conn!;
+    res = await tracked(() => c.query(sql));
   } catch (e) {
     throw new Error(guardError(e));
   } finally {
@@ -271,7 +330,8 @@ export async function countRows(table: string): Promise<number> {
   await init();
   let res: QueryResultType;
   try {
-    res = await conn!.query(`SELECT COUNT(*) AS n FROM "${table}"`);
+    const c = conn!;
+    res = await tracked(() => c.query(`SELECT COUNT(*) AS n FROM "${table}"`));
   } catch (e) {
     throw new Error(guardError(e));
   }
@@ -289,7 +349,8 @@ export async function describeTable(table: string): Promise<ColumnInfo[]> {
   await init();
   let res: QueryResultType;
   try {
-    res = await conn!.query(`DESCRIBE "${table}"`);
+    const c = conn!;
+    res = await tracked(() => c.query(`DESCRIBE "${table}"`));
   } catch (e) {
     throw new Error(guardError(e));
   }

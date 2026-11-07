@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { api, type DatasetInfo, type PortalDataset, type ViewInfo } from "../lib/api";
 import { loadDatasets } from "../store";
 import { installProgress, overall, progress } from "../lib/progress";
-import { confirmDownload, totalBytes } from "../lib/downloads";
+import { cancelDownload, confirmDownload, totalBytes, trackDownload, untrackDownload } from "../lib/downloads";
 
 const rows = ref<PortalDataset[]>([]);
 const selected = ref<PortalDataset | null>(null);
@@ -28,12 +28,16 @@ function clearProgressFor(files: string[]) {
 async function cancel() {
   if (!downloadId.value) return;
   cancelling.value = true;
-  try {
-    await api.cancelDownload(downloadId.value);
-  } catch {
-    /* already finished — fine */
-  }
+  await cancelDownload(downloadId.value);
 }
+
+// Leaving the picker ("New source", switching source) cancels its download,
+// and a download that still finishes must not load into the new source.
+let unmounted = false;
+onBeforeUnmount(() => {
+  unmounted = true;
+  void cancelDownload(downloadId.value);
+});
 
 type SortKey = "accession" | "totalSize" | "peptides" | "psmCount" | "proteins" | "samples";
 const SORTS: { key: SortKey; label: string }[] = [
@@ -110,6 +114,8 @@ async function loadRegistry() {
 }
 
 async function selectDataset(ds: PortalDataset | null) {
+  // Picking another dataset abandons the running download.
+  if (downloadId.value && ds !== selected.value) cancel();
   selected.value = ds;
   views.value = [];
   checked.value = {};
@@ -141,37 +147,47 @@ async function loadSelection() {
   downloading.value = true;
   error.value = "";
   const sel = views.value.filter((v) => checked.value[v.path]);
+  const target = selected.value;
   try {
     if (!sel.length) throw new Error("Select at least one view to load.");
     if (!(await confirmDownload(sel, "portal"))) return;
+    // The user may have left this dataset or source while the dialog was
+    // open; don't start a transfer for a dataset they've already moved on from.
+    if (unmounted || selected.value !== target) return;
     const files = sel.map((v) => v.name);
     cancelling.value = false;
-    downloadId.value = generateId();
+    const id = generateId();
+    downloadId.value = id;
+    trackDownload(id);
     try {
-      const local = await api.portalCacheViews(sel.map((v) => v.path), downloadId.value);
+      const local = await api.portalCacheViews(sel.map((v) => v.path), id);
+      if (unmounted || selected.value !== target) return;
       const ds: DatasetInfo = {
-        prefix: selected.value.accession,
-        path: `quantms portal / ${portalName(selected.value)}`,
+        prefix: target.accession,
+        path: `quantms portal / ${portalName(target)}`,
         views: local.sort((a, b) => a.view.localeCompare(b.view)),
         sourceKind: "portal",
       };
-      loadDatasets([ds], "portal | " + selected.value.accession);
+      loadDatasets([ds], "portal | " + target.accession);
     } catch (e: any) {
       if (isCancelledErr(e)) {
-        error.value = "Download cancelled; partial files were removed.";
+        // Cancelled by switching dataset or source: say nothing there.
+        if (!unmounted && selected.value === target) error.value = "Download cancelled; partial files were removed.";
         clearProgressFor(files);
       } else {
         clearProgressFor(files);
         throw e;
       }
     } finally {
-      downloadId.value = "";
+      untrackDownload(id);
+      if (downloadId.value === id) downloadId.value = "";
       cancelling.value = false;
     }
   } catch (e: any) {
     error.value = String(e);
   } finally {
-    busy.value = false;
+    // selectDataset owns `busy` once the user has moved to another dataset.
+    if (selected.value === target) busy.value = false;
     downloading.value = false;
   }
 }
@@ -241,7 +257,7 @@ function fmtPx(n: number): string {
       <b>download them to cache</b> once for fully offline use.
     </p>
 
-    <div v-if="error" class="error">{{ error }}</div>
+    <div v-if="error && !selected" class="error">{{ error }}</div>
     <div v-if="busy && !rows.length" class="muted">
       Loading dataset registry… <span class="spinner"></span>
     </div>
@@ -336,6 +352,8 @@ function fmtPx(n: number): string {
               </button>
             </div>
           </div>
+
+          <div v-if="error" class="error">{{ error }}</div>
 
           <div v-if="downloading && downloadId" class="progress-box">
             <div class="overall">

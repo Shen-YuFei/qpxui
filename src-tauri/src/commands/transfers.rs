@@ -57,6 +57,31 @@ pub fn is_cancelled(token: &AtomicBool) -> bool {
     token.load(Ordering::Relaxed)
 }
 
+/// Run `fut`, aborting as soon as the cancel token is set, even while `fut`
+/// is still waiting for the server to reply (an in-flight `send()` with no
+/// data yet — that phase had no chunk loop to poll it). Wrapping a request in
+/// this means cancel always takes effect within [`POLL`], never only at the
+/// next body chunk. The two branches of `select!` never both resolve, so a
+/// finished future is returned exact, not dropped.
+pub async fn cancellable<T, F>(token: &AtomicBool, fut: F) -> Result<T, String>
+where
+    F: std::future::Future<Output = Result<T, String>>,
+{
+    tokio::pin!(fut);
+    let mut tick = tokio::time::interval(POLL);
+    tick.tick().await; // consume the immediate first tick
+    loop {
+        tokio::select! {
+            r = &mut fut => return r,
+            _ = tick.tick() => {
+                if is_cancelled(token) {
+                    return Err("cancelled".to_string());
+                }
+            }
+        }
+    }
+}
+
 /// Tauri command: cancel an in-flight download batch by its `cancelId`.
 #[tauri::command]
 pub fn cancel_download(id: String) -> Result<(), String> {

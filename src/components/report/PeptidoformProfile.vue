@@ -50,6 +50,7 @@ interface Channel {
 
 const busy = ref(false);
 const error = ref("");
+const medError = ref("");
 const features = ref<Feature[]>([]);
 const channels = ref<Channel[]>([]);
 const truncated = ref(false);
@@ -95,7 +96,7 @@ async function load() {
   features.value = [];
   channels.value = [];
   try {
-    const [r] = await Promise.all([runSql(profileSql(S), MAX_FEATURES * 40), loadContext()]);
+    const [r] = await Promise.all([runSql(profileSql(S), MAX_FEATURES * 40), loadContext().catch(() => {})]);
     if (id !== seq) return;
     const fs = new Map<number, Feature>();
     const ch: Channel[] = [];
@@ -154,7 +155,7 @@ async function loadMedians() {
     );
     medians.value = new Map(r.rows.map((x) => [String(x[0]), Number(x[1])]));
   } catch (e: any) {
-    error.value = String(e?.message ?? e);
+    medError.value = String(e?.message ?? e);
     normalise.value = false;
   } finally {
     medBusy.value = false;
@@ -461,6 +462,7 @@ const base = computed(() => `${props.fileBase}_${props.peptidoform.replace(/[^A-
         <label v-if="channels.length" title="Subtract each sample's median log2 intensity over all evidence (reads the whole intensities column once)">
           <input v-model="normalise" type="checkbox" :disabled="medBusy" /> Normalise to sample median
           <span v-if="medBusy" class="spinner"></span>
+          <span v-if="medError" class="muted error-inline" :title="medError">⚠ medians failed</span>
         </label>
         <span v-if="truncated" class="muted">Only the first {{ MAX_FEATURES.toLocaleString() }} {{ srcLabel }} are shown.</span>
       </div>
