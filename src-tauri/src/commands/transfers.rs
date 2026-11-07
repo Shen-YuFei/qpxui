@@ -96,14 +96,11 @@ where
     }
 }
 
-/// Tauri command: cancel an in-flight download batch by its `cancelId`.
+/// Tauri command: cancel an in-flight download batch by its `cancelId`. A
+/// batch that already finished has nothing left to cancel.
 #[tauri::command]
-pub fn cancel_download(id: String) -> Result<(), String> {
-    if cancel(&id) {
-        Ok(())
-    } else {
-        Err("no such in-flight download".to_string())
-    }
+pub fn cancel_download(id: String) {
+    cancel(&id);
 }
 
 /// How often a stalled download re-checks its cancel token.
