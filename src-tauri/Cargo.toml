@@ -51,6 +51,9 @@ fs4 = "0.13"
 [dev-dependencies]
 rcgen = "0.13"
 tempfile = "3"
+# ring provider only (no aws-lc-rs) so the TLS test doesn't drag in cmake/nasm on CI.
+rustls = { version = "0.23", default-features = false, features = ["std", "ring", "tls12", "logging"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 
 [profile.release]
 panic = "abort"
