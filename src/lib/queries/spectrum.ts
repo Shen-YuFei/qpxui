@@ -54,3 +54,11 @@ export async function psmPeaks(P: TableRef, peptidoform: string, o: Record<strin
   const r = await runSql(`SELECT mz_array, intensity_array, charge FROM ${ident(P.table)} WHERE ${parts.join(" AND ")} LIMIT 1`, 1);
   return objects(r)[0];
 }
+
+/** "run · scan N · z+ · PEP x" for a PSM row. */
+export function psmLabel(r: Record<string, any>): string {
+  const sc = Array.isArray(r.scan) ? r.scan[0] : r.scan;
+  const parts = [r.run_file_name ? String(r.run_file_name) : "", sc != null ? `scan ${sc}` : "", r.charge != null ? `${r.charge}+` : ""];
+  if (r.posterior_error_probability != null) parts.push(`PEP ${Number(r.posterior_error_probability).toExponential(1)}`);
+  return parts.filter(Boolean).join(" · ");
+}
