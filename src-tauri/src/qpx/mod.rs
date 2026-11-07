@@ -25,8 +25,6 @@ pub struct DatasetInfo {
     /// Directory (or s3 locator) holding the dataset.
     pub path: String,
     pub views: Vec<ViewInfo>,
-    /// single-file | dataset | collection | s3
-    pub source_kind: String,
 }
 
 /// Split a QPX filename into `(prefix, view, format)`.
@@ -66,11 +64,7 @@ fn strip_msnet(s: &str) -> Option<&str> {
     }
 }
 
-fn into_datasets(
-    by_prefix: BTreeMap<String, Vec<ViewInfo>>,
-    dir: String,
-    source_kind: &str,
-) -> Vec<DatasetInfo> {
+fn into_datasets(by_prefix: BTreeMap<String, Vec<ViewInfo>>, dir: String) -> Vec<DatasetInfo> {
     by_prefix
         .into_iter()
         .map(|(prefix, mut views)| {
@@ -79,14 +73,13 @@ fn into_datasets(
                 prefix,
                 path: dir.clone(),
                 views,
-                source_kind: source_kind.to_string(),
             }
         })
         .collect()
 }
 
 /// Discover all datasets (grouped by prefix) directly inside `dir`.
-pub fn discover_dir(dir: &Path, source_kind: &str) -> Vec<DatasetInfo> {
+pub fn discover_dir(dir: &Path) -> Vec<DatasetInfo> {
     let mut by_prefix: BTreeMap<String, Vec<ViewInfo>> = BTreeMap::new();
     if let Ok(readdir) = std::fs::read_dir(dir) {
         for entry in readdir.flatten() {
@@ -107,23 +100,22 @@ pub fn discover_dir(dir: &Path, source_kind: &str) -> Vec<DatasetInfo> {
             }
         }
     }
-    into_datasets(by_prefix, dir.to_string_lossy().to_string(), source_kind)
+    into_datasets(by_prefix, dir.to_string_lossy().to_string())
 }
 
 /// Recursively walk a folder (up to `max_depth`) collecting datasets from
 /// every directory that directly contains QPX parquet files. This handles
 /// flat collections (many prefixes in one dir) and nested collections
 /// (one dataset per subdirectory).
-pub fn collect_all(root: &Path, source_kind: &str, max_depth: u32) -> Vec<DatasetInfo> {
+pub fn collect_all(root: &Path, max_depth: u32) -> Vec<DatasetInfo> {
     let mut out = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    walk(root, source_kind, 0, max_depth, &mut out, &mut seen);
+    walk(root, 0, max_depth, &mut out, &mut seen);
     out
 }
 
 fn walk(
     dir: &Path,
-    source_kind: &str,
     depth: u32,
     max_depth: u32,
     out: &mut Vec<DatasetInfo>,
@@ -132,7 +124,7 @@ fn walk(
     if depth > max_depth {
         return;
     }
-    for ds in discover_dir(dir, source_kind) {
+    for ds in discover_dir(dir) {
         // Avoid pushing the same dataset twice if a dir and a descendant
         // both contain its files.
         let key = format!("{}|{}", ds.path, ds.prefix);
@@ -144,7 +136,7 @@ fn walk(
         for entry in readdir.flatten() {
             let p = entry.path();
             if p.is_dir() {
-                walk(&p, source_kind, depth + 1, max_depth, out, seen);
+                walk(&p, depth + 1, max_depth, out, seen);
             }
         }
     }

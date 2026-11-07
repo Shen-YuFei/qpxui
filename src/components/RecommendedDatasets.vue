@@ -133,7 +133,6 @@ function openStream(ds: PortalDataset) {
     prefix: ds.accession,
     path: `quantms portal / ${portalName(ds)}`,
     views: list.map((v) => ({ ...v })).sort((a, b) => a.view.localeCompare(b.view)),
-    sourceKind: "portal",
   };
   loadDatasets([target], "portal | " + ds.accession);
 }
@@ -161,7 +160,6 @@ async function openDownload(ds: PortalDataset) {
         prefix: target.accession,
         path: `quantms portal / ${portalName(target)}`,
         views: local.sort((a, b) => a.view.localeCompare(b.view)),
-        sourceKind: "portal",
       };
       loadDatasets([nxt], "portal | " + target.accession);
     } catch (e: any) {

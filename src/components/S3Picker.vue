@@ -83,7 +83,6 @@ function groupLocal(entries: { prefix: string; local: ViewInfo }[]): DatasetInfo
     prefix,
     path: `${listing.value!.bucket}/${prefix}`,
     views: views.sort((a, b) => a.view.localeCompare(b.view)),
-    sourceKind: "s3",
   }));
 }
 
@@ -102,7 +101,6 @@ function groupStream(): DatasetInfo[] {
     prefix,
     path: `${listing.value!.bucket}/${prefix}`,
     views: views.sort((a, b) => a.view.localeCompare(b.view)),
-    sourceKind: "s3",
   }));
 }
 

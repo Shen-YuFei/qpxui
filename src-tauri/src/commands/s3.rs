@@ -140,7 +140,6 @@ pub async fn list_s3(bucket: String, prefix: Option<String>) -> Result<S3Listing
                 prefix: p,
                 path: format!("s3://{bucket}/{prefix}"),
                 views,
-                source_kind: "s3".to_string(),
             }
         })
         .collect();

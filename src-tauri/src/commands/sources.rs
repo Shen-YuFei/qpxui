@@ -16,7 +16,7 @@ pub fn open_file(path: String) -> Result<DatasetInfo, String> {
         .parent()
         .ok_or_else(|| "file has no parent directory".to_string())?;
 
-    let datasets = qpx::discover_dir(parent, "dataset");
+    let datasets = qpx::discover_dir(parent);
     datasets
         .into_iter()
         .find(|d| d.prefix == prefix)
@@ -28,7 +28,7 @@ pub fn open_file(path: String) -> Result<DatasetInfo, String> {
 #[tauri::command]
 pub fn scan_collection(path: String) -> Result<Vec<DatasetInfo>, String> {
     let root = PathBuf::from(&path);
-    let datasets = qpx::collect_all(&root, "collection", 4);
+    let datasets = qpx::collect_all(&root, 4);
     if datasets.is_empty() {
         return Err(
             "No QPX datasets (prefix.view.parquet files) found in this folder.".to_string(),

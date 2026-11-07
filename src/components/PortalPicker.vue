@@ -166,7 +166,6 @@ async function loadSelection() {
         prefix: target.accession,
         path: `quantms portal / ${portalName(target)}`,
         views: local.sort((a, b) => a.view.localeCompare(b.view)),
-        sourceKind: "portal",
       };
       loadDatasets([ds], "portal | " + target.accession);
     } catch (e: any) {
@@ -206,7 +205,6 @@ function streamSelection() {
     prefix: selected.value.accession,
     path: `quantms portal / ${portalName(selected.value)}`,
     views: sel.map((v) => ({ ...v })).sort((a, b) => a.view.localeCompare(b.view)),
-    sourceKind: "portal",
   };
   loadDatasets([ds], "portal | " + selected.value.accession + " (stream)");
 }

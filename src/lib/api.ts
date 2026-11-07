@@ -13,7 +13,6 @@ export interface DatasetInfo {
   prefix: string;
   path: string;
   views: ViewInfo[];
-  sourceKind: string;
 }
 
 export interface S3Object {

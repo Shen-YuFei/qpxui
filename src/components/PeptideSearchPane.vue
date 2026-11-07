@@ -138,7 +138,6 @@ async function loadSelection(h: PsHit) {
         prefix: h.datasetAccession,
         path: `quantms portal / ${h.datasetRef || h.datasetAccession}`,
         views: local.sort((a, b) => a.view.localeCompare(b.view)),
-        sourceKind: "portal",
       };
       loadDatasets([ds], "portal | " + h.datasetAccession);
     } catch (e: any) {
@@ -172,7 +171,6 @@ function streamSelection(h: PsHit) {
     prefix: h.datasetAccession,
     path: `quantms portal / ${h.datasetRef || h.datasetAccession}`,
     views: sel.map((v) => ({ ...v })).sort((a, b) => a.view.localeCompare(b.view)),
-    sourceKind: "portal",
   };
   loadDatasets([ds], "portal | " + h.datasetAccession + " (stream)");
 }
