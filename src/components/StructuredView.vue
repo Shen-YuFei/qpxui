@@ -27,7 +27,7 @@ function isScores(v: unknown): v is Array<Record<string, unknown>> {
     v.every((x) => isStructured(x) && "score_name" in (x as object))
   );
 }
-/** Is this a modifications list: array of objects each carrying name + accession? */
+/** Is this a modifications list: array of objects each carrying a name? */
 function isMods(v: unknown): v is Array<Record<string, unknown>> {
   return (
     Array.isArray(v) &&
@@ -60,7 +60,7 @@ const kindHint = computed<string>(() => {
 });
 
 function isScalar(v: unknown): boolean {
-  return v === null || typeof v !== "object" || !isStructured(v);
+  return !isStructured(v);
 }
 
 // ---- PTM helpers for the modifications cards ----
@@ -70,7 +70,7 @@ function modName(m: Record<string, unknown>): string {
 function modAcc(m: Record<string, unknown>): string | undefined {
   const acc = m.accession as string | undefined;
   const meta = ptmMeta(modName(m), acc);
-  return meta?.accession ?? acc ?? undefined;
+  return meta?.accession ?? acc;
 }
 function modMass(m: Record<string, unknown>): string | null {
   const meta = ptmMeta(modName(m), m.accession as string | undefined);
