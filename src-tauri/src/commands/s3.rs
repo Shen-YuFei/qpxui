@@ -162,6 +162,37 @@ fn cache_root() -> Result<std::path::PathBuf, String> {
     Ok(base.join("qpxui").join("s3-cache"))
 }
 
+/// Cache file for `s3://bucket/key`: a folder named by a hash of the bucket
+/// and key, holding the object under its file name with unsafe characters
+/// replaced. Keys that differ only in `/` versus `_` or in letter case get
+/// separate files, and no bucket or key can point outside the cache.
+fn cache_path(root: &std::path::Path, bucket: &str, key: &str) -> std::path::PathBuf {
+    let name: String = key
+        .rsplit_once('/')
+        .map_or(key, |(_, name)| name)
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || "._-".contains(c) {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    root.join(format!(
+        "{:016x}",
+        fnv1a(format!("{bucket}/{key}").as_bytes())
+    ))
+    .join(name)
+}
+
+/// FNV-1a: a hash that stays the same across builds, so cache folders do too.
+fn fnv1a(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, b| {
+        (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+
 /// Generate short-lived presigned GET URLs for the given S3 views so the
 /// frontend can query them *lazily* over HTTP(S) (DuckDB-wasm issues byte
 /// range requests on demand, pulling only the parts of the parquet it needs),
@@ -221,8 +252,7 @@ pub async fn cache_s3_views(
                 return Err("cancelled".to_string());
             }
             let key = p.trim_start_matches(&format!("s3://{bucket}/")).to_string();
-            // Use the bucket as a top-level cache dir to avoid key collisions.
-            let local = root.join(&bucket).join(key.replace('/', "_"));
+            let local = cache_path(&root, &bucket, &key);
             let size = if local.exists() {
                 0
             } else {
@@ -315,4 +345,51 @@ pub async fn cache_s3_views(
 
     xfers::end(&cancel_id);
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::{Component, Path};
+
+    #[test]
+    fn every_key_gets_its_own_cache_file() {
+        let root = Path::new("/cache");
+        let a = cache_path(root, "b", "x/y_z.psm.parquet");
+        let b = cache_path(root, "b", "x_y/z.psm.parquet");
+        assert_ne!(a, b);
+        // macOS and Windows file systems ignore letter case.
+        let c = cache_path(root, "b", "X/y_z.psm.parquet");
+        let lower = |p: &Path| p.to_string_lossy().to_lowercase();
+        assert_ne!(lower(&a), lower(&c));
+        assert_ne!(
+            cache_path(root, "b1", "k.psm.parquet"),
+            cache_path(root, "b2", "k.psm.parquet")
+        );
+    }
+
+    #[test]
+    fn cache_paths_stay_inside_the_cache() {
+        let root = Path::new("/cache");
+        for (bucket, key) in [
+            ("../..", "x.psm.parquet"),
+            ("b", "..\\..\\x.psm.parquet"),
+            ("b", "../../x.psm.parquet"),
+        ] {
+            let p = cache_path(root, bucket, key);
+            assert!(p.starts_with(root), "{}", p.display());
+            assert!(
+                p.components()
+                    .all(|c| matches!(c, Component::RootDir | Component::Normal(_))),
+                "{}",
+                p.display()
+            );
+            assert!(!p.to_string_lossy().contains('\\'), "{}", p.display());
+            assert!(
+                p.to_string_lossy().ends_with(".psm.parquet"),
+                "{}",
+                p.display()
+            );
+        }
+    }
 }
