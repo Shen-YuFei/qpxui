@@ -5,12 +5,13 @@ import { fmtBytes, fmtCount } from "../lib/format";
 import PortalViews from "./PortalViews.vue";
 import PeptideSearchPane from "./PeptideSearchPane.vue";
 
-const TABS = [
+type Tab = "datasets" | "peptides";
+const TABS: { key: Tab; label: string }[] = [
   { key: "datasets", label: "Dataset search" },
   { key: "peptides", label: "Peptide & protein search" },
 ];
 
-const tab = ref<"datasets" | "peptides">("datasets");
+const tab = ref<Tab>("datasets");
 
 const PAGE_SIZE = 50;
 
@@ -137,7 +138,7 @@ const hasNext = computed(() => page.value < results.value.totalPages);
         :key="t.key"
         class="tab"
         :class="{ on: tab === t.key }"
-        @click="tab = t.key as any"
+        @click="tab = t.key"
       >
         {{ t.label }}
       </button>

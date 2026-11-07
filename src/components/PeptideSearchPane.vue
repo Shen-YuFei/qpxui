@@ -6,8 +6,10 @@ import PortalViews from "./PortalViews.vue";
 
 defineProps<{ organisms: string[] }>();
 
+type SearchType = "auto" | "peptide" | "protein" | "gene";
+
 const query = ref("");
-const explicitType = ref<"auto" | "peptide" | "protein" | "gene">("auto");
+const explicitType = ref<SearchType>("auto");
 const matchMode = ref("exact");
 const organism = ref("");
 const mod = ref("");
@@ -19,7 +21,7 @@ const error = ref("");
 
 const expanded = ref<PsHit | null>(null);
 
-const TYPES: { key: string; label: string }[] = [
+const TYPES: { key: SearchType; label: string }[] = [
   { key: "auto", label: "Auto" },
   { key: "peptide", label: "Peptide" },
   { key: "protein", label: "Protein" },
@@ -75,7 +77,6 @@ onMounted(async () => {
   } catch {
     /* non-fatal */
   }
-  runSearch();
 });
 </script>
 
@@ -88,7 +89,7 @@ onMounted(async () => {
           :key="t.key"
           class="type"
           :class="{ on: explicitType === t.key }"
-          @click="explicitType = t.key as any"
+          @click="explicitType = t.key"
         >
           {{ t.label }}
         </button>
