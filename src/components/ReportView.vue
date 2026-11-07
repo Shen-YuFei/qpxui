@@ -4,6 +4,7 @@ import { openReport, state, type ReportTab } from "../store";
 import type { DatasetInfo } from "../lib/api";
 import { datasetTables, evidence, proteinExpr, viewScale, type DatasetTables, type TableRef } from "../lib/report";
 import { countValue, datasetMeta, kpiSources, runInstrumentsEnzymes, sampleOrganisms } from "../lib/queries/header";
+import { quantSource } from "../lib/queries/quant";
 import { fmtShort } from "../lib/format";
 import { saveText } from "../lib/export";
 import ReportOverview from "./report/ReportOverview.vue";
@@ -55,7 +56,7 @@ const tabs = computed(() => {
     samples: !!(t.sample || t.run),
     proteins: !!(t.pg || (ev && proteinExpr(ev))),
     peptides: !!ev,
-    quant: !!(t.pg?.cols.has("intensities") || t.feature?.cols.has("intensities")),
+    quant: !!quantSource(t),
   };
   return TABS.filter((x) => ok[x.id]);
 });

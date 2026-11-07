@@ -13,17 +13,8 @@ import { saveText } from "../../lib/export";
 import { state } from "../../store";
 import { useLargeGate } from "../../lib/useLargeGate";
 import LargeGate from "./LargeGate.vue";
-import {
-  cachedSql,
-  ident,
-  objects,
-  proteinExpr,
-  sampleMapSql,
-  targetWhere,
-  type Column,
-  type DatasetTables,
-  type TableRef,
-} from "../../lib/report";
+import type { Column, DatasetTables } from "../../lib/report";
+import { QUANT_COLUMNS, quantMatrix, quantSource, sampleMeta } from "../../lib/queries/quant";
 import { listText } from "../../lib/format";
 import {
   averageLinkageOrder,
@@ -44,9 +35,9 @@ const props = defineProps<{ ds: DatasetInfo; t: DatasetTables; fileBase: string 
 /** Matrices above this many columns skip the O(n²) correlation / PCA. */
 const MAX_COLS = 400;
 
-const hasInt = (r?: TableRef) => !!r?.cols.has("intensities");
-const src: TableRef | undefined = hasInt(props.t.pg) ? props.t.pg : hasInt(props.t.feature) ? props.t.feature : undefined;
-const srcKind = src === props.t.pg ? "pg" : "feature";
+const source = quantSource(props.t);
+const src = source?.ref;
+const srcKind = source?.kind ?? "feature";
 
 const busy = ref(true);
 const { gate, check, release, dispose } = useLargeGate();
@@ -69,80 +60,23 @@ const q = ref("");
 const focus = ref<string | null>(null);
 const protTable = ref<InstanceType<typeof ReportTable> | null>(null);
 
-function matrixSql(S: TableRef): string {
-  const prot = srcKind === "pg" ? "anchor_protein" : proteinExpr(S);
-  const gene = S.cols.has("gg_names") ? "gg_names[1]" : "NULL";
-  const run = S.cols.has("run_file_name") ? "run_file_name" : "'all'";
-  // The contaminant flag is not always set; also match the usual name tags.
-  const byName = `(contains(upper(${prot}), 'CONTAMINANT') OR contains(upper(${prot}), 'CON__'))`;
-  const cont = S.cols.has("contaminant") ? `(coalesce(contaminant, false) OR ${byName})` : byName;
-  const R = props.t.run?.cols.has("samples") ? props.t.run : undefined;
-  const { ctes: maps, joins, col } = sampleMapSql(R);
-  return `
-WITH x AS (
-  SELECT ${prot} AS p, ${gene} AS g, ${run} AS r, ${cont} AS c, unnest(intensities) AS i
-  FROM ${ident(S.table)}
-  WHERE ${targetWhere(S)} AND ${prot} IS NOT NULL AND len(intensities) > 0
-)${maps}
-SELECT x.p AS protein, any_value(x.g) AS gene, bool_or(x.c) AS cont, ${col} AS col,
-       sum(x.i.intensity)::DOUBLE AS v, ${R ? "bool_and(m.sa IS NULL AND m1.sa IS NOT NULL)" : "false"} AS by_run,
-       ${R ? "bool_and(m.sa IS NULL AND m1.sa IS NULL AND x.r IN (SELECT r FROM m))" : "false"} AS unmapped
-FROM x ${joins}
-WHERE x.i.intensity > 0
-GROUP BY x.p, col`;
-}
-
 onMounted(() => {
   if (!src) return;
-  check([{ ref: src, cols: ["is_decoy", "anchor_protein", "protein_accessions", "pg_accessions", "gg_names", "run_file_name", "contaminant", "intensities"] }], build);
+  check([{ ref: src, cols: QUANT_COLUMNS }], build);
 });
 
 async function build() {
-  if (!src) return;
+  if (!source) return;
   busy.value = true;
   try {
-    const r = await cachedSql(props.ds, `quant.${srcKind}`, matrixSql(src), 5_000_000);
-    if (r.truncated) truncated.value = true;
-    const [ip, ig, ic, icol, iv, ibr] = ["protein", "gene", "cont", "col", "v", "by_run"].map((c) => r.columns.indexOf(c));
-    const iun = r.columns.indexOf("unmapped");
-    const cols = new Map<string, number>();
-    const prots = new Map<string, number>();
-    const dropped = new Set<string>();
-    const rowsIn = r.rows.filter((row) => {
-      if (!row[iun]) return true;
-      dropped.add(String(row[icol]));
-      return false;
-    });
-    unmapped.value = dropped.size;
-    for (const row of rowsIn) {
-      const c = String(row[icol]);
-      if (!cols.has(c)) cols.set(c, 0);
-      const p = String(row[ip]);
-      if (!prots.has(p)) prots.set(p, prots.size);
-    }
-    const samples = [...cols.keys()].sort(natural);
-    samples.forEach((s, j) => cols.set(s, j));
-    const n = samples.length;
-    const values = Array.from({ length: prots.size }, () => new Float64Array(n).fill(NaN));
-    const genes: (string | null)[] = new Array(prots.size).fill(null);
-    const cont = new Uint8Array(prots.size);
-    let runOnly = rowsIn.length > 0;
-    for (const row of rowsIn) {
-      const i = prots.get(String(row[ip]))!;
-      const v = Number(row[iv]);
-      if (v > 0) values[i][cols.get(String(row[icol]))!] = Math.log2(v);
-      if (row[ig] != null) genes[i] = String(row[ig]);
-      if (row[ic]) cont[i] = 1;
-      if (!row[ibr]) runOnly = false;
-    }
-    raw.value = { samples, proteins: [...prots.keys()], genes, values };
-    contaminant.value = cont;
-    byRunOnly.value = runOnly;
+    const q = await quantMatrix(props.ds, props.t, source);
+    if (q.truncated) truncated.value = true;
+    unmapped.value = q.unmapped;
+    raw.value = q.matrix;
+    contaminant.value = q.contaminant;
+    byRunOnly.value = q.byRunOnly;
 
-    if (props.t.sample?.cols.has("sample_accession")) {
-      const s = await cachedSql(props.ds, "quant.samples", `SELECT * FROM ${ident(props.t.sample.table)}`, 100000);
-      meta.value = new Map(objects(s).map((x) => [String(x.sample_accession), x]));
-    }
+    if (props.t.sample?.cols.has("sample_accession")) meta.value = await sampleMeta(props.ds, props.t.sample);
     groupBy.value = groupOptions.value[0] ?? "";
     const want = state.proteinFocus;
     focus.value = want && raw.value.proteins.includes(want) ? want : (shownProts.value[0]?.protein ?? null);
