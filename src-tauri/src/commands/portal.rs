@@ -98,10 +98,7 @@ async fn remote_size(client: &Client, url: &str, token: &AtomicBool) -> Result<u
     .await
 }
 
-async fn get_html(url: &str) -> Result<String, String> {
-    let client = portal_http::client_builder()?
-        .build()
-        .map_err(|e| format!("portal HTTP client: {e:?}"))?;
+async fn get_html(client: &Client, url: &str) -> Result<String, String> {
     let resp = client
         .get(url)
         .header("Accept", "text/html")
@@ -284,10 +281,11 @@ struct DatasetSearchPage {
 /// results). This gives a rich, searchable catalogue rather than a bare list.
 #[tauri::command]
 pub async fn portal_registry(page_size: Option<usize>) -> Result<Vec<PortalDataset>, String> {
+    registry(&portal_http::client()?, page_size).await
+}
+
+async fn registry(client: &Client, page_size: Option<usize>) -> Result<Vec<PortalDataset>, String> {
     let page_size = page_size.unwrap_or(50).clamp(1, 100);
-    let client = portal_http::client_builder()?
-        .build()
-        .map_err(|e| format!("portal HTTP client: {e:?}"))?;
 
     async fn get_page(client: &Client, url: &str) -> Result<DatasetSearchPage, String> {
         let mut last = "no attempt".to_string();
@@ -307,7 +305,7 @@ pub async fn portal_registry(page_size: Option<usize>) -> Result<Vec<PortalDatas
     }
 
     let first = get_page(
-        &client,
+        client,
         &format!("https://api.quantms.org/dataset-search/datasets?page_size={page_size}&page=1"),
     )
     .await?;
@@ -315,7 +313,7 @@ pub async fn portal_registry(page_size: Option<usize>) -> Result<Vec<PortalDatas
     let mut all = first.datasets;
     for p in 2..=total_pages {
         let page = get_page(
-            &client,
+            client,
             &format!(
                 "https://api.quantms.org/dataset-search/datasets?page_size={page_size}&page={p}"
             ),
@@ -522,15 +520,33 @@ pub async fn portal_list_views(
     organism: Option<String>,
     psm_count: Option<u64>,
 ) -> Result<Vec<ViewInfo>, String> {
+    list_views(
+        &portal_http::client()?,
+        &dataset,
+        organism.as_deref(),
+        psm_count,
+    )
+    .await
+}
+
+async fn list_views(
+    client: &Client,
+    dataset: &str,
+    organism: Option<&str>,
+    psm_count: Option<u64>,
+) -> Result<Vec<ViewInfo>, String> {
     let (accession, wanted) = match dataset.split_once('/') {
         Some((acc, run)) => (acc.to_string(), Some(run.to_string())),
-        None => (dataset.clone(), None),
+        None => (dataset.to_string(), None),
     };
     let ds_url = format!("{}{accession}/", view_base());
     let direct = match &wanted {
         Some(run) => {
             let run_url = format!("{ds_url}{run}/");
-            get_html(&run_url).await.ok().map(|html| (run_url, html))
+            get_html(client, &run_url)
+                .await
+                .ok()
+                .map(|html| (run_url, html))
         }
         None => None,
     };
@@ -539,10 +555,10 @@ pub async fn portal_list_views(
         None => {
             // The registry can name a run folder that was since replaced, so
             // pick one of the runs the server holds now.
-            let ds_html = get_html(&ds_url)
+            let ds_html = get_html(client, &ds_url)
                 .await
                 .map_err(|e| format!("dataset {accession} not found on the portal ({e})"))?;
-            let run = pick_run(&ds_url, &ds_html, organism.as_deref(), psm_count)
+            let run = pick_run(client, &ds_url, &ds_html, organism, psm_count)
                 .await
                 .map_err(|e| match &wanted {
                     Some(run) => {
@@ -551,7 +567,7 @@ pub async fn portal_list_views(
                     None => e,
                 })?;
             let run_url = format!("{ds_url}{run}/");
-            let run_html = get_html(&run_url).await?;
+            let run_html = get_html(client, &run_url).await?;
             (run_url, run_html)
         }
     };
@@ -562,7 +578,7 @@ pub async fn portal_list_views(
     } else {
         run_url
     };
-    let q_html = get_html(&qpx_url).await?;
+    let q_html = get_html(client, &qpx_url).await?;
 
     let mut views = Vec::new();
     for (name, size) in parquet_entries(&q_html) {
@@ -689,6 +705,7 @@ fn choose_run(
 }
 
 async fn pick_run(
+    client: &Client,
     ds_url: &str,
     ds_html: &str,
     organism: Option<&str>,
@@ -701,9 +718,6 @@ async fn pick_run(
     if runs.len() == 1 {
         return Ok(runs[0].clone());
     }
-    let client = portal_http::client_builder()?
-        .build()
-        .map_err(|e| format!("portal HTTP client: {e:?}"))?;
     let fetches = runs.into_iter().map(|run| {
         let client = client.clone();
         let url = format!("{ds_url}{run}/provenance.json");
@@ -733,20 +747,26 @@ pub async fn portal_cache_views(
     cancel_id: String,
     urls: Vec<String>,
 ) -> Result<Vec<ViewInfo>, String> {
-    portal_cache_views_impl(Some(&app), &CacheKind::Portal.root()?, cancel_id, urls).await
+    let client = portal_http::client()?;
+    portal_cache_views_impl(
+        Some(&app),
+        &client,
+        &CacheKind::Portal.root()?,
+        cancel_id,
+        urls,
+    )
+    .await
 }
 
 /// Testable core of [`portal_cache_views`]: `app` may be `None` and `root`
 /// a temporary folder in tests.
 async fn portal_cache_views_impl(
     app: Option<&AppHandle>,
+    client: &Client,
     root: &Path,
     cancel_id: String,
     urls: Vec<String>,
 ) -> Result<Vec<ViewInfo>, String> {
-    let client = portal_http::client_builder()?
-        .build()
-        .map_err(|e| format!("portal HTTP client: {e:?}"))?;
     std::fs::create_dir_all(root).map_err(|e| e.to_string())?;
     let batch = xfers::begin(&cancel_id);
     let token = &batch.token;
@@ -775,7 +795,7 @@ async fn portal_cache_views_impl(
         sizes.push(if local.exists() {
             None
         } else {
-            let size = remote_size(&client, url, token)
+            let size = remote_size(client, url, token)
                 .await
                 .map_err(|e| format!("size of {name}: {e}"))?;
             Some(size)
@@ -835,6 +855,11 @@ async fn portal_cache_views_impl(
 mod tests {
     use super::*;
 
+    /// A client configured like the app's, owned by one test's runtime.
+    fn portal_client() -> Client {
+        portal_http::client_builder().unwrap().build().unwrap()
+    }
+
     #[test]
     fn size_parser_strips_tags_and_nbsp() {
         assert_eq!(parse_size(" &nbsp;<small>5,794,378 B</small>"), 5_794_378);
@@ -846,8 +871,9 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs network access to the quantms portal"]
     async fn portal_lists_and_downloads_pxd014414() {
-        let ds = "PXD014414".to_string();
-        let views = portal_list_views(ds.clone(), None, None)
+        let ds = "PXD014414";
+        let client = portal_client();
+        let views = list_views(&client, ds, None, None)
             .await
             .expect("list views");
         assert!(!views.is_empty(), "expected views for {ds}");
@@ -862,10 +888,15 @@ mod tests {
             .map(|v| v.path.clone())
             .expect("dataset view present");
         let tmp = tempfile::tempdir().unwrap();
-        let cached =
-            portal_cache_views_impl(None, tmp.path(), "test-cancel".to_string(), vec![url])
-                .await
-                .expect("cache");
+        let cached = portal_cache_views_impl(
+            None,
+            &client,
+            tmp.path(),
+            "test-cancel".to_string(),
+            vec![url],
+        )
+        .await
+        .expect("cache");
         assert_eq!(cached.len(), 1);
         assert!(cached[0].size_bytes > 0);
         assert!(std::path::Path::new(&cached[0].path).exists());
@@ -964,7 +995,7 @@ mod tests {
         let name = format!("nohead-test-{}.feature.parquet", std::process::id());
         let url = format!("{base}/{name}");
         let tmp = tempfile::tempdir().unwrap();
-        let out = portal_cache_views_impl(None, tmp.path(), "nohead".into(), vec![url])
+        let out = portal_cache_views_impl(None, &client, tmp.path(), "nohead".into(), vec![url])
             .await
             .expect("download");
         assert_eq!(std::fs::read(&out[0].path).unwrap(), body);
@@ -1056,7 +1087,7 @@ mod tests {
     async fn run_choice_reports_provenance_errors() {
         let base = status_server("500 Internal Server Error").await;
         let html = r#"<a href="aaaaaaaa1111/">a</a> <a href="bbbbbbbb2222/">b</a>"#;
-        let e = pick_run(&format!("{base}/ds/"), html, None, None)
+        let e = pick_run(&Client::new(), &format!("{base}/ds/"), html, None, None)
             .await
             .unwrap_err();
         assert!(e.contains("provenance.json") && e.contains("500"), "{e}");
@@ -1082,7 +1113,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().to_path_buf();
         let job = tokio::spawn(async move {
-            portal_cache_views_impl(None, &root, "first".into(), vec![big]).await
+            portal_cache_views_impl(None, &Client::new(), &root, "first".into(), vec![big]).await
         });
         tokio::time::sleep(std::time::Duration::from_millis(400)).await;
         assert!(xfers::cancel("first"));
@@ -1091,9 +1122,10 @@ mod tests {
         let body: Vec<u8> = (0..100_000u32).map(|i| (i % 7) as u8).collect();
         let base = no_head_server(body.clone()).await;
         let url = format!("{base}/after-cancel-{}.pg.parquet", std::process::id());
-        let out = portal_cache_views_impl(None, tmp.path(), "second".into(), vec![url])
-            .await
-            .expect("second download");
+        let out =
+            portal_cache_views_impl(None, &Client::new(), tmp.path(), "second".into(), vec![url])
+                .await
+                .expect("second download");
         assert_eq!(std::fs::read(&out[0].path).unwrap(), body);
     }
 
@@ -1109,10 +1141,9 @@ mod tests {
             format!("{base}/{name}"),
             id.clone(),
         );
-        let task =
-            tokio::spawn(
-                async move { portal_cache_views_impl(None, &root, task_id, vec![url]).await },
-            );
+        let task = tokio::spawn(async move {
+            portal_cache_views_impl(None, &Client::new(), &root, task_id, vec![url]).await
+        });
         let part = local.with_file_name(format!("{name}.part"));
         for _ in 0..100 {
             if part.exists() && std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0) > 0 {
@@ -1140,6 +1171,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let r = portal_cache_views_impl(
             None,
+            &Client::new(),
             tmp.path(),
             "test-huge".into(),
             vec![format!("{base}/{name}")],
@@ -1203,7 +1235,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs network access to the quantms portal"]
     async fn stale_registry_ref_falls_back_to_a_live_run() {
-        let views = portal_list_views("IPX0001804002/0e8d80a52200".into(), None, None)
+        let views = list_views(&portal_client(), "IPX0001804002/0e8d80a52200", None, None)
             .await
             .expect("fallback run");
         assert!(views.iter().any(|v| v.view == "psm"));
@@ -1213,7 +1245,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs network access to the quantms portal"]
     async fn registry_lists_and_ref_resolves() {
-        let rows = portal_registry(Some(100)).await.expect("registry");
+        let client = portal_client();
+        let rows = registry(&client, Some(100)).await.expect("registry");
         assert!(
             rows.len() >= 80,
             "expected ~83 unique datasets, got {}",
@@ -1223,9 +1256,14 @@ mod tests {
             .iter()
             .find(|r| r.dataset_ref.is_some())
             .expect("some dataset has a run ref");
-        let views = portal_list_views(with_ref.dataset_ref.clone().unwrap(), None, None)
-            .await
-            .expect("list views from ref");
+        let views = list_views(
+            &client,
+            with_ref.dataset_ref.as_deref().unwrap(),
+            None,
+            None,
+        )
+        .await
+        .expect("list views from ref");
         assert!(!views.is_empty());
         assert!(views.iter().any(|v| v.size_bytes > 0));
     }

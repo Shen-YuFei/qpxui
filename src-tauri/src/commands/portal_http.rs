@@ -1,6 +1,21 @@
 use reqwest::{Certificate, Client, ClientBuilder};
 use std::ffi::OsStr;
 use std::path::Path;
+use std::sync::OnceLock;
+
+/// The portal HTTP client, built once so that requests reuse its pooled
+/// connections: a TLS handshake can take several times longer than the
+/// listing request it precedes.
+pub(super) fn client() -> Result<Client, String> {
+    static CLIENT: OnceLock<Client> = OnceLock::new();
+    if let Some(client) = CLIENT.get() {
+        return Ok(client.clone());
+    }
+    let client = client_builder()?
+        .build()
+        .map_err(|e| format!("portal HTTP client: {e:?}"))?;
+    Ok(CLIENT.get_or_init(|| client).clone())
+}
 
 pub(super) fn client_builder() -> Result<ClientBuilder, String> {
     let file = std::env::var_os("SSL_CERT_FILE");
