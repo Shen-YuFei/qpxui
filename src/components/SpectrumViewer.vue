@@ -11,6 +11,7 @@ import { savePng, saveText } from "../lib/export";
 import { settings } from "../lib/settings";
 import type { TableRef } from "../lib/report";
 import { peptidoformPsms, psmPeaks, psmRecord, type PsmKey } from "../lib/queries/spectrum";
+import { cvMap } from "../lib/qpx";
 import {
   KOINA_MODELS,
   fetchUsi,
@@ -299,37 +300,6 @@ async function load() {
   }
   if (id === loadSeq && rec.value) loadMirror();
 }
-
-/** `cv_params` as name -> value. Files store it as a list of
- * {cv_name, cv_value} structs, a MAP, or (after a QPX 1.3 relayout) a struct
- * with one field per name. */
-function cvMap(v: unknown): Record<string, string> {
-  const out: Record<string, string> = {};
-  if (Array.isArray(v)) {
-    for (const p of v as any[]) {
-      if (!p || typeof p !== "object") continue;
-      const k = p.cv_name ?? p.name ?? p.key;
-      if (k != null) out[String(k)] = String(p.cv_value ?? p.value ?? "");
-    }
-  } else if (v && typeof v === "object") {
-    for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
-      if (x != null && typeof x !== "object") out[k] = String(x);
-    }
-  }
-  const norm: Record<string, string> = {};
-  for (const [k, x] of Object.entries(out)) {
-    const lk = k.toLowerCase();
-    norm[CV_ALIASES[lk] ?? lk] = x;
-  }
-  return norm;
-}
-
-// Equivalent cv_params keys across converters (π-MSNet uses PSI-MS names,
-// quantms uses short struct field names).
-const CV_ALIASES: Record<string, string> = {
-  "fragmentation method": "dissociation method",
-  "collision energy": "normalized collision energy",
-};
 
 function cvOf(row: Record<string, any>, name: string): string | undefined {
   return cvMap(row.cv_params)[name];

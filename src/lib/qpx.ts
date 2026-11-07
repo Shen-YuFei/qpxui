@@ -7,7 +7,7 @@
 //   never reads ids, so only the values shown in tables change.
 // - Name-value lists (additional_scores, cv_params, additional_intensities)
 //   may be stored as one struct with a field per name (footer
-//   `qpx.struct_lists`): see cvMap in SpectrumViewer and isScoreList in format.
+//   `qpx.struct_lists`): see cvMap below and isScoreList in format.
 
 /** Views the reports read. */
 export type ViewKind = "feature" | "psm" | "pg" | "run" | "sample" | "dataset";
@@ -31,3 +31,34 @@ export const SAMPLE_FACETS = [
   "developmental_stage",
   "histologic_subtype",
 ];
+
+// Equivalent cv_params keys across converters (π-MSNet uses PSI-MS names,
+// quantms uses short struct field names).
+const CV_ALIASES: Record<string, string> = {
+  "fragmentation method": "dissociation method",
+  "collision energy": "normalized collision energy",
+};
+
+/** `cv_params` as lower-case name -> value. Files store it as a list of
+ * {cv_name, cv_value} structs, a MAP, or (after a QPX 1.3 relayout) a struct
+ * with one field per name. */
+export function cvMap(v: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (Array.isArray(v)) {
+    for (const p of v as any[]) {
+      if (!p || typeof p !== "object") continue;
+      const k = p.cv_name ?? p.name ?? p.key;
+      if (k != null) out[String(k)] = String(p.cv_value ?? p.value ?? "");
+    }
+  } else if (v && typeof v === "object") {
+    for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+      if (x != null && typeof x !== "object") out[k] = String(x);
+    }
+  }
+  const norm: Record<string, string> = {};
+  for (const [k, x] of Object.entries(out)) {
+    const lk = k.toLowerCase();
+    norm[CV_ALIASES[lk] ?? lk] = x;
+  }
+  return norm;
+}
