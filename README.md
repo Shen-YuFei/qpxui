@@ -63,6 +63,9 @@ Download the installer for your platform from the
 
 1. Launch QPX UI and pick a source:
    - **🌍 Quantms portal**: pick a reanalysed dataset (for example `PXD014414`), then press **⚡ Stream**.
+   - **🔎 Discover quantms data**: search the portal's datasets, or find the datasets that contain a
+     peptide, protein or gene; expand one to stream or download its views. The start page also
+     lists a few recommended datasets.
    - **🗂️ Folder / collection**: a folder with one dataset, or with many `PXD*/` dataset folders.
    - **📄 Single file**: one `*.parquet` view; the files next to it are picked up too.
    - **☁️ S3 bucket**: a bucket/prefix, read with your AWS credentials.
@@ -83,6 +86,7 @@ Download the installer for your platform from the
 | **Folder / collection** | Opens one QPX dataset folder, or a folder tree holding many projects. |
 | **S3 bucket** | Lists datasets under a bucket/prefix using your AWS credentials. You can stream the files lazily or download them to a local cache. S3-compatible stores (MinIO, Ceph) work too. |
 | **Quantms portal** | Searchable list of the datasets on [portal.quantms.org](https://portal.quantms.org) (title, organism, instrument, counts). You can stream a dataset lazily or download it to a local cache. No account needed. |
+| **Discover quantms data** | Searches the portal's datasets by text, organism, instrument and collection, and finds the datasets that contain a peptide, protein or gene. Expand a result to stream or download its views. |
 
 Downloads show progress and can be cancelled at any point, even in the middle of a file; partial
 files are removed. Before a download starts, the app checks the free space on the cache disk: it
@@ -247,7 +251,7 @@ On macOS, launch the executable directly (for example,
 `SSL_CERT_FILE=/path/to/ca-bundle.pem /Applications/qpxui.app/Contents/MacOS/qpxui`);
 on Windows PowerShell, set `$env:SSL_CERT_FILE` before launching the executable.
 Only use certificates from a trusted source. Restart the app after changing the configuration.
-These settings apply to portal registry, listing, downloads and streaming; the separate S3 client
+These settings apply to portal registry, search, listing, downloads and streaming; the separate S3 client
 may handle certificate configuration differently. HTTPS certificate verification remains enabled.
 
 **Download to cache** instead fetches whole files once (with progress and cancel), for fully
@@ -321,7 +325,7 @@ Many reanalysed datasets (e.g. `PXD014414`) can be opened directly with the **Qu
 ```
 ┌───────────────────────────────────────────────────────────────────┐
 │ WebView: Vue 3 + duckdb-wasm + ECharts                            │
-│  SourcePicker · PortalPicker · S3Picker                           │
+│  SourcePicker · PortalPicker · S3Picker · DiscoverView            │
 │  DatasetExplorer (sidebar, search box)                            │
 │  ReportView ─ Overview · QC · PTMs · Samples · Proteins ·         │
 │               Quantification · Peptidoforms · SpectrumViewer      │
@@ -334,7 +338,8 @@ Many reanalysed datasets (e.g. `PXD014414`) can be opened directly with the **Qu
 │  sources.rs     QPX discovery (file / folder / collection)        │
 │  io.rs          write exports                                     │
 │  s3.rs          list / download S3 objects (aws-sdk-s3, rustls)   │
-│  portal.rs      quantms portal registry, listing, downloads       │
+│  portal.rs      portal registry, search, listing, downloads       │
+│  peptide_search.rs  datasets holding a peptide, protein or gene   │
 │  portal_http.rs shared HTTPS client, certificate settings         │
 │  s3stream.rs    127.0.0.1 range proxy with block cache            │
 │                 (S3, portal HTTP and local files)                 │
@@ -383,6 +388,8 @@ qpxui/
 │       ├── ChartCard.vue, ReportTable.vue
 │       ├── PeptideSeq.vue, PTMSegs.vue, PTMBadges.vue, PTMTip.vue  # PTM-coloured cells
 │       ├── SourcePicker.vue, PortalPicker.vue, S3Picker.vue, DownloadProgress.vue
+│       ├── DiscoverView.vue, PeptideSearchPane.vue, RecommendedDatasets.vue
+│       ├── PortalViews.vue        # a portal dataset's views: stream or download
 │       ├── DatasetExplorer.vue    # sidebar: search, datasets, views
 │       ├── ViewPanel.vue, DataTable.vue, SummaryView.vue, QueryView.vue
 │       └── SettingsPanel.vue, StructuredView.vue
