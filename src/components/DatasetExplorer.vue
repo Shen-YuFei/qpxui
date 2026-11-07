@@ -10,11 +10,7 @@ const streamStats = ref<Record<string, StreamStat>>({});
 let timer: number | undefined;
 async function refreshStats() {
   if (!state.datasets.some((d) => d.views.some(isStreamed))) return;
-  try {
-    streamStats.value = await api.streamS3Stats();
-  } catch {
-    /* backend not ready */
-  }
+  streamStats.value = await api.streamS3Stats();
 }
 onMounted(() => {
   refreshStats();

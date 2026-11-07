@@ -45,7 +45,7 @@ function flash(text: string) {
 async function exportPng() {
   const inst = (chart.value as any)?.chart;
   if (!inst) return;
-  const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg-panel").trim() || "#fff";
+  const bg = chartTheme().bg;
   try {
     const p = await savePng(name.value, inst.getDataURL({ type: "png", pixelRatio: 2, backgroundColor: bg }));
     if (p) flash("Saved");

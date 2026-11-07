@@ -6,7 +6,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import VChart from "vue-echarts";
 import PeptideSeq from "./PeptideSeq.vue";
 import { runSql } from "../lib/duck";
-import { escapeHtml, toCsv } from "../lib/charts";
+import { chartTheme, escapeHtml, toCsv } from "../lib/charts";
 import { savePng, saveText } from "../lib/export";
 import { settings } from "../lib/settings";
 import { ident, lit, objects, type TableRef } from "../lib/report";
@@ -284,9 +284,7 @@ function colorOf(p: Peak): string {
 
 const option = computed(() => {
   void settings.theme;
-  const s = getComputedStyle(document.documentElement);
-  const dim = s.getPropertyValue("--text-dim").trim() || "#94a3b8";
-  const border = s.getPropertyValue("--border").trim() || "#334155";
+  const { dim, border } = chartTheme();
   const grey = settings.theme === "light" ? "#94a3b8" : "#64748b";
   const mi = maxInt.value;
   const pts = peaks.value.map((p, i) => ({ p, i, rel: (p.intensity / mi) * 100 }));
@@ -525,7 +523,7 @@ const fileName = computed(() => `${props.fileBase ? props.fileBase + "_" : ""}${
 async function exportPng() {
   const inst = (chart.value as any)?.chart;
   if (!inst) return;
-  const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg-panel").trim() || "#fff";
+  const bg = chartTheme().bg;
   try {
     if (await savePng(fileName.value, inst.getDataURL({ type: "png", pixelRatio: 2, backgroundColor: bg }))) flash("Saved");
   } catch (e) {

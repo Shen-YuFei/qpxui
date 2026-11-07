@@ -54,14 +54,14 @@ export interface ChartTheme {
 
 export function chartTheme(): ChartTheme {
   const s = getComputedStyle(document.documentElement);
-  const v = (n: string, d: string) => s.getPropertyValue(n).trim() || d;
+  const v = (n: string) => s.getPropertyValue(n).trim();
   return {
-    text: v("--text", "#e2e8f0"),
-    dim: v("--text-dim", "#94a3b8"),
-    border: v("--border", "#334155"),
-    accent: v("--accent", "#22d3ee"),
-    accent2: v("--accent-2", "#818cf8"),
-    bg: v("--bg-panel", "#0b1120"),
+    text: v("--text"),
+    dim: v("--text-dim"),
+    border: v("--border"),
+    accent: v("--accent"),
+    accent2: v("--accent-2"),
+    bg: v("--bg-panel"),
   };
 }
 

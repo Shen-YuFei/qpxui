@@ -59,11 +59,7 @@ function load(): SettingsState {
 export const settings = reactive<SettingsState>(load());
 
 export function persist() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-  } catch {
-    /* storage unavailable — ignore */
-  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
 }
 
 /** Push the current theme onto <html> so the CSS variables switch. */
