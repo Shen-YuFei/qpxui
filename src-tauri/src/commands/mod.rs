@@ -1,4 +1,5 @@
 pub mod io;
+pub mod peptide_search;
 pub mod portal;
 mod portal_http;
 pub mod progress;
