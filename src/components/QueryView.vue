@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, shallowRef } from "vue";
-import { ensureViewReady, runSql, type QueryResult } from "../lib/duck";
+import { ensureViewReady, type QueryResult } from "../lib/duck";
+import { QUERY_EXAMPLES as Examples, QUERY_LIMIT as limit, runQuery, substituteTable } from "../lib/queries/sqlConsole";
 import { isStructured, formatCompact, scalarText } from "../lib/format";
 import PTMBadges from "./PTMBadges.vue";
 import PTMSegs from "./PTMSegs.vue";
@@ -12,7 +13,6 @@ const props = defineProps<{ view: ViewInfo }>();
 
 const tableName = ref("");
 const sql = ref("");
-const limit = 2000;
 // Replaced as a whole on each run: no deep proxies over the rows.
 const results = shallowRef<QueryResult>({ columns: [], rows: [], rowCount: 0, truncated: false });
 const busy = ref(false);
@@ -20,24 +20,13 @@ const error = ref("");
 const lastSql = ref("");
 const expanded = ref<Record<string, boolean>>({});
 
-const Examples = [
-  "SELECT * FROM {table} LIMIT 50",
-  "SELECT anchor_protein, COUNT(*) AS n FROM {table} WHERE anchor_protein IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 20",
-  "SELECT run_file_name, COUNT(*) AS n FROM {table} GROUP BY 1 ORDER BY 2 DESC",
-  "SELECT charge, COUNT(*) AS n FROM {table} GROUP BY 1 ORDER BY 1",
-];
-
 onMounted(async () => {
   tableName.value = await ensureViewReady(props.view);
-  sql.value = `SELECT * FROM "${tableName.value}" LIMIT 50`;
+  sql.value = substituteTable(Examples[0], tableName.value);
 });
 
-function substitute(text: string): string {
-  return text.replace("{table}", `"${tableName.value}"`);
-}
-
 function insertExample(i: number) {
-  sql.value = substitute(Examples[i]);
+  sql.value = substituteTable(Examples[i], tableName.value);
   run();
 }
 
@@ -46,11 +35,7 @@ async function run() {
   error.value = "";
   lastSql.value = sql.value;
   try {
-    let body = sql.value.trim();
-    if (!body) body = `SELECT * FROM "${tableName.value}"`;
-    body = substitute(body);
-    const final = /limit\s+\d+\s*$/i.test(body) ? body : `${body} LIMIT ${limit}`;
-    results.value = await runSql(final);
+    results.value = await runQuery(sql.value, tableName.value);
   } catch (e: any) {
     error.value = String(e);
     results.value = { columns: [], rows: [], rowCount: 0, truncated: false };
