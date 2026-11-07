@@ -735,22 +735,19 @@ async fn pick_run(
         let client = client.clone();
         let url = format!("{ds_url}{run}/provenance.json");
         async move {
-            let p = client
+            let p: RunProvenance = client
                 .get(&url)
                 .send()
                 .await
-                .ok()?
-                .error_for_status()
-                .ok()?;
-            let p: RunProvenance = p.json().await.ok()?;
-            Some(run_info(run, p))
+                .and_then(|r| r.error_for_status())
+                .map_err(|e| format!("{url}: {}", e.without_url()))?
+                .json()
+                .await
+                .map_err(|e| format!("{url}: {}", e.without_url()))?;
+            Ok::<_, String>(run_info(run, p))
         }
     });
-    let infos: Vec<RunInfo> = futures::future::join_all(fetches)
-        .await
-        .into_iter()
-        .flatten()
-        .collect();
+    let infos = futures::future::try_join_all(fetches).await?;
     choose_run(infos, organism, psm_count)
 }
 
@@ -1059,6 +1056,37 @@ mod tests {
         let size = remote_size(&client, &url, &cancelled);
         let r = tokio::time::timeout(std::time::Duration::from_secs(2), size).await;
         assert_eq!(r.expect("cancel is prompt"), Err("cancelled".to_string()));
+    }
+
+    /// Answers every request with `status` and an empty body.
+    async fn status_server(status: &'static str) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            loop {
+                let (mut sock, _) = listener.accept().await.unwrap();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let _ = sock.read(&mut buf).await;
+                    let resp = format!(
+                        "HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    );
+                    let _ = sock.write_all(resp.as_bytes()).await;
+                });
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn run_choice_reports_provenance_errors() {
+        let base = status_server("500 Internal Server Error").await;
+        let html = r#"<a href="aaaaaaaa1111/">a</a> <a href="bbbbbbbb2222/">b</a>"#;
+        let e = pick_run(&format!("{base}/ds/"), html, None, None)
+            .await
+            .unwrap_err();
+        assert!(e.contains("provenance.json") && e.contains("500"), "{e}");
     }
 
     #[tokio::test]
