@@ -1,9 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { api, type DatasetInfo, type PsHit, type PsModification, type PsSearchResult, type ViewInfo } from "../lib/api";
-import { loadDatasets } from "../store";
-import { confirmDownload, totalBytes, useDownload } from "../lib/downloads";
-import DownloadProgress from "./DownloadProgress.vue";
+import { api, type PsHit, type PsModification, type PsSearchResult } from "../lib/api";
+import PortalViews from "./PortalViews.vue";
 
 defineProps<{ organisms: string[] }>();
 
@@ -17,15 +15,8 @@ const mods = ref<PsModification[]>([]);
 const result = ref<PsSearchResult | null>(null);
 const busy = ref(false);
 const error = ref("");
-/** Listing, streaming or downloading the open dataset's views failed. */
-const viewError = ref("");
 
 const expanded = ref<PsHit | null>(null);
-const views = ref<ViewInfo[]>([]);
-const checked = ref<Record<string, boolean>>({});
-const downloading = ref(false);
-const { id: downloadId, cancelling, files: downloadFiles, cancel, run: runDownload, unmounted } = useDownload();
-const viewsBusy = ref(false);
 
 const TYPES: { key: string; label: string }[] = [
   { key: "auto", label: "Auto" },
@@ -54,11 +45,8 @@ async function runSearch() {
   const id = ++searchSeq;
   busy.value = true;
   error.value = "";
-  // The new hits replace the open one, and with it its download.
-  void cancel();
+  // The new hits replace the open one (closing it cancels its download).
   expanded.value = null;
-  views.value = [];
-  checked.value = {};
   try {
     const res = await api.psSearch(q, {
       dtype: explicitType.value === "auto" ? null : explicitType.value,
@@ -75,81 +63,8 @@ async function runSearch() {
   }
 }
 
-async function toggleHit(h: PsHit) {
-  if (downloadId.value) cancel();
-  if (isExpanded(h)) {
-    expanded.value = null;
-    views.value = [];
-    checked.value = {};
-    return;
-  }
-  expanded.value = h;
-  views.value = [];
-  checked.value = {};
-  viewsBusy.value = true;
-  viewError.value = "";
-  try {
-    const v = await api.portalListViews(h.datasetRef || h.datasetAccession, h.organism, null);
-    if (expanded.value === h) views.value = v;
-  } catch (e: any) {
-    if (expanded.value === h) viewError.value = String(e);
-  } finally {
-    if (expanded.value === h) viewsBusy.value = false;
-  }
-}
-
-function selectedCount() {
-  return views.value.filter((v) => checked.value[v.path]).length;
-}
-function selectedBytes() {
-  return totalBytes(views.value.filter((v) => checked.value[v.path]));
-}
-async function loadSelection(h: PsHit) {
-  busy.value = true;
-  downloading.value = true;
-  viewError.value = "";
-  try {
-    const sel = views.value.filter((v) => checked.value[v.path]);
-    if (!sel.length) throw new Error("Select at least one view to load.");
-    if (!(await confirmDownload(sel, "portal"))) return;
-    if (unmounted() || expanded.value !== h) return;
-    const local = await runDownload((id) => api.portalCacheViews(sel.map((v) => v.path), id));
-    // Left meanwhile (which also cancels): say nothing there.
-    if (unmounted() || expanded.value !== h) return;
-    if (!local) {
-      viewError.value = "Download cancelled; partial files were removed.";
-      return;
-    }
-    const ds: DatasetInfo = {
-      prefix: h.datasetAccession,
-      path: `quantms portal / ${h.datasetRef || h.datasetAccession}`,
-      views: local.sort((a, b) => a.view.localeCompare(b.view)),
-    };
-    loadDatasets([ds], "portal | " + h.datasetAccession);
-  } catch (e: any) {
-    viewError.value = String(e);
-  } finally {
-    busy.value = false;
-    downloading.value = false;
-  }
-}
-function streamSelection(h: PsHit) {
-  viewError.value = "";
-  const sel = views.value.filter((v) => checked.value[v.path]);
-  if (!sel.length) {
-    viewError.value = "Select at least one view to stream.";
-    return;
-  }
-  const ds: DatasetInfo = {
-    prefix: h.datasetAccession,
-    path: `quantms portal / ${h.datasetRef || h.datasetAccession}`,
-    views: sel.map((v) => ({ ...v })).sort((a, b) => a.view.localeCompare(b.view)),
-  };
-  loadDatasets([ds], "portal | " + h.datasetAccession + " (stream)");
-}
-function toggleAll() {
-  const allOn = views.value.every((v) => checked.value[v.path]);
-  for (const v of views.value) checked.value[v.path] = !allOn;
+function toggleHit(h: PsHit) {
+  expanded.value = isExpanded(h) ? null : h;
 }
 
 function fmtCount(n: number | null | undefined): string {
@@ -157,12 +72,6 @@ function fmtCount(n: number | null | undefined): string {
   if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M`;
   if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}K`;
   return String(n);
-}
-function fmt(n: number | null | undefined, force = false): string {
-  if (!n) return force ? "0 B" : "—";
-  const u = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(n) / Math.log(1024));
-  return `${(n / Math.pow(1024, i)).toFixed(1)} ${u[i]}`;
 }
 
 onMounted(async () => {
@@ -173,7 +82,6 @@ onMounted(async () => {
   }
   runSearch();
 });
-
 </script>
 
 <template>
@@ -262,45 +170,12 @@ onMounted(async () => {
             <span v-for="(pf, i) in h.samplePeptidoforms.slice(0, 3)" :key="i" class="mono pf">{{ pf }}</span>
           </div>
 
-          <div v-if="isExpanded(h)" class="loadbox">
-            <div class="toolbar">
-              <span class="muted">
-                {{ views.length }} view(s) · {{ selectedCount() }} selected<template v-if="selectedCount()"> · {{ fmt(selectedBytes(), true) }}</template>
-              </span>
-              <div class="actions">
-                <button @click="streamSelection(h)" :disabled="busy || !selectedCount()" title="Query the files in place — each query fetches only the byte ranges it needs">
-                  ⚡ Stream (lazy)
-                </button>
-                <button class="primary" @click="loadSelection(h)" :disabled="busy || !selectedCount()">
-                  {{ downloading ? "Downloading…" : "Download to cache" }}
-                </button>
-              </div>
-            </div>
-
-            <div v-if="viewError" class="error">{{ viewError }}</div>
-
-            <DownloadProgress
-              v-if="downloadId"
-              :files="downloadFiles"
-              :cancelling="cancelling"
-              label="Transferring to cache…"
-              @cancel="cancel"
-            />
-
-            <label class="all">
-              <input type="checkbox" :checked="views.length > 0 && selectedCount() === views.length" @change="toggleAll" />
-              <span>All views</span>
-            </label>
-            <div v-if="views.length" class="view-list">
-              <label v-for="v in views" :key="v.path" class="view">
-                <input v-model="checked[v.path]" type="checkbox" />
-                <span class="mono view-name">{{ v.name }}</span>
-                <span class="muted">{{ fmt(v.sizeBytes, true) }}</span>
-              </label>
-            </div>
-            <div v-else-if="viewsBusy" class="muted">Loading views… <span class="spinner"></span></div>
-            <div v-else class="muted">No QPX views listed for this dataset.</div>
-          </div>
+          <PortalViews
+            v-if="isExpanded(h)"
+            :accession="h.datasetAccession"
+            :dataset-ref="h.datasetRef || h.datasetAccession"
+            :organism="h.organism"
+          />
         </article>
       </div>
       <div v-else class="muted empty">No datasets match this search.</div>
@@ -430,50 +305,6 @@ onMounted(async () => {
 .pf {
   font-size: 10px;
   color: var(--text-dim);
-}
-.loadbox {
-  margin-top: 10px;
-  border-top: 1px solid var(--border);
-  padding-top: 10px;
-}
-.toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  font-size: 13px;
-  margin-bottom: 8px;
-}
-.actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.all {
-  font-weight: 600;
-  font-size: 12px;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 4px;
-}
-.view-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.view {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.view-name {
-  flex: 1;
 }
 .error {
   margin: 8px 0;

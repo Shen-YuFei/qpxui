@@ -1,23 +1,14 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { api, type DatasetInfo, type PortalDataset, type ViewInfo } from "../lib/api";
-import { loadDatasets } from "../store";
-import { confirmDownload, totalBytes, useDownload } from "../lib/downloads";
-import DownloadProgress from "./DownloadProgress.vue";
+import { api, type PortalDataset } from "../lib/api";
+import PortalViews from "./PortalViews.vue";
 
 const datasets = ref<PortalDataset[]>([]);
 const busy = ref(false);
 const loadingMsg = ref("Loading recommended datasets…");
 const error = ref("");
-/** Listing, streaming or downloading the open dataset's views failed. */
-const viewError = ref("");
 
 const selected = ref<PortalDataset | null>(null);
-const views = ref<ViewInfo[]>([]);
-const checked = ref<Record<string, boolean>>({});
-const viewBusy = ref(false);
-const downloading = ref(false);
-const { id: downloadId, cancelling, files: downloadFiles, cancel, run: runDownload, unmounted } = useDownload();
 
 function rowKey(ds: PortalDataset): string {
   return ds.datasetRef ?? ds.accession;
@@ -63,90 +54,8 @@ async function loadRecommended() {
   }
 }
 
-async function toggleDataset(ds: PortalDataset) {
-  if (downloadId.value) cancel();
-  if (isOpen(ds)) {
-    selected.value = null;
-    views.value = [];
-    checked.value = {};
-    return;
-  }
-  selected.value = ds;
-  views.value = [];
-  checked.value = {};
-  viewBusy.value = true;
-  viewError.value = "";
-  try {
-    const ref = ds.datasetRef ?? ds.accession;
-    const v = await api.portalListViews(ref, ds.organism, ds.psmCount);
-    if (selected.value === ds) views.value = v;
-  } catch (e: any) {
-    if (selected.value === ds) viewError.value = String(e);
-  } finally {
-    if (selected.value === ds) viewBusy.value = false;
-  }
-}
-
-function selectedViews() {
-  return views.value.filter((v) => checked.value[v.path]);
-}
-function selectedCount() {
-  return selectedViews().length;
-}
-function selectedBytes() {
-  return totalBytes(selectedViews());
-}
-function toggleAll() {
-  const allOn = views.value.every((v) => checked.value[v.path]);
-  for (const v of views.value) checked.value[v.path] = !allOn;
-}
-
-function openStream(ds: PortalDataset) {
-  viewError.value = "";
-  const sel = selectedViews();
-  if (!views.value.length) {
-    viewError.value = "This dataset has no listed QPX views to open.";
-    return;
-  }
-  const list = sel.length ? sel : views.value;
-  const target: DatasetInfo = {
-    prefix: ds.accession,
-    path: `quantms portal / ${portalName(ds)}`,
-    views: list.map((v) => ({ ...v })).sort((a, b) => a.view.localeCompare(b.view)),
-  };
-  loadDatasets([target], "portal | " + ds.accession);
-}
-
-async function openDownload(ds: PortalDataset) {
-  busy.value = true;
-  downloading.value = true;
-  viewError.value = "";
-  const target = ds;
-  try {
-    const sel = selectedViews();
-    const list = (sel.length ? sel : views.value);
-    if (!list.length) throw new Error("This dataset has no listed QPX views to download.");
-    if (!(await confirmDownload(list, "portal"))) return;
-    if (unmounted() || selected.value !== target) return;
-    const local = await runDownload((id) => api.portalCacheViews(list.map((v) => v.path), id));
-    // Left meanwhile (which also cancels): say nothing there.
-    if (unmounted() || selected.value !== target) return;
-    if (!local) {
-      viewError.value = "Download cancelled; partial files were removed.";
-      return;
-    }
-    const nxt: DatasetInfo = {
-      prefix: target.accession,
-      path: `quantms portal / ${portalName(target)}`,
-      views: local.sort((a, b) => a.view.localeCompare(b.view)),
-    };
-    loadDatasets([nxt], "portal | " + target.accession);
-  } catch (e: any) {
-    viewError.value = String(e);
-  } finally {
-    busy.value = false;
-    downloading.value = false;
-  }
+function toggleDataset(ds: PortalDataset) {
+  selected.value = isOpen(ds) ? null : ds;
 }
 
 function fmtCount(n: number | null | undefined): string {
@@ -155,17 +64,10 @@ function fmtCount(n: number | null | undefined): string {
   if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}K`;
   return String(n);
 }
-function fmt(n: number | null | undefined, force = false): string {
-  if (!n) return force ? "0 B" : "—";
-  const u = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(n) / Math.log(1024));
-  return `${(n / Math.pow(1024, i)).toFixed(1)} ${u[i]}`;
-}
 
 onMounted(() => {
   loadRecommended();
 });
-
 </script>
 
 <template>
@@ -211,43 +113,14 @@ onMounted(() => {
           </div>
         </header>
 
-        <div v-if="isOpen(ds)" class="loadbox">
-          <div class="toolbar">
-            <span class="muted">
-              {{ views.length }} view(s) · {{ selectedCount() }} selected<template v-if="selectedCount()"> · {{ fmt(selectedBytes(), true) }}</template>
-            </span>
-            <div class="actions">
-              <button @click="openStream(ds)" :disabled="busy || !views.length">⚡ Stream (lazy)</button>
-              <button class="primary" @click="openDownload(ds)" :disabled="busy || !views.length">
-                {{ downloading ? "Downloading…" : "Download to cache" }}
-              </button>
-            </div>
-          </div>
-
-          <div v-if="viewError" class="error">{{ viewError }}</div>
-
-          <DownloadProgress
-            v-if="downloadId"
-            :files="downloadFiles"
-            :cancelling="cancelling"
-            label="Transferring to cache…"
-            @cancel="cancel"
-          />
-
-          <label class="all">
-            <input type="checkbox" :checked="views.length > 0 && selectedCount() === views.length" @change="toggleAll" />
-            <span>All views</span>
-          </label>
-          <div v-if="views.length" class="view-list">
-            <label v-for="v in views" :key="v.path" class="view">
-              <input v-model="checked[v.path]" type="checkbox" />
-              <span class="mono view-name">{{ v.name }}</span>
-              <span class="muted">{{ fmt(v.sizeBytes, true) }}</span>
-            </label>
-          </div>
-          <div v-else-if="viewBusy" class="muted">Loading views… <span class="spinner"></span></div>
-          <div v-else class="muted">No QPX views listed for this dataset.</div>
-        </div>
+        <PortalViews
+          v-if="isOpen(ds)"
+          :accession="ds.accession"
+          :dataset-ref="portalName(ds)"
+          :organism="ds.organism"
+          :psm-count="ds.psmCount"
+          all-when-none
+        />
       </article>
     </div>
   </section>
@@ -346,50 +219,6 @@ onMounted(() => {
 .counts b {
   color: var(--text);
   font-variant-numeric: tabular-nums;
-}
-.loadbox {
-  margin-top: 10px;
-  border-top: 1px solid var(--border);
-  padding-top: 10px;
-}
-.toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  font-size: 12px;
-  margin-bottom: 8px;
-}
-.actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.all {
-  font-weight: 600;
-  font-size: 12px;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 4px;
-}
-.view-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.view {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.view-name {
-  flex: 1;
 }
 .error {
   margin: 8px 0;
