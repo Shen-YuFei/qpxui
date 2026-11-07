@@ -551,7 +551,7 @@ pub async fn register(
     paths: &[String],
 ) -> Result<BTreeMap<String, StreamHandle>, String> {
     let p = proxy().await?;
-    let client = client_for_bucket(bucket).await?;
+    let client = client_for_bucket(bucket).await;
     let mut out = BTreeMap::new();
     for path in paths {
         let key = path

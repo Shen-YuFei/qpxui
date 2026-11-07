@@ -5,7 +5,9 @@ use aws_config::BehaviorVersion;
 use aws_sdk_s3::Client;
 use serde::Serialize;
 use std::collections::BTreeMap;
+use std::sync::Mutex;
 use tauri::AppHandle;
+use tokio::sync::OnceCell;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -24,46 +26,48 @@ pub struct S3Listing {
     pub datasets: Vec<DatasetInfo>,
 }
 
-async fn client() -> Result<Client, String> {
-    client_in(None).await
-}
-
-/// Build a client, optionally pinned to a region. A custom endpoint
-/// (`AWS_ENDPOINT_URL`, e.g. MinIO / Ceph / a local test server) switches to
-/// path-style addressing, which those servers expect.
-async fn client_in(region: Option<String>) -> Result<Client, String> {
-    let mut loader = aws_config::defaults(BehaviorVersion::latest());
-    loader = match region {
-        Some(r) => loader.region(aws_config::Region::new(r)),
-        None => loader.region(RegionProviderChain::default_provider().or_else("us-east-1")),
-    };
-    let config = loader.load().await;
-    let mut b = aws_sdk_s3::config::Builder::from(&config);
+/// A client for the user's AWS settings (credentials chain, region,
+/// endpoint), which are loaded once: on a machine without a configured region
+/// the region lookup alone waits about a second for the EC2 metadata service.
+/// A custom endpoint (`AWS_ENDPOINT_URL`, e.g. MinIO / Ceph / a local test
+/// server) switches to path-style addressing, which those servers expect.
+async fn client() -> Client {
+    static CONFIG: OnceCell<aws_config::SdkConfig> = OnceCell::const_new();
+    let config = CONFIG
+        .get_or_init(|| async {
+            aws_config::defaults(BehaviorVersion::latest())
+                .region(RegionProviderChain::default_provider().or_else("us-east-1"))
+                .load()
+                .await
+        })
+        .await;
+    let mut b = aws_sdk_s3::config::Builder::from(config);
     if std::env::var_os("AWS_ENDPOINT_URL").is_some()
         || std::env::var_os("AWS_ENDPOINT_URL_S3").is_some()
     {
         b = b.force_path_style(true);
     }
-    Ok(Client::from_conf(b.build()))
+    Client::from_conf(b.build())
 }
 
-/// A client in the bucket's own region. Range reads are many small requests,
-/// so we resolve the region once (HeadBucket reports it even on a redirect)
-/// instead of paying a cross-region redirect on every request.
-pub(crate) async fn client_for_bucket(bucket: &str) -> Result<Client, String> {
-    use std::collections::HashMap;
-    use std::sync::Mutex;
-    static REGIONS: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
+/// A client in the bucket's own region, kept for the session. Range reads are
+/// many small requests, so the region is resolved once (HeadBucket reports it
+/// even on a redirect) and the client keeps its connections.
+pub(crate) async fn client_for_bucket(bucket: &str) -> Client {
+    static CLIENTS: Mutex<BTreeMap<String, Client>> = Mutex::new(BTreeMap::new());
+    bucket_client(&CLIENTS, client().await, bucket).await
+}
 
-    let cached = REGIONS
-        .lock()
-        .unwrap()
-        .as_ref()
-        .and_then(|m| m.get(bucket).cloned());
-    if let Some(r) = cached {
-        return client_in(Some(r)).await;
+/// [`client_for_bucket`] over the given clients and base client. A bucket
+/// whose region could not be read is not kept, so the next call asks again.
+async fn bucket_client(
+    clients: &Mutex<BTreeMap<String, Client>>,
+    base: Client,
+    bucket: &str,
+) -> Client {
+    if let Some(client) = clients.lock().unwrap().get(bucket) {
+        return client.clone();
     }
-    let base = client().await?;
     let region = match base.head_bucket().bucket(bucket).send().await {
         Ok(out) => out.bucket_region().map(str::to_string),
         Err(e) => e
@@ -71,17 +75,23 @@ pub(crate) async fn client_for_bucket(bucket: &str) -> Result<Client, String> {
             .and_then(|r| r.headers().get("x-amz-bucket-region"))
             .map(str::to_string),
     };
-    match region {
-        Some(r) if Some(r.as_str()) != base.config().region().map(|x| x.as_ref()) => {
-            REGIONS
-                .lock()
-                .unwrap()
-                .get_or_insert_with(HashMap::new)
-                .insert(bucket.to_string(), r.clone());
-            client_in(Some(r)).await
-        }
-        _ => Ok(base),
-    }
+    let Some(region) = region else {
+        return base;
+    };
+    let client = if Some(region.as_str()) == base.config().region().map(|r| r.as_ref()) {
+        base
+    } else {
+        let config = base
+            .config()
+            .to_builder()
+            .region(aws_config::Region::new(region));
+        Client::from_conf(config.build())
+    };
+    clients
+        .lock()
+        .unwrap()
+        .insert(bucket.to_string(), client.clone());
+    client
 }
 
 fn s3_url(bucket: &str, key: &str) -> String {
@@ -92,7 +102,7 @@ fn s3_url(bucket: &str, key: &str) -> String {
 /// datasets (grouped by the `<prefix>` part of their filenames).
 #[tauri::command]
 pub async fn list_s3(bucket: String, prefix: Option<String>) -> Result<S3Listing, String> {
-    let client = client_for_bucket(&bucket).await?;
+    let client = client_for_bucket(&bucket).await;
     let prefix = prefix.unwrap_or_default();
 
     let mut objects: Vec<S3Object> = Vec::new();
@@ -191,7 +201,7 @@ pub async fn cache_s3_views(
     bucket: String,
     paths: Vec<String>,
 ) -> Result<Vec<ViewInfo>, String> {
-    let client = client_for_bucket(&bucket).await?;
+    let client = client_for_bucket(&bucket).await;
     let root = CacheKind::S3.root()?;
     cache_s3_views_impl(Some(&app), &client, &root, cancel_id, bucket, paths).await
 }
@@ -297,21 +307,26 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
     use std::path::{Component, Path};
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
-    /// Bare S3 stand-in for path-style requests: HEAD and GET of
-    /// `/<bucket>/<key>` answer with the object; GETs are counted.
-    async fn fake_s3(objects: HashMap<&'static str, Vec<u8>>) -> (Client, Arc<AtomicUsize>) {
+    type Requests = Arc<Mutex<Vec<String>>>;
+
+    /// Bare S3 stand-in for path-style requests in `region`: HEAD and GET of
+    /// `/<bucket>[/<key>]` answer with the object. Every request is recorded
+    /// as "METHOD path".
+    async fn fake_s3(
+        region: &'static str,
+        objects: HashMap<&'static str, Vec<u8>>,
+    ) -> (Client, Requests) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let gets = Arc::new(AtomicUsize::new(0));
-        let (objects, counter) = (Arc::new(objects), gets.clone());
+        let requests = Requests::default();
+        let (objects, log) = (Arc::new(objects), requests.clone());
         tokio::spawn(async move {
             loop {
                 let (mut sock, _) = listener.accept().await.unwrap();
-                let (objects, gets) = (objects.clone(), counter.clone());
+                let (objects, log) = (objects.clone(), log.clone());
                 tokio::spawn(async move {
                     let mut buf = vec![0u8; 16 * 1024];
                     let n = sock.read(&mut buf).await.unwrap();
@@ -319,22 +334,24 @@ mod tests {
                     let mut line = head.split_whitespace();
                     let (method, target) = (line.next().unwrap(), line.next().unwrap());
                     let path = target.split('?').next().unwrap();
-                    let resp = match objects.get(path) {
-                        Some(body) => {
-                            let mut r = format!(
-                                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                                body.len()
-                            )
-                            .into_bytes();
-                            if method == "GET" {
-                                gets.fetch_add(1, Ordering::SeqCst);
-                                r.extend_from_slice(body);
-                            }
-                            r
-                        }
-                        None => b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-                            .to_vec(),
+                    log.lock().unwrap().push(format!("{method} {path}"));
+                    let (status, body) = match objects.get(path) {
+                        Some(body) => ("200 OK", body.as_slice()),
+                        None => ("404 Not Found", &[][..]),
                     };
+                    // An empty region leaves the header out.
+                    let region = match region {
+                        "" => String::new(),
+                        r => format!("x-amz-bucket-region: {r}\r\n"),
+                    };
+                    let mut resp = format!(
+                        "HTTP/1.1 {status}\r\nContent-Length: {}\r\n{region}Connection: close\r\n\r\n",
+                        body.len()
+                    )
+                    .into_bytes();
+                    if method == "GET" {
+                        resp.extend_from_slice(body);
+                    }
                     sock.write_all(&resp).await.unwrap();
                 });
             }
@@ -348,16 +365,63 @@ mod tests {
                 "test", "test", None, None, "test",
             ))
             .build();
-        (Client::from_conf(conf), gets)
+        (Client::from_conf(conf), requests)
+    }
+
+    fn count(requests: &Requests, method: &str) -> usize {
+        let prefix = format!("{method} ");
+        requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|r| r.starts_with(&prefix))
+            .count()
+    }
+
+    #[tokio::test]
+    async fn bucket_region_is_looked_up_once() {
+        for region in ["us-east-1", "eu-west-1"] {
+            let objects = HashMap::from([("/bkt", Vec::new()), ("/bkt/k", b"x".to_vec())]);
+            let (base, requests) = fake_s3(region, objects).await;
+            let clients = Mutex::new(BTreeMap::new());
+            for _ in 0..2 {
+                let client = bucket_client(&clients, base.clone(), "bkt").await;
+                assert_eq!(client.config().region().unwrap().as_ref(), region);
+            }
+            assert_eq!(count(&requests, "HEAD"), 1, "{region}");
+            // The bucket's client keeps the endpoint and path-style addressing.
+            let client = bucket_client(&clients, base.clone(), "bkt").await;
+            client
+                .get_object()
+                .bucket("bkt")
+                .key("k")
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(requests.lock().unwrap().last().unwrap(), "GET /bkt/k");
+        }
+    }
+
+    #[tokio::test]
+    async fn bucket_without_a_region_is_asked_again() {
+        let (base, requests) = fake_s3("", HashMap::new()).await;
+        let clients = Mutex::new(BTreeMap::new());
+        for _ in 0..2 {
+            bucket_client(&clients, base.clone(), "bkt").await;
+        }
+        assert_eq!(count(&requests, "HEAD"), 2);
     }
 
     #[tokio::test]
     async fn downloads_each_object_once_into_its_own_file() {
         let (a, b) = (vec![1u8; 300_000], vec![2u8; 1_000]);
-        let (client, gets) = fake_s3(HashMap::from([
-            ("/bkt/x/y_z.psm.parquet", a.clone()),
-            ("/bkt/x_y/z.psm.parquet", b.clone()),
-        ]))
+        let (client, requests) = fake_s3(
+            "us-east-1",
+            HashMap::from([
+                ("/bkt/x/y_z.psm.parquet", a.clone()),
+                ("/bkt/x_y/z.psm.parquet", b.clone()),
+            ]),
+        )
         .await;
         let tmp = tempfile::tempdir().unwrap();
         let paths = vec![
@@ -383,7 +447,7 @@ mod tests {
         );
         // Opening the same views again is served from the cache.
         let again = open("s3-second").await.unwrap();
-        assert_eq!(gets.load(Ordering::SeqCst), 2);
+        assert_eq!(count(&requests, "GET"), 2);
         assert_eq!(again[1].size_bytes, b.len() as u64);
     }
 
