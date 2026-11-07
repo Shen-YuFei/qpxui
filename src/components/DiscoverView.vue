@@ -46,11 +46,14 @@ function isOpen(ds: PortalDataset): boolean {
   return !!selected.value && rowKey(selected.value) === rowKey(ds);
 }
 
+// Searches overlap (typing, filters, paging); only the latest one may show.
+let searchSeq = 0;
 async function load() {
+  const id = ++searchSeq;
   busy.value = true;
   error.value = "";
   try {
-    results.value = await api.portalSearch(q.value.trim() || null, {
+    const res = await api.portalSearch(q.value.trim() || null, {
       collection: collection.value || null,
       organism: organism.value || null,
       instrument: instrument.value || null,
@@ -58,6 +61,8 @@ async function load() {
       page: page.value,
       pageSize: PAGE_SIZE,
     });
+    if (id !== searchSeq) return;
+    results.value = res;
     // Drop the expanded dataset if it is no longer on this page.
     if (selected.value) {
       const stillThere = results.value.datasets.some(
@@ -70,9 +75,9 @@ async function load() {
       }
     }
   } catch (e: any) {
-    error.value = String(e);
+    if (id === searchSeq) error.value = String(e);
   } finally {
-    busy.value = false;
+    if (id === searchSeq) busy.value = false;
   }
 }
 

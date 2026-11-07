@@ -44,26 +44,30 @@ function isExpanded(h: PsHit): boolean {
   return !!expanded.value && rowKey(expanded.value) === rowKey(h);
 }
 
+// Enter can start a search while another runs; only the latest one may show.
+let searchSeq = 0;
 async function runSearch() {
   const q = query.value.trim();
   if (!q) return;
+  const id = ++searchSeq;
   busy.value = true;
   error.value = "";
   expanded.value = null;
   views.value = [];
   checked.value = {};
   try {
-    result.value = await api.psSearch(q, {
+    const res = await api.psSearch(q, {
       dtype: explicitType.value === "auto" ? null : explicitType.value,
       matchMode: explicitType.value === "protein" || explicitType.value === "gene" ? null : matchMode.value || null,
       organism: organism.value || null,
       modification: mod.value || null,
       limit: 50,
     });
+    if (id === searchSeq) result.value = res;
   } catch (e: any) {
-    error.value = String(e);
+    if (id === searchSeq) error.value = String(e);
   } finally {
-    busy.value = false;
+    if (id === searchSeq) busy.value = false;
   }
 }
 
