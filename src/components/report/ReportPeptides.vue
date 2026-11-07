@@ -18,9 +18,12 @@ import {
   objects,
   proteinExpr,
   targetWhere,
+  viewScale,
   type DatasetTables,
+  type ViewScale,
 } from "../../lib/report";
 import { runSql } from "../../lib/duck";
+import { fmtBytes } from "../../lib/format";
 import { openProtein, state } from "../../store";
 
 const props = defineProps<{ ds: DatasetInfo; t: DatasetTables; fileBase: string; accession?: string }>();
@@ -33,6 +36,15 @@ const evName = props.t.feature ? "features" : "PSMs";
 const q = ref(state.search.peptides);
 const mod = ref(state.search.mod);
 const mode = ref<"contains" | "exact" | "prefix">("contains");
+// Big streamed files: no whole-file scan until the user searches.
+const scale = ref<ViewScale | null>(null);
+const large = computed(() => !!scale.value?.large);
+// Row-group statistics only help when the peptide is the leading sort key
+// (relayouted psm views; feature views lead with anchor_protein).
+const sorted = computed(() => ["peptidoform", "sequence"].includes(scale.value?.sortedBy[0] ?? ""));
+const waiting = ref(false);
+const modsLoaded = ref(false);
+const modsBusy = ref(false);
 const minCharge = ref<number | null>(null);
 const busy = ref(false);
 const error = ref("");
@@ -106,6 +118,7 @@ function whereClause(): string {
 
 async function search() {
   if (!ev) return;
+  waiting.value = false;
   busy.value = true;
   error.value = "";
   focus.value = null;
@@ -196,24 +209,47 @@ watch(
   }
 );
 
+async function loadMods() {
+  if (!ev || modsLoaded.value || modsBusy.value || !ev.cols.has("modifications")) return;
+  modsBusy.value = true;
+  try {
+    const r = await cachedSql(
+      props.ds,
+      "ptm.mods",
+      `SELECT m.name AS name, any_value(m.accession) AS accession,
+              count(DISTINCT pf)::BIGINT AS n_pf, count(DISTINCT seq)::BIGINT AS n_pep, count(*)::BIGINT AS n_ev
+       FROM (SELECT unnest(modifications) AS m, ${ev.cols.has("peptidoform") ? "peptidoform" : ev.seq} AS pf, ${ev.seq} AS seq
+             FROM ${ident(ev.table)} WHERE ${targetWhere(ev)})
+       GROUP BY 1 ORDER BY n_ev DESC`
+    );
+    modNames.value = r.rows.map((x) => String(x[0])).filter((x) => x && x !== "null");
+    modsLoaded.value = true;
+  } catch {
+    /* optional filter */
+  } finally {
+    modsBusy.value = false;
+  }
+}
+
 onMounted(async () => {
   if (!ev) return;
   hasSpectra(props.t.psm).then((v) => (spectra.value = v && !!props.t.psm?.cols.has("peptidoform"))).catch(() => {});
-  if (ev.cols.has("modifications")) {
-    try {
-      const r = await cachedSql(
-        props.ds,
-        "ptm.mods",
-        `SELECT m.name AS name, any_value(m.accession) AS accession,
-                count(DISTINCT pf)::BIGINT AS n_pf, count(DISTINCT seq)::BIGINT AS n_pep, count(*)::BIGINT AS n_ev
-         FROM (SELECT unnest(modifications) AS m, ${ev.cols.has("peptidoform") ? "peptidoform" : ev.seq} AS pf, ${ev.seq} AS seq
-               FROM ${ident(ev.table)} WHERE ${targetWhere(ev)})
-         GROUP BY 1 ORDER BY n_ev DESC`
-      );
-      modNames.value = r.rows.map((x) => String(x[0])).filter((x) => x && x !== "null");
-    } catch {
-      /* optional filter */
+  try {
+    scale.value = await viewScale(ev);
+  } catch {
+    scale.value = null;
+  }
+  if (large.value) {
+    // Listing the top peptidoforms or the modifications reads whole columns of
+    // the file; on a big streamed file wait for a search term instead. Exact
+    // matches can skip row groups when the file is sorted by peptidoform.
+    mode.value = "exact";
+    if (!q.value.trim() && !mod.value) {
+      waiting.value = true;
+      return;
     }
+  } else {
+    await loadMods();
   }
   search();
 });
@@ -229,8 +265,14 @@ onMounted(async () => {
         <option value="prefix">starts with</option>
         <option value="exact">exact</option>
       </select>
-      <select v-if="modNames.length" v-model="mod" title="Only peptidoforms carrying this modification">
-        <option value="">any modification</option>
+      <select
+        v-if="modNames.length || (large && ev.cols.has('modifications'))"
+        v-model="mod"
+        :title="modsLoaded ? 'Only peptidoforms carrying this modification' : 'Listing the modifications reads the modifications column of the whole file'"
+        @focus="loadMods"
+        @mousedown="loadMods"
+      >
+        <option value="">{{ modsBusy ? "loading modifications…" : "any modification" }}</option>
         <option v-for="m in modNames" :key="m" :value="m">{{ m }}</option>
       </select>
       <input v-model.number="minCharge" type="number" min="1" max="9" placeholder="z ≥" class="z" title="Minimum charge" />
@@ -239,6 +281,11 @@ onMounted(async () => {
     </form>
     <div class="muted info">
       <span v-if="busy">Searching… <span class="spinner"></span></span>
+      <span v-else-if="waiting">
+        Large streamed {{ evName }} view ({{ fmtBytes(scale!.bytes) }}, {{ scale!.rows.toLocaleString() }} rows): enter a peptide sequence to search.
+        Only the columns and row groups a search needs are fetched{{ sorted ? "; the file is sorted by peptidoform, so exact matches skip most of it" : "; this file is not sorted by peptidoform, so each search reads the whole sequence column" }}.
+        Press Search with an empty box to list the top {{ LIMIT }} peptidoforms (reads the whole file's peptide columns).
+      </span>
       <span v-else>
         {{ rows.length.toLocaleString() }}{{ truncated ? "+" : "" }} peptidoforms
         <template v-if="truncated"> (top {{ LIMIT }} by {{ evName }} — refine the search)</template>

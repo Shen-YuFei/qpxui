@@ -136,3 +136,11 @@ export function formatValue(v: unknown): string {
   build(v, 0, lines);
   return lines.join("\n");
 }
+
+/** Byte count in binary units ("1.5 GB"). */
+export function fmtBytes(n: number): string {
+  if (!n || n < 0) return "0 B";
+  const u = ["B", "KB", "MB", "GB", "TB", "PB"];
+  const i = Math.min(u.length - 1, Math.floor(Math.log(n) / Math.log(1024)));
+  return i === 0 ? `${n} B` : `${(n / 1024 ** i).toFixed(1)} ${u[i]}`;
+}
