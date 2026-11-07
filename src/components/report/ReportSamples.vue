@@ -2,11 +2,11 @@
 import { computed, onMounted, ref } from "vue";
 import ChartCard from "../ChartCard.vue";
 import ReportTable from "../ReportTable.vue";
-import type { Column } from "../../lib/report";
 import type { DatasetInfo } from "../../lib/api";
 import type { ChartSpec } from "../../lib/charts";
-import { cachedSql, ident, objects, type DatasetTables } from "../../lib/report";
+import type { Column, DatasetTables } from "../../lib/report";
 import { SAMPLE_FACETS } from "../../lib/qpx";
+import { runRows, sampleFacet, sampleRows } from "../../lib/queries/samples";
 
 const props = defineProps<{ ds: DatasetInfo; t: DatasetTables; fileBase: string }>();
 
@@ -36,43 +36,14 @@ const filtered = computed(() => {
 onMounted(async () => {
   try {
     if (sample) {
-      // Attach how many runs / which channels each sample was measured in.
-      const hasMap = !!runV?.cols.has("samples");
-      const sql = hasMap
-        ? `WITH m AS (
-             SELECT s.sample_accession AS sample_accession, count(DISTINCT run_file_name)::BIGINT AS runs,
-                    string_agg(DISTINCT s.label, ', ') AS labels
-             FROM (SELECT run_file_name, unnest(samples) AS s FROM ${ident(runV!.table)}) GROUP BY 1)
-           SELECT x.*, m.runs, m.labels FROM ${ident(sample.table)} x LEFT JOIN m USING (sample_accession)`
-        : `SELECT * FROM ${ident(sample.table)}`;
-      const r = await cachedSql(props.ds, "smp.rows", sql, 50000);
-      rows.value = objects(r).sort((a, b) =>
-        String(a.sample_accession ?? "").localeCompare(String(b.sample_accession ?? ""), undefined, { numeric: true })
-      );
+      rows.value = await sampleRows(props.ds, sample, runV);
       for (const col of SAMPLE_FACETS) {
         if (!sample.cols.has(col)) continue;
-        const f = await cachedSql(
-          props.ds,
-          `smp.f.${col}`,
-          `SELECT coalesce(${ident(col)}, 'not available') AS k, count(*)::BIGINT AS n FROM ${ident(sample.table)} GROUP BY 1 ORDER BY 2 DESC LIMIT 25`
-        );
-        // A single value (e.g. all "Homo sapiens") is shown in the header/table already.
-        if (f.rows.length < 2) continue;
-        facets.value.push({
-          col,
-          spec: {
-            kind: "hbar",
-            labels: f.rows.map((x) => String(x[0])),
-            series: [{ name: "samples", values: f.rows.map((x) => Number(x[1])) }],
-            xName: "samples",
-          },
-        });
+        const spec = await sampleFacet(props.ds, sample, col);
+        if (spec) facets.value.push({ col, spec });
       }
     } else if (runV) {
-      // modification_parameters is optional in the QPX run view.
-      const cols = runV.cols.has("modification_parameters") ? "* EXCLUDE (modification_parameters)" : "*";
-      const r = await cachedSql(props.ds, "smp.runs", `SELECT ${cols} FROM ${ident(runV.table)}`, 50000);
-      rows.value = objects(r);
+      rows.value = await runRows(props.ds, runV);
     }
   } catch (e: any) {
     error.value = String(e?.message ?? e);
