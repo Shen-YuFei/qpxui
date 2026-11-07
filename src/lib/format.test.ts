@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fmtBytes, fmtCount, fmtSize, formatCompact, listText, scalarText } from "./format";
+import { fmtBytes, fmtCount, fmtSize, formatCompact, listText, peakSummary, scalarText } from "./format";
 
 describe("scalarText", () => {
   it("marks missing values", () => {
@@ -72,5 +72,13 @@ describe("listText", () => {
   it("shows struct elements in their compact form", () => {
     expect(listText([{ sample_accession: "S1", label: "lf" }])).toBe("{ sample_accession: S1, label: lf }");
     expect(listText(["a", "b", "c", "d"])).toBe("a, b, c +1");
+  });
+});
+
+describe("peakSummary", () => {
+  it("counts the peaks of an array", () => {
+    expect(peakSummary([1, 2, 3])).toBe("3 peaks");
+    expect(peakSummary([])).toBe("no peaks");
+    expect(peakSummary(null)).toBe("∅");
   });
 });

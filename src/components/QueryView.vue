@@ -2,10 +2,7 @@
 import { computed, onMounted, ref, shallowRef } from "vue";
 import { ensureViewReady, type QueryResult } from "../lib/duck";
 import { QUERY_EXAMPLES as Examples, QUERY_LIMIT as limit, runQuery, substituteTable } from "../lib/queries/sqlConsole";
-import { isStructured, formatCompact, scalarText } from "../lib/format";
-import PTMBadges from "./PTMBadges.vue";
-import PTMSegs from "./PTMSegs.vue";
-import StructuredView from "./StructuredView.vue";
+import ResultCell from "./table/ResultCell.vue";
 import { isModificationsCol, peptideCells, type PTMSeg } from "../lib/ptm";
 import type { ViewInfo } from "../lib/api";
 
@@ -97,20 +94,7 @@ function isModsCell(j: number): boolean {
         <tbody>
           <tr v-for="(row, i) in results.rows" :key="i">
             <td v-for="(v, j) in row" :key="j" :class="{ 'mono': typeof v === 'string' }">
-              <!-- PTM-enhanced peptide / peptidoform sequence -->
-              <PTMSegs v-if="segsFor(i, j)" :segs="segsFor(i, j)!" />
-
-              <!-- Structured `modifications` column -> colour-coded badges -->
-              <PTMBadges v-else-if="isModsCell(j) && isStructured(v)" :mods="v" />
-
-              <template v-else-if="isStructured(v)">
-                <button class="cell-toggle" @click="toggle(i, j)">
-                  {{ expanded[cellKey(i, j)] ? "▾" : "▸" }}
-                </button>
-                <StructuredView v-if="expanded[cellKey(i, j)]" :value="v" class="complex" />
-                <span v-else class="compact mono" @click="toggle(i, j)">{{ formatCompact(v) }}</span>
-              </template>
-              <template v-else>{{ scalarText(v) }}</template>
+              <ResultCell :value="v" :expanded="!!expanded[cellKey(i, j)]" :segs="segsFor(i, j)" :mods="isModsCell(j)" @toggle="toggle(i, j)" />
             </td>
           </tr>
         </tbody>
@@ -181,32 +165,4 @@ th {
   background: var(--bg-soft);
   z-index: 1;
 }
-.cell-toggle {
-  border: none;
-  background: transparent;
-  padding: 0 4px 0 0;
-  margin: 0;
-  color: var(--accent);
-  font-size: 10px;
-}
-.compact {
-  color: var(--accent);
-  cursor: pointer;
-}
-.complex {
-  display: block;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px;
-  line-height: 1.45;
-  max-width: 480px;
-  color: var(--text);
-  background: var(--bg-soft);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 8px;
-  margin: 2px 0;
-}
-/* ---- PTM-aware peptide rendering ---- */
 </style>

@@ -39,6 +39,12 @@ function isModList(v: unknown): v is Array<Record<string, unknown>> {
 }
 
 /** Short, single-line summary for a structured value (for collapsed cells). */
+/** A peak array as "N peaks" ("∅" when missing). */
+export function peakSummary(v: unknown): string {
+  if (!Array.isArray(v)) return "∅";
+  return v.length ? `${v.length.toLocaleString()} peaks` : "no peaks";
+}
+
 export function formatCompact(v: unknown): string {
   if (isScoreList(v)) {
     const shown = v.slice(0, 5).map(

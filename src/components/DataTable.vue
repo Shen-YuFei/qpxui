@@ -1,15 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import { countRows, describeTable, ensureViewReady, type QueryResult } from "../lib/duck";
-import { isStructured, formatCompact, scalarText } from "../lib/format";
+import { isStructured } from "../lib/format";
 import type { ViewInfo } from "../lib/api";
 import type { TableRef } from "../lib/report";
 import { viewScale } from "../lib/report";
 import { cellFilter, isPeakColumn, tablePage } from "../lib/queries/table";
 import { state } from "../store";
-import PTMBadges from "./PTMBadges.vue";
-import PTMSegs from "./PTMSegs.vue";
-import StructuredView from "./StructuredView.vue";
+import ResultCell from "./table/ResultCell.vue";
 import SpectrumViewer from "./SpectrumViewer.vue";
 import type { PsmKey } from "../lib/queries/spectrum";
 import { isModificationsCol, peptideCells, type PTMSeg } from "../lib/ptm";
@@ -86,10 +84,6 @@ watch(showPeaks, () => load());
 
 function isPeakCol(j: number): boolean {
   return isPeakColumn(result.value.columns[j] ?? "");
-}
-function peakSummary(v: unknown): string {
-  if (!Array.isArray(v)) return "∅";
-  return v.length ? `${v.length.toLocaleString()} peaks` : "no peaks";
 }
 
 // ---- Right-click cell menu ----
@@ -401,32 +395,16 @@ function isModsCell(j: number): boolean {
               :class="{ num: typeof v === 'number', 'mono': typeof v === 'string', active: menu && menu.i === i && menu.j === j }"
               @contextmenu.prevent="openMenu($event, i, j)"
             >
-              <!-- Peak arrays: "N peaks" summary, click to expand -->
-              <template v-if="isPeakCol(j) && !expanded[cellKey(i, j)]">
-                <span class="peaks" :title="Array.isArray(v) ? formatCompact(v) : 'null'" @click="Array.isArray(v) && toggle(i, j)">
-                  {{ peakSummary(v) }}<template v-if="Array.isArray(v) && v.length"> ▸</template>
-                </span>
-              </template>
-
-              <!-- PTM-enhanced peptide / peptidoform sequence -->
-              <PTMSegs v-else-if="ptmOn && segsFor(i, j)" :segs="segsFor(i, j)!" />
-
-              <!-- Structured `modifications` column -> colour-coded badges -->
-              <PTMBadges v-else-if="ptmOn && isModsCell(j) && isStructured(v)" :mods="v" />
-
-              <!-- Other structured values (expandable JSON) -->
-              <template v-else-if="isStructured(v)">
-                <button
-                  class="cell-toggle"
-                  :title="expanded[cellKey(i, j)] ? 'Collapse' : 'Expand'"
-                  @click="toggle(i, j)"
-                >
-                  {{ expanded[cellKey(i, j)] ? "▾" : "▸" }}
-                </button>
-                <StructuredView v-if="expanded[cellKey(i, j)]" :value="v" class="complex" />
-                <span v-else class="compact mono" @click="toggle(i, j)">{{ formatCompact(v) }}</span>
-              </template>
-              <template v-else>{{ scalarText(v) }}</template>
+              <ResultCell
+                :value="v"
+                :expanded="!!expanded[cellKey(i, j)]"
+                :segs="segsFor(i, j)"
+                :mods="isModsCell(j)"
+                :ptm="ptmOn"
+                :peak="isPeakCol(j)"
+                toggle-titles
+                @toggle="toggle(i, j)"
+              />
             </td>
           </tr>
         </tbody>
@@ -570,11 +548,6 @@ td.active {
   outline: 1px solid var(--accent);
   outline-offset: -1px;
 }
-.peaks {
-  color: var(--accent);
-  cursor: pointer;
-  font-variant-numeric: tabular-nums;
-}
 .flash {
   color: var(--accent);
 }
@@ -657,35 +630,6 @@ th:hover {
 }
 td.num {
   font-variant-numeric: tabular-nums;
-}
-.cell-toggle {
-  border: none;
-  background: transparent;
-  padding: 0 4px 0 0;
-  margin: 0;
-  color: var(--accent);
-  font-size: 10px;
-  vertical-align: baseline;
-}
-.compact {
-  color: var(--accent);
-  cursor: pointer;
-}
-/* ---- PTM-aware peptide rendering ---- */
-.complex {
-  display: block;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px;
-  line-height: 1.45;
-  max-width: 480px;
-  color: var(--text);
-  background: var(--bg-soft);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 8px;
-  margin: 2px 0;
 }
 .pad {
   padding: 18px;
