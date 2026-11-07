@@ -88,8 +88,8 @@ function groupLocal(entries: { prefix: string; local: ViewInfo }[]): DatasetInfo
 
 /**
  * Build DatasetInfo for the selected views *without* downloading: each view
- * keeps its `s3://bucket/key` path, so the engine presigns a URL and DuckDB
- * streams only the byte ranges each query needs.
+ * keeps its `s3://bucket/key` path, and DuckDB reads only the byte ranges
+ * each query needs through the backend range proxy.
  */
 function groupStream(): DatasetInfo[] {
   const map = new Map<string, ViewInfo[]>();

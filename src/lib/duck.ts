@@ -107,13 +107,12 @@ function safeName(name: string): string {
 
 /** Register a view's parquet file and expose it as a DuckDB table.
  *
- * Local files (and files already downloaded to cache) are range-read from
- * disk through the backend proxy (falling back to a whole-file buffer).
- * Remote S3 views (`s3://…`) are registered *lazily*: the Rust backend runs a
- * 127.0.0.1 range proxy that fetches byte ranges from S3 with the user's
- * credentials, and DuckDB's HTTP file system asks it only for the ranges a
- * query needs (parquet footer, then the touched column chunks). Huge files
- * open instantly, nothing is downloaded up front, and the bucket needs no CORS.
+ * Every view is read lazily through the Rust backend's 127.0.0.1 range proxy:
+ * local files (and files downloaded to the cache) from disk, `s3://…` views
+ * from S3 with the user's credentials, and portal files over HTTPS. DuckDB's
+ * HTTP file system asks it only for the ranges a query needs (parquet footer,
+ * then the touched column chunks), so huge files open instantly, nothing is
+ * downloaded up front, and the bucket needs no CORS.
  */
 export async function ensureViewReady(view: ViewInfo): Promise<string> {
   await init();
@@ -131,44 +130,16 @@ export async function ensureViewReady(view: ViewInfo): Promise<string> {
 async function register(view: ViewInfo, table: string): Promise<void> {
   // Bind this engine: a restart meanwhile must not touch the new one.
   const { db, conn } = await initDb();
-
+  const handles = view.path.startsWith("s3://")
+    ? await api.streamS3Urls(view.path.slice(5).split("/")[0], [view.path])
+    : /^https?:\/\//.test(view.path)
+      ? await api.streamHttpUrls([view.path])
+      : await api.streamLocalFiles([view.path]);
   const fileKey = `${table}.parquet`;
-  if (view.path.startsWith("s3://")) {
-    const bucket = view.path.slice(5).split("/")[0];
-    let url: string | undefined;
-    try {
-      url = (await api.streamS3Urls(bucket, [view.path]))[view.path]?.url;
-    } catch (e) {
-      // Fall back to a presigned URL read directly by the webview (needs CORS).
-      console.warn("stream proxy unavailable, falling back to presigned URL", e);
-      url = (await api.presignS3Urls(bucket, [view.path]))[view.path];
-    }
-    if (!url) throw new Error(`could not open ${view.path} for streaming`);
-    // Still range requests only (allowFullHTTPReads is off), but with
-    // directIO = false duckdb-wasm keeps the ranges it read, so later queries
-    // over the same columns don't go back to the network.
-    await db.registerFileURL(fileKey, url, duckdb.DuckDBDataProtocol.HTTP, false);
-  } else if (/^https?:\/\//.test(view.path)) {
-    // Public portal file: same lazy range proxy, fetched over HTTPS.
-    const url = (await api.streamHttpUrls([view.path]))[view.path]?.url;
-    if (!url) throw new Error(`could not open ${view.path} for streaming`);
-    await db.registerFileURL(fileKey, url, duckdb.DuckDBDataProtocol.HTTP, false);
-  } else {
-    // Local parquet: range-read from disk through the same proxy, so big
-    // files open instantly and only the touched column chunks are read.
-    let url: string | undefined;
-    try {
-      url = (await api.streamLocalFiles([view.path]))[view.path]?.url;
-    } catch (e) {
-      console.warn("local range proxy unavailable, loading the whole file", e);
-    }
-    if (url) {
-      await db.registerFileURL(fileKey, url, duckdb.DuckDBDataProtocol.HTTP, false);
-    } else {
-      const bytes = base64ToUint8(await api.readFileBytes(view.path));
-      await db.registerFileBuffer(fileKey, bytes);
-    }
-  }
+  // Range requests only (allowFullHTTPReads is off), but with directIO =
+  // false duckdb-wasm keeps the ranges it read, so later queries over the
+  // same columns don't go back to the network.
+  await db.registerFileURL(fileKey, handles[view.path].url, duckdb.DuckDBDataProtocol.HTTP, false);
   await conn.query(
     `CREATE OR REPLACE VIEW "${table}" AS SELECT * FROM read_parquet('${fileKey}')`
   );
@@ -177,14 +148,6 @@ async function register(view: ViewInfo, table: string): Promise<void> {
 async function initDb(): Promise<{ db: duckdb.AsyncDuckDB; conn: duckdb.AsyncDuckDBConnection }> {
   await init();
   return { db: db!, conn: conn! };
-}
-
-export function base64ToUint8(b64: string): Uint8Array {
-  const clean = b64.replace(/\s/g, "");
-  const bin = atob(clean);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return bytes;
 }
 
 /**

@@ -139,9 +139,6 @@ export const api = {
   cacheS3Views: (bucket: string, paths: string[], cancelId?: string) =>
     invoke<ViewInfo[]>("cache_s3_views", { bucket, paths, cancelId }),
 
-  /** Sign S3 paths so DuckDB can read them lazily over HTTP without credentials. */
-  presignS3Urls: (bucket: string, paths: string[]) =>
-    invoke<Record<string, string>>("presign_s3_urls", { bucket, paths }),
   /** Register S3 views with the backend range proxy (lazy, no download). */
   streamS3Urls: (bucket: string, paths: string[]) =>
     invoke<Record<string, StreamHandle>>("stream_s3_urls", { bucket, paths }),
@@ -160,7 +157,6 @@ export const api = {
   cacheFreeSpace: (kind: "portal" | "s3") =>
     invoke<{ free: number; reserve: number; dir: string }>("cache_free_space", { kind }),
 
-  readFileBytes: (path: string) => invoke<string>("read_file_bytes", { path }),
   writeFileBytes: (path: string, base64: string) =>
     invoke<void>("write_file_bytes", { path, base64 }),
   /** Native save dialog; resolves to null when cancelled. */

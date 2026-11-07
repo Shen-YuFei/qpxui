@@ -2,11 +2,9 @@ use crate::commands::transfers::{self as xfers, CacheKind};
 use crate::qpx::{self, DatasetInfo, ViewInfo};
 use aws_config::meta::region::RegionProviderChain;
 use aws_config::BehaviorVersion;
-use aws_sdk_s3::presigning::PresigningConfig;
 use aws_sdk_s3::Client;
 use serde::Serialize;
 use std::collections::BTreeMap;
-use std::time::Duration;
 use tauri::AppHandle;
 
 #[derive(Debug, Serialize)]
@@ -181,37 +179,6 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, b| {
         (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3)
     })
-}
-
-/// Generate short-lived presigned GET URLs for the given S3 views so the
-/// frontend can query them *lazily* over HTTP(S) (DuckDB-wasm issues byte
-/// range requests on demand, pulling only the parts of the parquet it needs),
-/// without ever holding AWS credentials in the browser.
-///
-/// URLs are valid for 12 hours — plenty for an active desktop session. If you
-/// browse the same dataset later, the app simply asks for a fresh set.
-#[tauri::command]
-pub async fn presign_s3_urls(
-    bucket: String,
-    paths: Vec<String>,
-) -> Result<BTreeMap<String, String>, String> {
-    let client = client().await?;
-    let mut out = BTreeMap::new();
-    for p in &paths {
-        let key = p.trim_start_matches(&format!("s3://{bucket}/")).to_string();
-        let presigned = client
-            .get_object()
-            .bucket(&bucket)
-            .key(&key)
-            .presigned(
-                PresigningConfig::expires_in(Duration::from_secs(12 * 60 * 60))
-                    .map_err(|e| e.to_string())?,
-            )
-            .await
-            .map_err(|e| format!("S3 presign {key}: {e}"))?;
-        out.insert(p.clone(), presigned.uri().to_string());
-    }
-    Ok(out)
 }
 
 /// Download the given `s3://bucket/key` parquet views to the local cache so
