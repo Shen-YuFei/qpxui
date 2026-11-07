@@ -16,7 +16,7 @@ use crate::commands::progress;
 use crate::commands::transfers as xfers;
 use crate::qpx::ViewInfo;
 use reqwest::Client;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use tauri::AppHandle;
 
@@ -770,20 +770,21 @@ pub async fn portal_cache_views(
     cancel_id: String,
     urls: Vec<String>,
 ) -> Result<Vec<ViewInfo>, String> {
-    portal_cache_views_impl(Some(&app), cancel_id, urls).await
+    portal_cache_views_impl(Some(&app), &cache_root()?, cancel_id, urls).await
 }
 
-/// Testable core of [`portal_cache_views`]; `app` may be `None` in tests.
+/// Testable core of [`portal_cache_views`]: `app` may be `None` and `root`
+/// a temporary folder in tests.
 async fn portal_cache_views_impl(
     app: Option<&AppHandle>,
+    root: &Path,
     cancel_id: String,
     urls: Vec<String>,
 ) -> Result<Vec<ViewInfo>, String> {
     let client = portal_http::client_builder()?
         .build()
         .map_err(|e| format!("portal HTTP client: {e:?}"))?;
-    let root = cache_root()?;
-    std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(root).map_err(|e| e.to_string())?;
 
     // Register the cancel token only after the setup that can fail, so a
     // failed setup never leaks a registry entry (it is cleaned up by `end`
@@ -803,7 +804,7 @@ async fn portal_cache_views_impl(
             if !safe_component(&name) {
                 return Err(format!("unsafe file name in {url}"));
             }
-            let dir = run_cache_dir(&root, &url);
+            let dir = run_cache_dir(root, &url);
             let local = dir.join(&name);
             plan.push((url, name, dir, local));
         }
@@ -823,7 +824,7 @@ async fn portal_cache_views_impl(
             need = need.saturating_add(size);
             sizes.push(size);
         }
-        xfers::ensure_space(&root, need)?;
+        xfers::ensure_space(root, need)?;
 
         let mut out = Vec::new();
         for ((url, name, dir, local), head_size) in plan.into_iter().zip(sizes) {
@@ -918,6 +919,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "needs network access to the quantms portal"]
     async fn portal_lists_and_downloads_pxd014414() {
         let ds = "PXD014414".to_string();
         let views = portal_list_views(ds.clone(), None, None)
@@ -934,9 +936,11 @@ mod tests {
             .find(|v| v.view == "dataset")
             .map(|v| v.path.clone())
             .expect("dataset view present");
-        let cached = portal_cache_views_impl(None, "test-cancel".to_string(), vec![url])
-            .await
-            .expect("cache");
+        let tmp = tempfile::tempdir().unwrap();
+        let cached =
+            portal_cache_views_impl(None, tmp.path(), "test-cancel".to_string(), vec![url])
+                .await
+                .expect("cache");
         assert_eq!(cached.len(), 1);
         assert!(cached[0].size_bytes > 0);
         assert!(std::path::Path::new(&cached[0].path).exists());
@@ -1034,12 +1038,11 @@ mod tests {
 
         let name = format!("nohead-test-{}.feature.parquet", std::process::id());
         let url = format!("{base}/{name}");
-        let out = portal_cache_views_impl(None, "nohead".into(), vec![url])
+        let tmp = tempfile::tempdir().unwrap();
+        let out = portal_cache_views_impl(None, tmp.path(), "nohead".into(), vec![url])
             .await
             .expect("download");
-        let got = std::fs::read(&out[0].path).unwrap();
-        std::fs::remove_file(&out[0].path).ok();
-        assert_eq!(got, body);
+        assert_eq!(std::fs::read(&out[0].path).unwrap(), body);
     }
 
     /// HTTP server where HEAD answers 200 with a Content-Length; the size
@@ -1098,7 +1101,11 @@ mod tests {
     async fn new_download_starts_after_a_cancel() {
         let slow = slow_server(1 << 30).await;
         let big = format!("{slow}/recancel-{}.feature.parquet", std::process::id());
-        let job = tokio::spawn(portal_cache_views_impl(None, "first".into(), vec![big]));
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        let job = tokio::spawn(async move {
+            portal_cache_views_impl(None, &root, "first".into(), vec![big]).await
+        });
         tokio::time::sleep(std::time::Duration::from_millis(400)).await;
         assert!(xfers::cancel("first"));
         assert_eq!(job.await.unwrap().unwrap_err(), "cancelled");
@@ -1106,25 +1113,28 @@ mod tests {
         let body: Vec<u8> = (0..100_000u32).map(|i| (i % 7) as u8).collect();
         let base = no_head_server(body.clone()).await;
         let url = format!("{base}/after-cancel-{}.pg.parquet", std::process::id());
-        let out = portal_cache_views_impl(None, "second".into(), vec![url])
+        let out = portal_cache_views_impl(None, tmp.path(), "second".into(), vec![url])
             .await
             .expect("second download");
-        let got = std::fs::read(&out[0].path).unwrap();
-        std::fs::remove_file(&out[0].path).ok();
-        assert_eq!(got, body);
+        assert_eq!(std::fs::read(&out[0].path).unwrap(), body);
     }
 
     #[tokio::test]
     async fn cancel_mid_file_leaves_no_partial_file() {
         let base = slow_server(1 << 30).await;
         let name = format!("cancel-test-{}.feature.parquet", std::process::id());
-        let local = cache_root().unwrap().join(&name);
+        let tmp = tempfile::tempdir().unwrap();
+        let local = tmp.path().join(&name);
         let id = format!("test-cancel-{}", std::process::id());
-        let task = tokio::spawn(portal_cache_views_impl(
-            None,
+        let (root, url, task_id) = (
+            tmp.path().to_path_buf(),
+            format!("{base}/{name}"),
             id.clone(),
-            vec![format!("{base}/{name}")],
-        ));
+        );
+        let task =
+            tokio::spawn(
+                async move { portal_cache_views_impl(None, &root, task_id, vec![url]).await },
+            );
         let part = local.with_file_name(format!("{name}.part"));
         for _ in 0..100 {
             if part.exists() && std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0) > 0 {
@@ -1149,11 +1159,17 @@ mod tests {
     async fn refuses_download_that_does_not_fit() {
         let base = slow_server(1 << 50).await; // 1 PB
         let name = format!("huge-test-{}.feature.parquet", std::process::id());
-        let r =
-            portal_cache_views_impl(None, "test-huge".into(), vec![format!("{base}/{name}")]).await;
+        let tmp = tempfile::tempdir().unwrap();
+        let r = portal_cache_views_impl(
+            None,
+            tmp.path(),
+            "test-huge".into(),
+            vec![format!("{base}/{name}")],
+        )
+        .await;
         let e = r.unwrap_err();
         assert!(e.starts_with("Not enough disk space"), "{e}");
-        let local = cache_root().unwrap().join(&name);
+        let local = tmp.path().join(&name);
         assert!(!local.exists() && !local.with_file_name(format!("{name}.part")).exists());
     }
 
@@ -1207,6 +1223,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "needs network access to the quantms portal"]
     async fn stale_registry_ref_falls_back_to_a_live_run() {
         let views = portal_list_views("IPX0001804002/0e8d80a52200".into(), None, None)
             .await
@@ -1216,6 +1233,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "needs network access to the quantms portal"]
     async fn registry_lists_and_ref_resolves() {
         let rows = portal_registry(Some(100)).await.expect("registry");
         assert!(
