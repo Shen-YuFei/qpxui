@@ -34,12 +34,16 @@ export function datasetTables(ds: DatasetInfo): Promise<DatasetTables> {
   let p = tablesCache.get(key);
   if (!p) {
     p = (async () => {
+      const views = KINDS.flatMap((kind) => {
+        const view = ds.views.find((v) => v.view === kind && v.format === "parquet");
+        return view ? [{ kind, view }] : [];
+      });
+      // Registering waits on the backend (a network round trip for remote
+      // files), so register every view at once.
+      const tables = await Promise.all(views.map(({ view }) => ensureViewReady(view)));
       const out: DatasetTables = {};
-      for (const kind of KINDS) {
-        const view = ds.views.find((v) => v.view === kind && v.format === "parquet")
-          ?? ds.views.find((v) => v.view === kind);
-        if (!view || view.format !== "parquet") continue;
-        const table = await ensureViewReady(view);
+      for (const [i, { kind, view }] of views.entries()) {
+        const table = tables[i];
         const desc = await describeTable(table);
         const types: Record<string, string> = {};
         for (const c of desc) types[c.name.toLowerCase()] = c.type;
