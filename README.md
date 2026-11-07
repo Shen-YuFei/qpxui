@@ -218,7 +218,7 @@ Click a view in the sidebar to work with its rows directly:
 
 **⚡ Stream** queries files where they are stored, without downloading them:
 
-- The Rust backend runs a local HTTP range proxy on `127.0.0.1` (`src-tauri/src/commands/s3stream.rs`).
+- The Rust backend runs a local HTTP range proxy on `127.0.0.1` (`src-tauri/src/commands/stream/`).
 - DuckDB reads only the parquet footer plus the column chunks and row groups each query touches.
 - The proxy fetches just those byte ranges, in 4 MB requests, 8 in parallel. It keeps them in a
   512 MB in-memory cache of 256 KB blocks, so repeated queries don't refetch.
@@ -343,8 +343,10 @@ Many reanalysed datasets (e.g. `PXD014414`) can be opened directly with the **Qu
 │                 download.rs   views into the download cache       │
 │  peptide_search.rs  datasets holding a peptide, protein or gene   │
 │  portal_http.rs shared HTTPS client, certificate settings         │
-│  s3stream.rs    127.0.0.1 range proxy with block cache            │
-│                 (S3, portal HTTP and local files)                 │
+│  stream/        127.0.0.1 range proxy: S3, portal, local files    │
+│                 register.rs   files to stream, commands, stats    │
+│                 server.rs     DuckDB's range requests             │
+│                 fetch.rs      source reads, block cache           │
 │  transfers.rs   download loop, cache folders, free space, cancel  │
 │  progress.rs    download progress events                          │
 └───────────────────────────────────────────────────────────────────┘

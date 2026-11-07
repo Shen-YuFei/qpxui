@@ -1,7 +1,7 @@
 mod commands;
 mod qpx;
 
-pub use commands::s3stream::{
+pub use commands::stream::register::{
     register as stream_register, register_http as stream_register_http, stats as stream_stats,
 };
 
@@ -16,10 +16,10 @@ pub fn run() {
             commands::io::write_file_bytes,
             commands::s3::list_s3,
             commands::s3::cache_s3_views,
-            commands::s3stream::stream_s3_urls,
-            commands::s3stream::stream_s3_stats,
-            commands::s3stream::stream_http_urls,
-            commands::s3stream::stream_local_files,
+            commands::stream::register::stream_s3_urls,
+            commands::stream::register::stream_s3_stats,
+            commands::stream::register::stream_http_urls,
+            commands::stream::register::stream_local_files,
             commands::transfers::cancel_download,
             commands::transfers::cache_free_space,
             commands::portal::catalogue::portal_registry,
