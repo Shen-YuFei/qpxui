@@ -4,7 +4,7 @@
 // sample-sample correlation, PCA and a per-protein abundance profile.
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import ChartCard from "../ChartCard.vue";
-import ReportTable from "../ReportTable.vue";
+import QuantProteinProfile from "./QuantProteinProfile.vue";
 import type { DatasetInfo } from "../../lib/api";
 import { chartTheme, commonPrefix, seriesColor, type ChartSpec } from "../../lib/charts";
 import {
@@ -24,11 +24,9 @@ import { saveText } from "../../lib/export";
 import { state } from "../../store";
 import { useLargeGate } from "../../lib/useLargeGate";
 import LargeGate from "./LargeGate.vue";
-import type { Column, DatasetTables } from "../../lib/report";
+import type { DatasetTables } from "../../lib/report";
 import { QUANT_COLUMNS, quantMatrix, quantSource, sampleMeta } from "../../lib/queries/quant";
-import { listText } from "../../lib/format";
 import {
-  PROTEIN_LIST_MAX,
   averageLinkageOrder,
   correlation,
   findProteins,
@@ -73,7 +71,6 @@ const minPresence = ref(0.5);
 const groupBy = ref("");
 const q = ref("");
 const focus = ref<string | null>(null);
-const protTable = ref<InstanceType<typeof ReportTable> | null>(null);
 
 onMounted(() => {
   if (!src) return;
@@ -220,14 +217,6 @@ watch(shownProts, (rows) => {
   if (!focus.value && rows.length) focus.value = rows[0].protein;
 });
 
-const protCols: Column[] = [
-  { key: "protein", label: "Anchor protein" },
-  { key: "gene", label: "Gene" },
-  { key: "n", label: "Quantified in", num: true },
-  { key: "mean", label: "Mean log2", num: true, fmt: (v) => (v == null ? "" : Number(v).toFixed(2)) },
-  { key: "sd", label: "SD log2", num: true, fmt: (v) => (v == null ? "" : Number(v).toFixed(2)), title: "Standard deviation of log2 abundance across samples" },
-];
-
 const focusRow = computed(() => protRows.value.find((r) => r.protein === focus.value) ?? null);
 
 const profileOption = computed(() => {
@@ -348,38 +337,18 @@ const sourceText = computed(() => {
         <div v-else class="muted note">Correlation and PCA are skipped above {{ MAX_COLS }} {{ colUnit }} ({{ matrix.samples.length }} here).</div>
       </div>
 
-      <div class="profile">
-        <div class="left">
-          <div class="sec-head">
-            <h3>Proteins <span class="muted">({{ shownProts.length.toLocaleString() }}{{ shownProts.length === PROTEIN_LIST_MAX ? "+" : "" }})</span></h3>
-            <input v-model="q" class="filter" placeholder="Filter accession or gene…" />
-          </div>
-          <ReportTable
-            ref="protTable"
-            :columns="protCols"
-            :rows="shownProts"
-            row-key="protein"
-            :selected="focus"
-            clickable
-            max-height="420px"
-            :file-name="`${fileBase}_quant_proteins`"
-            @row="(r) => (focus = r.protein)"
-          >
-            <template #cell-protein="{ value }"><span class="mono acc">{{ value }}</span></template>
-            <template #cell-gene="{ value }"><b>{{ listText(value) }}</b></template>
-          </ReportTable>
-        </div>
-        <ChartCard
-          class="right"
-          :title="focus ? `Abundance profile · ${focusRow?.gene ?? focus}` : 'Abundance profile'"
-          :subtitle="focusRow ? `${focus} · quantified in ${focusRow.n} of ${matrix.samples.length} ${colUnit}${groupBy ? ' · lines = group means' : ''}` : 'Pick a protein.'"
-          :option="profileOption"
-          :csv="profileCsv"
-          :empty-text="focus ? '' : 'Pick a protein.'"
-          :file-base="`${fileBase}_${focusRow?.gene ?? focus ?? ''}`"
-          :height="420"
-        />
-      </div>
+      <QuantProteinProfile
+        v-model:focus="focus"
+        v-model:q="q"
+        :rows="shownProts"
+        :focus-row="focusRow"
+        :option="profileOption"
+        :csv="profileCsv"
+        :n-cols="matrix.samples.length"
+        :col-unit="colUnit"
+        :group-by="groupBy"
+        :file-base="fileBase"
+      />
     </template>
   </div>
 </template>
@@ -417,40 +386,13 @@ select.pc {
   margin-bottom: 14px;
 }
 @media (max-width: 1100px) {
-  .grid,
-  .profile {
+  .grid {
     grid-template-columns: minmax(0, 1fr);
   }
 }
 .note {
   padding: 18px;
   font-size: 12px;
-}
-.profile {
-  display: grid;
-  grid-template-columns: minmax(380px, 2fr) 3fr;
-  gap: 14px;
-  margin-top: 4px;
-  align-items: start;
-}
-.sec-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-  gap: 10px;
-}
-h3 {
-  margin: 0;
-  font-size: 14px;
-}
-.filter {
-  padding: 4px 8px;
-  font-size: 12px;
-  width: 200px;
-}
-.acc {
-  font-size: 11px;
 }
 button.xs {
   padding: 2px 8px;
