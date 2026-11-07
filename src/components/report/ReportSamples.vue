@@ -6,10 +6,10 @@ import type { Column } from "../../lib/report";
 import type { DatasetInfo } from "../../lib/api";
 import type { ChartSpec } from "../../lib/charts";
 import { cachedSql, ident, objects, type DatasetTables } from "../../lib/report";
+import { SAMPLE_FACETS } from "../../lib/qpx";
 
 const props = defineProps<{ ds: DatasetInfo; t: DatasetTables; fileBase: string }>();
 
-const FACETS = ["organism", "organism_part", "disease", "cell_line", "cell_type", "sex", "developmental_stage", "histologic_subtype"];
 const busy = ref(true);
 const error = ref("");
 const rows = ref<Record<string, any>[]>([]);
@@ -49,7 +49,7 @@ onMounted(async () => {
       rows.value = objects(r).sort((a, b) =>
         String(a.sample_accession ?? "").localeCompare(String(b.sample_accession ?? ""), undefined, { numeric: true })
       );
-      for (const col of FACETS) {
+      for (const col of SAMPLE_FACETS) {
         if (!sample.cols.has(col)) continue;
         const f = await cachedSql(
           props.ds,

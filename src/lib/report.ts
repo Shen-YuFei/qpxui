@@ -5,8 +5,7 @@
 import type { DatasetInfo, ViewInfo } from "./api";
 import { describeTable, ensureViewReady, runSql, type QueryResult } from "./duck";
 import { fmtNum } from "./format";
-
-export type ViewKind = "feature" | "psm" | "pg" | "run" | "sample" | "dataset";
+import { SORT_ORDER_KEY, VIEW_KINDS, type ViewKind } from "./qpx";
 
 export interface TableRef {
   view: ViewInfo;
@@ -20,7 +19,6 @@ export interface TableRef {
 
 export type DatasetTables = Partial<Record<ViewKind, TableRef>>;
 
-const KINDS: ViewKind[] = ["feature", "psm", "pg", "run", "sample", "dataset"];
 const tablesCache = new Map<string, Promise<DatasetTables>>();
 const sqlCache = new Map<string, Promise<QueryResult>>();
 
@@ -35,7 +33,7 @@ export function datasetTables(ds: DatasetInfo): Promise<DatasetTables> {
   let p = tablesCache.get(key);
   if (!p) {
     p = (async () => {
-      const views = KINDS.flatMap((kind) => {
+      const views = VIEW_KINDS.flatMap((kind) => {
         const view = ds.views.find((v) => v.view === kind && v.format === "parquet");
         return view ? [{ kind, view }] : [];
       });
@@ -175,7 +173,7 @@ export function viewScale(ref: Pick<TableRef, "view" | "table">): Promise<ViewSc
       }
       const bytes = Math.max(ref.view.sizeBytes, total);
       const kv = await runSql(
-        `SELECT decode(value) FROM parquet_kv_metadata(${file}) WHERE decode(key) = 'qpx.sort_order' LIMIT 1`,
+        `SELECT decode(value) FROM parquet_kv_metadata(${file}) WHERE decode(key) = ${lit(SORT_ORDER_KEY)} LIMIT 1`,
         1
       );
       const order = kv.rows[0]?.[0];

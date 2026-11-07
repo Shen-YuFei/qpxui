@@ -3,6 +3,7 @@ import { cancelAllDownloads } from "./lib/downloads";
 import type { DatasetInfo, ViewInfo } from "./lib/api";
 import { clearReportCache } from "./lib/report";
 import { abandonQueries, forgetTableNames } from "./lib/duck";
+import { REPORT_VIEWS } from "./lib/qpx";
 
 // Simple reactive store (no Pinia needed for this scale).
 export const state = reactive({
@@ -86,5 +87,5 @@ export function loadDatasets(datasets: DatasetInfo[], kind: string) {
 
 /** A dataset gets a report when it has peptide-level evidence or protein groups. */
 export function hasReport(d: DatasetInfo | null | undefined): boolean {
-  return !!d && d.views.some((v) => v.format === "parquet" && ["feature", "psm", "pg"].includes(v.view));
+  return !!d && d.views.some((v) => v.format === "parquet" && REPORT_VIEWS.has(v.view));
 }
