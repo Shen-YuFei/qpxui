@@ -7,7 +7,7 @@
 //                                       -> one colour-coded card per modification
 //   * anything else                    -> a generic indented key/value tree
 import { computed } from "vue";
-import { isStructured, scalarText } from "../lib/format";
+import { isScoreList, isStructured, scalarText } from "../lib/format";
 import { ptmColor, ptmMeta, shortCode } from "../lib/ptm";
 
 defineOptions({ name: "StructuredView" });
@@ -19,14 +19,6 @@ const props = defineProps<{
 }>();
 
 // ---- classifiers ----
-/** Is this a scores list: array of objects each carrying score_name? */
-function isScores(v: unknown): v is Array<Record<string, unknown>> {
-  return (
-    Array.isArray(v) &&
-    v.length > 0 &&
-    v.every((x) => isStructured(x) && "score_name" in (x as object))
-  );
-}
 /** Is this a modifications list: array of objects each carrying a name? */
 function isMods(v: unknown): v is Array<Record<string, unknown>> {
   return (
@@ -38,7 +30,7 @@ function isMods(v: unknown): v is Array<Record<string, unknown>> {
 
 const kind = computed<string>(() => {
   const v = props.value;
-  if (isScores(v)) return "scores";
+  if (isScoreList(v)) return "scores";
   if (isMods(v)) return "modifications";
   if (Array.isArray(v)) return "list";
   if (isStructured(v)) return "struct";
@@ -104,7 +96,7 @@ function scorePairs(m: Record<string, unknown>): Array<[string, unknown]> {
     <span v-else-if="isStructured(value) && Object.keys(value).length === 0" class="sv-muted">{ }</span>
 
     <!-- Scores: score_name = score_value -->
-    <div v-else-if="isScores(value)" class="sv-scores">
+    <div v-else-if="isScoreList(value)" class="sv-scores">
       <div v-for="(m, i) in value" :key="i" class="sv-score">
         <span class="sv-score-label">{{ scoreLabel(m) }}</span>
         <span v-for="[k, val] in scorePairs(m)" :key="k" class="sv-pair">

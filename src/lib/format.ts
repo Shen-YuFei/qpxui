@@ -19,8 +19,10 @@ export function scalarText(v: unknown): string {
   return String(v);
 }
 
-/** A QPX score list: STRUCTs with a `score_name`. */
-function isScoreList(v: unknown): v is Array<Record<string, unknown>> {
+/** A QPX score list: STRUCTs with a `score_name`. A QPX 1.3 relayout may
+ * store additional_scores as one struct with a field per score name instead;
+ * that renders as a plain struct. */
+export function isScoreList(v: unknown): v is Array<Record<string, unknown>> {
   return (
     Array.isArray(v) &&
     v.length > 0 &&
