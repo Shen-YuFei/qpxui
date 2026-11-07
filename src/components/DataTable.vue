@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
-import { describeTable, ensureViewReady, runSql, type QueryResult } from "../lib/duck";
+import { countRows, describeTable, ensureViewReady, runSql, type QueryResult } from "../lib/duck";
 import { isStructured, formatCompact, scalarText } from "../lib/format";
 import type { ViewInfo } from "../lib/api";
 import type { TableRef } from "../lib/report";
@@ -67,9 +67,9 @@ async function load() {
         }
       }
     }
-    const c = await runSql(`SELECT COUNT(*) AS n FROM "${table.value}"`);
+    const n = await countRows(table.value);
     if (id !== loadSeq) return;
-    total.value = Number((c.rows[0]?.[0] as any) ?? 0);
+    total.value = n;
 
     const whereClause = where.value.trim() ? ` WHERE ${where.value.trim()}` : "";
     const orderClause = sortCol.value ? ` ORDER BY ${ident(sortCol.value)} ${sortDir.value}` : "";
