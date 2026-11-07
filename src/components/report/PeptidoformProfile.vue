@@ -8,37 +8,17 @@ import ChartCard from "../ChartCard.vue";
 import type { DatasetInfo } from "../../lib/api";
 import { chartTheme, seriesColor, toCsv } from "../../lib/charts";
 import { distributionChart, retentionChart, sampleChart, type Feature, type ProfileStyle } from "../../lib/peptidoformCharts";
-import { runSql } from "../../lib/duck";
 import { groupingColumns, natural, quantile, sampleGroup } from "../../lib/quant";
-import {
-  cachedSql,
-  ident,
-  lit,
-  objects,
-  sampleMapSql,
-  targetWhere,
-  type DatasetTables,
-  type TableRef,
-} from "../../lib/report";
+import type { DatasetTables, TableRef } from "../../lib/report";
+import { PROFILE_MAX_FEATURES as MAX_FEATURES, peptidoformProfile, profileSource, runNames, sampleMedians, type Channel } from "../../lib/queries/profile";
+import { sampleMeta } from "../../lib/queries/quant";
 import { settings } from "../../lib/settings";
 
 const props = defineProps<{ ds: DatasetInfo; t: DatasetTables; peptidoform: string; fileBase: string }>();
 
-const MAX_FEATURES = 20000;
-
-const hasInt = (r?: TableRef) => !!r?.cols.has("intensities");
 /** Quantified evidence first: features, then PSMs that carry intensities. */
-const src = computed<TableRef | undefined>(() =>
-  hasInt(props.t.feature) ? props.t.feature : hasInt(props.t.psm) ? props.t.psm : props.t.feature ?? props.t.psm
-);
+const src = computed<TableRef | undefined>(() => profileSource(props.t));
 const srcLabel = computed(() => (src.value === props.t.feature ? "features" : "PSMs"));
-
-interface Channel {
-  fid: number;
-  sample: string;
-  label: string | null;
-  intensity: number;
-}
 
 const busy = ref(false);
 const error = ref("");
@@ -53,31 +33,6 @@ const normalise = ref(false);
 const medians = ref<Map<string, number> | null>(null);
 const medBusy = ref(false);
 
-const pfCol = (S: TableRef) => (S.cols.has("peptidoform") ? "peptidoform" : S.seq);
-
-function profileSql(S: TableRef): string {
-  const has = (c: string) => S.cols.has(c);
-  const sec = (c: string) => (has(c) ? `${c} / 60.0` : "NULL");
-  const quant = hasInt(S);
-  const map = sampleMapSql(props.t.run);
-  const f = `f AS MATERIALIZED (
-  SELECT row_number() OVER ()::BIGINT AS fid, ${has("run_file_name") ? "run_file_name" : "'all'"} AS r,
-         ${has("charge") ? "charge" : "NULL"} AS z, ${sec("rt")} AS rt, ${sec("rt_start")} AS rt_lo, ${sec("rt_stop")} AS rt_hi,
-         ${has("posterior_error_probability") ? "posterior_error_probability" : "NULL"} AS pep${quant ? ", intensities" : ""}
-  FROM ${ident(S.table)} WHERE ${targetWhere(S)} AND ${pfCol(S)} = ${lit(props.peptidoform)}
-  LIMIT ${MAX_FEATURES + 1})`;
-  if (!quant) {
-    return `WITH ${f} SELECT fid, r AS run, z AS charge, rt, rt_lo, rt_hi, pep, NULL AS label, NULL AS sample, NULL AS intensity FROM f ORDER BY fid`;
-  }
-  return `WITH ${f},
-x AS (SELECT fid, r, unnest(intensities) AS i FROM f WHERE len(intensities) > 0)${map.ctes},
-s AS (SELECT x.fid, x.i.label AS label, ${map.col} AS sample, x.i.intensity::DOUBLE AS intensity FROM x ${map.joins} WHERE x.i.intensity > 0)
-SELECT f.fid, f.r AS run, f.z AS charge, f.rt, f.rt_lo, f.rt_hi, f.pep, s.label, s.sample, s.intensity
-FROM f LEFT JOIN s USING (fid) ORDER BY f.fid`;
-}
-
-const num = (v: unknown) => (v == null || !Number.isFinite(Number(v)) ? null : Number(v));
-
 let seq = 0;
 async function load() {
   const S = src.value;
@@ -88,29 +43,11 @@ async function load() {
   features.value = [];
   channels.value = [];
   try {
-    const [r] = await Promise.all([runSql(profileSql(S), MAX_FEATURES * 40), loadContext().catch(() => {})]);
+    const [r] = await Promise.all([peptidoformProfile(props.t, S, props.peptidoform), loadContext().catch(() => {})]);
     if (id !== seq) return;
-    const fs = new Map<number, Feature>();
-    const ch: Channel[] = [];
-    for (const row of objects(r)) {
-      const fid = Number(row.fid);
-      if (!fs.has(fid)) {
-        fs.set(fid, {
-          fid,
-          run: String(row.run),
-          charge: num(row.charge),
-          rt: num(row.rt),
-          rtLo: num(row.rt_lo),
-          rtHi: num(row.rt_hi),
-          pep: num(row.pep),
-        });
-      }
-      const v = num(row.intensity);
-      if (row.sample != null && v != null && v > 0) ch.push({ fid, sample: String(row.sample), label: row.label == null ? null : String(row.label), intensity: v });
-    }
-    truncated.value = fs.size > MAX_FEATURES;
-    features.value = [...fs.values()].slice(0, MAX_FEATURES);
-    channels.value = ch;
+    truncated.value = r.truncated;
+    features.value = r.features;
+    channels.value = r.channels;
     if (!groupOptions.value.includes(groupBy.value)) groupBy.value = groupOptions.value[0] ?? "";
   } catch (e: any) {
     if (id === seq) error.value = String(e?.message ?? e);
@@ -122,30 +59,20 @@ async function load() {
 /** Sample metadata and the full run list, shared with the Quantification tab cache. */
 async function loadContext() {
   if (!meta.value.size && props.t.sample?.cols.has("sample_accession")) {
-    const s = await cachedSql(props.ds, "quant.samples", `SELECT * FROM ${ident(props.t.sample.table)}`, 100000);
-    meta.value = new Map(objects(s).map((x) => [String(x.sample_accession), x]));
+    meta.value = await sampleMeta(props.ds, props.t.sample);
   }
   if (!allRuns.value.length && props.t.run?.cols.has("run_file_name")) {
-    const r = await cachedSql(props.ds, "pep.runs", `SELECT DISTINCT run_file_name FROM ${ident(props.t.run.table)}`, 100000);
-    allRuns.value = r.rows.map((x) => String(x[0])).sort(natural);
+    allRuns.value = await runNames(props.ds, props.t.run);
   }
 }
 
 /** Median log2 intensity of every sample over all target evidence, for normalisation. */
 async function loadMedians() {
   const S = src.value;
-  if (!S || !hasInt(S) || medians.value || medBusy.value) return;
+  if (!S || !S.cols.has("intensities") || medians.value || medBusy.value) return;
   medBusy.value = true;
   try {
-    const map = sampleMapSql(props.t.run);
-    const r = await cachedSql(
-      props.ds,
-      `pep.medians.${S === props.t.feature ? "feature" : "psm"}`,
-      `WITH x AS (SELECT run_file_name AS r, unnest(intensities) AS i FROM ${ident(S.table)} WHERE ${targetWhere(S)} AND len(intensities) > 0)${map.ctes}
-       SELECT ${map.col} AS sample, median(log2(x.i.intensity)) AS med FROM x ${map.joins} WHERE x.i.intensity > 0 GROUP BY 1`,
-      100000
-    );
-    medians.value = new Map(r.rows.map((x) => [String(x[0]), Number(x[1])]));
+    medians.value = await sampleMedians(props.ds, props.t, S);
   } catch (e: any) {
     medError.value = String(e?.message ?? e);
     normalise.value = false;
