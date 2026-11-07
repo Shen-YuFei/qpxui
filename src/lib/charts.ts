@@ -55,6 +55,16 @@ export interface ChartTheme {
   bg: string;
 }
 
+/** How grouped charts colour samples: by one sample attribute, or not at all. */
+export interface GroupStyle {
+  theme: ChartTheme;
+  /** The sample attribute that colours the charts; "" for none. */
+  groupBy: string;
+  groups: string[];
+  groupOf: (sample: string) => string;
+  groupColor: (group: string) => string;
+}
+
 export function chartTheme(): ChartTheme {
   const s = getComputedStyle(document.documentElement);
   const v = (n: string) => s.getPropertyValue(n).trim();

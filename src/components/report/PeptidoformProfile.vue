@@ -6,7 +6,8 @@
 import { computed, ref, watch } from "vue";
 import ChartCard from "../ChartCard.vue";
 import type { DatasetInfo } from "../../lib/api";
-import { SERIES_COLORS, chartTheme, commonPrefix, escapeHtml, toCsv } from "../../lib/charts";
+import { SERIES_COLORS, chartTheme, toCsv } from "../../lib/charts";
+import { distributionChart, retentionChart, sampleChart, type Feature, type ProfileStyle } from "../../lib/peptidoformCharts";
 import { runSql } from "../../lib/duck";
 import { groupingColumns, natural, quantile } from "../../lib/quant";
 import {
@@ -32,15 +33,6 @@ const src = computed<TableRef | undefined>(() =>
 );
 const srcLabel = computed(() => (src.value === props.t.feature ? "features" : "PSMs"));
 
-interface Feature {
-  fid: number;
-  run: string;
-  charge: number | null;
-  rt: number | null;
-  rtLo: number | null;
-  rtHi: number | null;
-  pep: number | null;
-}
 interface Channel {
   fid: number;
   sample: string;
@@ -227,80 +219,18 @@ const theme = computed(() => {
   void settings.theme;
   return chartTheme();
 });
-const prefixOf = (xs: string[]) => commonPrefix(xs);
-/** Axis label: drop the shared prefix, then keep the distinctive end of long names. */
-const shorten = (p: string) => (s: string) => {
-  const rest = p ? s.slice(p.length) : s;
-  return rest.length > 16 ? `…${rest.slice(-15)}` : p ? `…${rest}` : rest;
-};
 const yLabel = computed(() => (normalise.value ? "log2 intensity − sample median" : "log2 intensity"));
 
-function categoryAxis(labels: string[]) {
-  const t = theme.value;
-  const p = prefixOf(labels);
-  return {
-    type: "category",
-    data: labels,
-    axisLabel: { show: labels.length <= 80, color: t.dim, rotate: labels.length > 8 ? 45 : 0, fontSize: 10, formatter: shorten(p), hideOverlap: true },
-    axisLine: { lineStyle: { color: t.border } },
-  };
-}
-function valueAxis(name: string, extra: Record<string, any> = {}) {
-  const t = theme.value;
-  return {
-    type: "value",
-    scale: true,
-    name,
-    nameLocation: "middle",
-    nameGap: 36,
-    nameTextStyle: { color: t.dim },
-    axisLabel: { color: t.dim },
-    splitLine: { lineStyle: { color: t.border, opacity: 0.5 } },
-    ...extra,
-  };
-}
-function groupLegend() {
-  const t = theme.value;
-  return groupBy.value
-    ? { top: 0, type: "scroll", data: groups.value.map((g) => ({ name: g, itemStyle: { color: groupColor(g) } })), textStyle: { color: t.dim }, pageTextStyle: { color: t.dim } }
-    : undefined;
-}
+const style = computed<ProfileStyle>(() => ({
+  theme: theme.value,
+  groupBy: groupBy.value,
+  groups: groups.value,
+  groupOf,
+  groupColor,
+  yLabel: yLabel.value,
+}));
 
-const sampleOption = computed(() => {
-  if (!channels.value.length) return null;
-  const labels = sampleAxis.value;
-  const data = labels.map((s) => {
-    const v = perSample.value.get(s);
-    return { value: v && Number.isFinite(v.log2) ? +v.log2.toFixed(4) : null, itemStyle: { color: groupColor(groupOf(s)) } };
-  });
-  return {
-    animation: false,
-    backgroundColor: "transparent",
-    legend: groupLegend(),
-    tooltip: {
-      trigger: "axis",
-      confine: true,
-      axisPointer: { type: "shadow" },
-      formatter: (ps: any) => {
-        const p = (Array.isArray(ps) ? ps : [ps]).find((x: any) => x.seriesType === "bar");
-        if (!p) return "";
-        const s = labels[p.dataIndex];
-        const v = perSample.value.get(s);
-        const g = groupBy.value ? `<br/>${escapeHtml(groupBy.value)}: ${escapeHtml(groupOf(s))}` : "";
-        const body = v ? `${yLabel.value} <b>${v.log2.toFixed(2)}</b><br/>${v.n} ${srcLabel.value} summed` : "not quantified";
-        return `<b>${escapeHtml(s)}</b>${g}<br/>${body}`;
-      },
-    },
-    grid: { left: 26, right: 18, top: groupBy.value ? 32 : 14, bottom: 4, containLabel: true },
-    dataZoom: labels.length > 80 ? [{ type: "inside" }, { type: "slider", height: 14, bottom: 0 }] : undefined,
-    xAxis: categoryAxis(labels),
-    yAxis: valueAxis(yLabel.value),
-    series: [
-      { name: "intensity", type: "bar", data, barMaxWidth: 26 },
-      ...groups.value.map((g) => ({ name: g, type: "line", data: [], itemStyle: { color: groupColor(g) } })),
-    ],
-  };
-});
+const sampleOption = computed(() => (channels.value.length ? sampleChart(sampleAxis.value, perSample.value, srcLabel.value, style.value) : null));
 
 function sampleCsv(): string {
   const head = ["sample", ...(groupBy.value ? [groupBy.value] : []), normalise.value ? "log2_intensity_minus_sample_median" : "log2_intensity", "n_summed"];
@@ -310,122 +240,18 @@ function sampleCsv(): string {
   }));
 }
 
-/** Box (5–95% whiskers) plus the individual samples, per group. */
-const distOption = computed(() => {
-  if (!perSample.value.size) return null;
-  const t = theme.value;
-  const unit = isSamples.value ? "samples" : "runs";
-  const cats = groupBy.value ? groups.value : [`all ${unit}`];
-  const valuesOf = (g: string) =>
-    sampleAxis.value
-      .filter((s) => !groupBy.value || groupOf(s) === g)
-      .map((s) => ({ s, v: perSample.value.get(s)?.log2 }))
-      .filter((x): x is { s: string; v: number } => x.v != null && Number.isFinite(x.v));
-  const boxes = cats.map((g) => {
-    const xs = valuesOf(g).map((x) => x.v).sort((a, b) => a - b);
-    return xs.length ? [0.05, 0.25, 0.5, 0.75, 0.95].map((q) => +quantile(xs, q).toFixed(4)) : [];
-  });
-  const points = cats.flatMap((g, k) =>
-    valuesOf(g).map((x, i, arr) => ({
-      value: [k + ((i / Math.max(1, arr.length - 1)) - 0.5) * 0.5, +x.v.toFixed(4), x.s],
-      itemStyle: { color: groupColor(groupBy.value ? g : "") },
-    }))
-  );
-  return {
-    animation: false,
-    backgroundColor: "transparent",
-    tooltip: {
-      confine: true,
-      formatter: (p: any) => {
-        if (p.seriesType === "boxplot") {
-          const q = (p.value as number[]).slice(-5);
-          return `<b>${escapeHtml(cats[p.dataIndex])}</b><br/>` + ["5%", "25%", "median", "75%", "95%"].map((n, k) => `${n}: <b>${Number(q[k]).toFixed(2)}</b>`).join("<br/>");
-        }
-        return `<b>${escapeHtml(p.value[2])}</b><br/>${yLabel.value} <b>${Number(p.value[1]).toFixed(2)}</b>`;
-      },
-    },
-    grid: { left: 26, right: 18, top: 14, bottom: 4, containLabel: true },
-    xAxis: {
-      ...categoryAxis(cats),
-      axisLabel: {
-        color: t.dim,
-        fontSize: 10,
-        interval: 0,
-        rotate: cats.length > 4 ? 30 : 0,
-        width: cats.length > 4 ? 140 : Math.max(60, 420 / cats.length),
-        overflow: "break",
-      },
-    },
-    yAxis: valueAxis(yLabel.value),
-    series: [
-      { name: "distribution", type: "boxplot", data: boxes, itemStyle: { color: `${t.accent}22`, borderColor: t.dim } },
-      { name: "samples", type: "scatter", symbolSize: 7, data: points, xAxisIndex: 0, z: 3 },
-    ],
-  };
-});
+const distOption = computed(() =>
+  perSample.value.size ? distributionChart(sampleAxis.value, perSample.value, isSamples.value ? "samples" : "runs", style.value) : null
+);
 
 function distCsv(): string {
   return toCsv(["sample", ...(groupBy.value ? [groupBy.value] : []), normalise.value ? "log2_intensity_minus_sample_median" : "log2_intensity"],
     [...perSample.value].map(([s, v]) => [s, ...(groupBy.value ? [groupOf(s)] : []), Number.isFinite(v.log2) ? v.log2 : null]));
 }
 
-const chargeColor = (z: number | null) => SERIES_COLORS[Math.max(0, charges.value.indexOf(z)) % SERIES_COLORS.length];
-
-/** Apex RT per run, one series per charge, with the elution window as a bar. */
-const rtOption = computed(() => {
-  const withRt = features.value.filter((f) => f.rt != null);
-  if (!withRt.length) return null;
-  const t = theme.value;
-  const labels = runs.value;
-  const idx = new Map(labels.map((r, i) => [r, i]));
-  const ranges = withRt.filter((f) => f.rtLo != null && f.rtHi != null);
-  const med = stats.value.rtMedian;
-  return {
-    animation: false,
-    backgroundColor: "transparent",
-    legend: charges.value.length > 1 ? { top: 0, textStyle: { color: t.dim } } : undefined,
-    tooltip: {
-      confine: true,
-      formatter: (p: any) => {
-        const f: Feature | undefined = p.data?.f;
-        if (!f) return "";
-        const win = f.rtLo != null && f.rtHi != null ? `<br/>window ${f.rtLo.toFixed(2)}–${f.rtHi.toFixed(2)} min` : "";
-        const pep = f.pep != null ? `<br/>PEP ${f.pep.toExponential(1)}` : "";
-        return `<b>${escapeHtml(f.run)}</b><br/>z ${f.charge ?? "?"} · RT <b>${f.rt!.toFixed(2)}</b> min${win}${pep}`;
-      },
-    },
-    grid: { left: 26, right: 18, top: charges.value.length > 1 ? 32 : 14, bottom: 4, containLabel: true },
-    dataZoom: labels.length > 80 ? [{ type: "inside" }, { type: "slider", height: 14, bottom: 0 }] : undefined,
-    xAxis: categoryAxis(labels),
-    yAxis: valueAxis("RT (min)"),
-    series: [
-      ...(ranges.length
-        ? [{
-            name: "window",
-            type: "custom",
-            silent: true,
-            renderItem: (_: any, api: any) => {
-              const a = api.coord([api.value(0), api.value(1)]);
-              const b = api.coord([api.value(0), api.value(2)]);
-              return { type: "line", shape: { x1: a[0], y1: a[1], x2: b[0], y2: b[1] }, style: { stroke: t.dim, lineWidth: 2, opacity: 0.5 } };
-            },
-            data: ranges.map((f) => [idx.get(f.run), f.rtLo, f.rtHi]),
-          }]
-        : []),
-      ...charges.value.map((z, k) => ({
-        name: z == null ? "z ?" : `z ${z}`,
-        type: "scatter",
-        symbolSize: 8,
-        itemStyle: { color: chargeColor(z), borderColor: t.bg, borderWidth: 1 },
-        data: withRt.filter((f) => f.charge === z).map((f) => ({ value: [idx.get(f.run), +f.rt!.toFixed(3)], f })),
-        markLine:
-          k === 0 && med != null
-            ? { silent: true, symbol: "none", label: { color: t.dim, position: "insideEndTop", formatter: `median ${med.toFixed(2)}` }, lineStyle: { color: t.dim, type: "dashed" }, data: [{ yAxis: med }] }
-            : undefined,
-      })),
-    ],
-  };
-});
+const rtOption = computed(() =>
+  features.value.some((f) => f.rt != null) ? retentionChart(features.value, runs.value, charges.value, stats.value.rtMedian, theme.value) : null
+);
 
 function rtCsv(): string {
   return toCsv(["run_file_name", "charge", "rt_min", "rt_start_min", "rt_stop_min", "posterior_error_probability"],

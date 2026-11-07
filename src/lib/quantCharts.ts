@@ -1,18 +1,12 @@
 // ECharts options for the Quantification tab: the sample correlation
 // heatmap, the PCA scores and one protein's abundance across samples.
-import { escapeHtml, type ChartTheme } from "./charts";
+import { escapeHtml, type ChartTheme, type GroupStyle } from "./charts";
 import type { Pca } from "./quant";
 
 /** How the charts name and colour samples. */
-export interface SampleStyle {
-  theme: ChartTheme;
+export interface SampleStyle extends GroupStyle {
   /** A sample's name without the prefix all samples share. */
   short: (sample: string) => string;
-  /** The sample attribute that colours the charts; "" for none. */
-  groupBy: string;
-  groups: string[];
-  groupOf: (sample: string) => string;
-  groupColor: (group: string) => string;
 }
 
 /** Pearson r between samples, in the clustered order `ord`. */
