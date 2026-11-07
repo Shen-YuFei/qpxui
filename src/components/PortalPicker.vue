@@ -241,7 +241,7 @@ function fmtPx(n: number): string {
       <b>download them to cache</b> once for fully offline use.
     </p>
 
-    <div v-if="error" class="error">{{ error }}</div>
+    <div v-if="error && !selected" class="error">{{ error }}</div>
     <div v-if="busy && !rows.length" class="muted">
       Loading dataset registry… <span class="spinner"></span>
     </div>
@@ -336,6 +336,8 @@ function fmtPx(n: number): string {
               </button>
             </div>
           </div>
+
+          <div v-if="error" class="error">{{ error }}</div>
 
           <div v-if="downloading && downloadId" class="progress-box">
             <div class="overall">

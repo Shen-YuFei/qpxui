@@ -43,6 +43,35 @@ fn run_cache_dir(root: &std::path::Path, url: &str) -> PathBuf {
     dir
 }
 
+/// Size of a remote file. The portal answers HEAD with 405, so fall back to a
+/// one-byte ranged GET and read the total from `Content-Range`.
+async fn remote_size(client: &Client, url: &str) -> Result<u64, String> {
+    if let Ok(r) = client.head(url).send().await {
+        if r.status().is_success() {
+            if let Some(n) = r.content_length().filter(|n| *n > 0) {
+                return Ok(n);
+            }
+        }
+    }
+    let r = client
+        .get(url)
+        .header(reqwest::header::RANGE, "bytes=0-0")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !r.status().is_success() {
+        return Err(format!("HTTP {}", r.status()));
+    }
+    let total = r
+        .headers()
+        .get(reqwest::header::CONTENT_RANGE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.rsplit('/').next())
+        .and_then(|v| v.trim().parse::<u64>().ok());
+    // A server that ignores Range sends the whole body: use its length.
+    Ok(total.or_else(|| r.content_length()).unwrap_or(0))
+}
+
 fn cache_root() -> Result<PathBuf, String> {
     let base = dirs::cache_dir()
         .or_else(dirs::data_local_dir)
@@ -502,15 +531,7 @@ async fn portal_cache_views_impl(
             let size = if local.exists() {
                 0
             } else {
-                let head = client
-                    .head(url)
-                    .send()
-                    .await
-                    .map_err(|e| format!("size of {name}: {e}"))?;
-                if !head.status().is_success() {
-                    return Err(format!("size of {name}: HTTP {}", head.status()));
-                }
-                head.content_length().unwrap_or(0)
+                remote_size(&client, url).await.map_err(|e| format!("size of {name}: {e}"))?
             };
             need += size;
             sizes.push(size);
@@ -651,6 +672,75 @@ mod tests {
         format!("http://{addr}")
     }
 
+    /// HTTP server like the portal's: HEAD is 405, GET honours `Range`.
+    async fn no_head_server(body: Vec<u8>) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let body = std::sync::Arc::new(body);
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else { return };
+                let body = body.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let n = sock.read(&mut buf).await.unwrap_or(0);
+                    let req = String::from_utf8_lossy(&buf[..n]).to_lowercase();
+                    let resp = if req.starts_with("head") {
+                        b"HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec()
+                    } else if req.contains("range: bytes=0-0") {
+                        let mut r = format!(
+                            "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-0/{}\r\nContent-Length: 1\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        )
+                        .into_bytes();
+                        r.push(body[0]);
+                        r
+                    } else {
+                        let mut r = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).into_bytes();
+                        r.extend_from_slice(&body);
+                        r
+                    };
+                    let _ = sock.write_all(&resp).await;
+                });
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn downloads_when_server_rejects_head() {
+        let body: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
+        let base = no_head_server(body.clone()).await;
+        let client = Client::new();
+        assert_eq!(remote_size(&client, &format!("{base}/x")).await.unwrap(), body.len() as u64);
+
+        let name = format!("nohead-test-{}.feature.parquet", std::process::id());
+        let url = format!("{base}/{name}");
+        let out = portal_cache_views_impl(None, "nohead".into(), vec![url]).await.expect("download");
+        let got = std::fs::read(&out[0].path).unwrap();
+        std::fs::remove_file(&out[0].path).ok();
+        assert_eq!(got, body);
+    }
+
+    #[tokio::test]
+    async fn new_download_starts_after_a_cancel() {
+        let slow = slow_server(1 << 30).await;
+        let big = format!("{slow}/recancel-{}.feature.parquet", std::process::id());
+        let job = tokio::spawn(portal_cache_views_impl(None, "first".into(), vec![big]));
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        assert!(xfers::cancel("first"));
+        assert_eq!(job.await.unwrap().unwrap_err(), "cancelled");
+
+        let body: Vec<u8> = (0..100_000u32).map(|i| (i % 7) as u8).collect();
+        let base = no_head_server(body.clone()).await;
+        let url = format!("{base}/after-cancel-{}.pg.parquet", std::process::id());
+        let out = portal_cache_views_impl(None, "second".into(), vec![url]).await.expect("second download");
+        let got = std::fs::read(&out[0].path).unwrap();
+        std::fs::remove_file(&out[0].path).ok();
+        assert_eq!(got, body);
+    }
+
     #[tokio::test]
     async fn cancel_mid_file_leaves_no_partial_file() {
         let base = slow_server(1 << 30).await;
@@ -738,3 +828,4 @@ mod tests {
         assert!(views.iter().any(|v| v.size_bytes > 0));
     }
 }
+
