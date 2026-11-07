@@ -1,5 +1,5 @@
 import * as duckdb from "@duckdb/duckdb-wasm";
-import { state } from "../store";
+import { reactive } from "vue";
 import { api, type ViewInfo } from "./api";
 import { CANCELLED, engineErrorText } from "./errors";
 
@@ -49,8 +49,9 @@ async function tracked<T>(fn: () => Promise<T>): Promise<T> {
 
 /** Stop whatever the engine is doing (duckdb-wasm runs one query at a time, so
  * a long scan of the previous dataset would hold up the next one). Kills the
- * worker when something is running; the next query starts a fresh engine.
- * Returns true when it restarted, so callers drop tables and cached results. */
+ * worker when something is running; the next query starts a fresh engine,
+ * with no tables. Returns true when it restarted, so callers drop cached
+ * results. */
 export function abandonQueries(): boolean {
   if (!pending || !db) return false;
   const old = db;
@@ -59,6 +60,7 @@ export function abandonQueries(): boolean {
   initPromise = null;
   pending = 0;
   generation++;
+  registered.clear();
   const toCancel = Array.from(trackedCancels);
   trackedCancels.clear();
   for (const r of toCancel) r(new Error(CANCELLED));
@@ -114,6 +116,10 @@ function safeName(name: string): string {
  * first one's. */
 const tableNames = new Map<string, string>();
 
+/** Paths of the views registered as tables in the running engine (ticked in
+ * the sidebar). */
+export const registered = reactive(new Set<string>());
+
 export function tableName(view: ViewInfo): string {
   let name = tableNames.get(view.path);
   if (!name) {
@@ -126,21 +132,23 @@ export function tableName(view: ViewInfo): string {
   return name;
 }
 
-/** A new source: its views may take the names of the previous one's. */
-export function forgetTableNames(): void {
+/** A new source: its views may take the names of the previous one's, and
+ * are registered again. */
+export function forgetTables(): void {
   tableNames.clear();
+  registered.clear();
 }
 
 export async function ensureViewReady(view: ViewInfo): Promise<string> {
   // Named before any await, so concurrent registrations can't pick one name.
   const table = tableName(view);
   await init();
-  if (state.registered.has(view.path)) return table;
+  if (registered.has(view.path)) return table;
   const gen = generation;
   await tracked(() => register(view, table));
   // The engine was restarted meanwhile: the table belongs to the old one.
   if (gen !== generation) throw new Error(CANCELLED);
-  state.registered.add(view.path);
+  registered.add(view.path);
   return table;
 }
 

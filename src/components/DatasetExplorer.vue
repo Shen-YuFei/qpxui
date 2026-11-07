@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { hasReport, openReport, searchFor, state, stopQueries } from "../store";
 import { api, type StreamStat, type ViewInfo } from "../lib/api";
+import { registered } from "../lib/duck";
 import { fmtSize } from "../lib/format";
 
 const datasets = computed(() => state.datasets);
@@ -121,7 +122,7 @@ const viewIcon: Record<string, string> = {
             ⚡ {{ fmtSize(streamStats[v.path]?.fetchedBytes ?? 0, "0 B") }} /
           </span>
           <span class="vsize muted">{{ fmtSize(v.sizeBytes, "0 B") }}</span>
-          <span v-if="state.registered.has(v.path)" class="ok" title="Loaded in DuckDB">✓</span>
+          <span v-if="registered.has(v.path)" class="ok" title="Loaded in DuckDB">✓</span>
         </div>
       </div>
     </div>

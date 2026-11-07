@@ -2,7 +2,7 @@ import { reactive } from "vue";
 import { cancelAllDownloads } from "./lib/downloads";
 import type { DatasetInfo, ViewInfo } from "./lib/api";
 import { clearReportCache } from "./lib/report";
-import { abandonQueries, forgetTableNames } from "./lib/duck";
+import { abandonQueries, forgetTables } from "./lib/duck";
 import { REPORT_VIEWS } from "./lib/qpx";
 
 // Simple reactive store (no Pinia needed for this scale).
@@ -12,8 +12,6 @@ export const state = reactive({
   sourceKind: "none" as string,
   selectedDataset: null as DatasetInfo | null,
   selectedView: null as ViewInfo | null,
-  /** Paths of the views registered as DuckDB tables (ticked in the sidebar). */
-  registered: new Set<string>(),
   status: "" as string,
   /** Main panel: a single view (browse/summary/query) or the dataset report. */
   page: "view" as "view" | "report",
@@ -47,11 +45,9 @@ export function openProtein(acc: string) {
 }
 
 /** Leaving a dataset: stop its running queries so the next one starts at
- * once. A restarted engine has no tables, so forget what was registered. */
+ * once. A restarted engine has no tables, so its cached results go too. */
 export function stopQueries() {
-  if (!abandonQueries()) return;
-  clearReportCache();
-  state.registered = new Set();
+  if (abandonQueries()) clearReportCache();
 }
 
 export function reset() {
@@ -62,7 +58,7 @@ export function reset() {
   state.sourceKind = "none";
   state.selectedDataset = null;
   state.selectedView = null;
-  state.registered = new Set();
+  forgetTables();
   state.status = "";
   state.page = "view";
   state.reportTab = "overview";
@@ -77,8 +73,7 @@ export function loadDatasets(datasets: DatasetInfo[], kind: string) {
   state.sourceKind = kind;
   state.selectedDataset = datasets[0] ?? null;
   state.selectedView = datasets[0]?.views[0] ?? null;
-  state.registered = new Set();
-  forgetTableNames();
+  forgetTables();
   state.page = hasReport(datasets[0]) ? "report" : "view";
   state.reportTab = "overview";
   state.proteinFocus = null;

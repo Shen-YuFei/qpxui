@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ViewInfo } from "./api";
-import { forgetTableNames, tableName } from "./duck";
+import { forgetTables, registered, tableName } from "./duck";
 
 const view = (path: string): ViewInfo => ({ name: path.split("/").pop()!, view: "psm", format: "parquet", path, sizeBytes: 1 });
 
@@ -15,7 +15,13 @@ describe("tableName", () => {
 
   it("lets a new source reuse the names", () => {
     tableName(view("/x/a/PXD2.psm.parquet"));
-    forgetTableNames();
+    forgetTables();
     expect(tableName(view("/y/PXD2.psm.parquet"))).toBe("PXD2_psm");
+  });
+
+  it("registers a new source's views again", () => {
+    registered.add("/x/a/PXD3.psm.parquet");
+    forgetTables();
+    expect(registered.size).toBe(0);
   });
 });
