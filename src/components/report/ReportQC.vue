@@ -17,11 +17,14 @@ import {
   type DatasetTables,
 } from "../../lib/report";
 import { useSlots } from "../../lib/useSlots";
+import { useLargeGate } from "../../lib/useLargeGate";
+import LargeGate from "./LargeGate.vue";
 
 const props = defineProps<{ ds: DatasetInfo; t: DatasetTables; fileBase: string }>();
 
 const ev = evidence(props.t);
 const evName = props.t.feature ? "features" : "PSMs";
+const { gate, check, release } = useLargeGate();
 
 const runRows = ref<Record<string, any>[]>([]);
 const runCols = ref<Column[]>([]);
@@ -157,7 +160,8 @@ function runMedianSpec(key: "med_int" | "med_ppm", name: string): ChartSpec | nu
   };
 }
 
-onMounted(async () => {
+async function build() {
+  runBusy.value = true;
   try {
     await loadRuns();
   } catch (e: any) {
@@ -171,12 +175,21 @@ onMounted(async () => {
     runInt: async () => runMedianSpec("med_int", "median log10 intensity"),
     runPpm: async () => runMedianSpec("med_ppm", "median ppm"),
   });
+}
+
+onMounted(() => {
+  const evCols = ["is_decoy", "run_file_name", "sequence", "peptidoform", "anchor_protein", "protein_accessions", "pg_accessions",
+    "intensities", "mass_error_ppm", "rt", "charge", "missed_cleavages"];
+  const psm = props.t.feature ? props.t.psm : undefined;
+  check([{ ref: ev, cols: evCols }, { ref: psm, cols: ["is_decoy", "run_file_name"] }, { ref: props.t.pg, cols: ["is_decoy", "run_file_name"] }], build);
 });
 </script>
 
 <template>
   <div>
     <div v-if="!ev" class="muted pad">No feature or PSM view in this dataset.</div>
+    <LargeGate v-else-if="gate.blocked" :bytes="gate.bytes" :size="gate.size" what="Per-run QC" @go="release" />
+    <div v-else-if="gate.checking" class="muted pad"><span class="spinner"></span></div>
     <template v-else>
       <p class="muted note">
         <span v-if="runBusy || progress.running">Computing per-run QC… <span class="spinner"></span> · </span>

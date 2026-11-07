@@ -148,12 +148,14 @@ export interface ViewScale {
   large: boolean;
   /** Leading sort columns from the QPX footer (`qpx.sort_order`), if any. */
   sortedBy: string[];
+  /** Compressed bytes per top-level column, from the footer. */
+  colBytes: Record<string, number>;
 }
 
 const scaleCache = new Map<string, Promise<ViewScale>>();
 
 /** Size, row count and sort order of a view, from the parquet footer only. */
-export function viewScale(ref: TableRef): Promise<ViewScale> {
+export function viewScale(ref: Pick<TableRef, "view" | "table">): Promise<ViewScale> {
   const key = ref.view.path;
   let p = scaleCache.get(key);
   if (!p) {
@@ -162,11 +164,21 @@ export function viewScale(ref: TableRef): Promise<ViewScale> {
       const file = lit(`${ref.table}.parquet`);
       let rows = 0;
       let bytes = ref.view.sizeBytes || 0;
+      const colBytes: Record<string, number> = {};
       try {
         const r = await runSql(`SELECT sum(num_rows)::BIGINT FROM parquet_file_metadata(${file})`, 1);
         rows = Number(r.rows[0]?.[0] ?? 0);
-        const b = await runSql(`SELECT sum(total_compressed_size)::BIGINT FROM parquet_metadata(${file})`, 1);
-        bytes = Math.max(bytes, Number(b.rows[0]?.[0] ?? 0));
+        const b = await runSql(
+          `SELECT lower(split_part(path_in_schema, ', ', 1)) AS c, sum(total_compressed_size)::BIGINT
+           FROM parquet_metadata(${file}) GROUP BY 1`,
+          10000
+        );
+        let total = 0;
+        for (const [c, n] of b.rows) {
+          colBytes[String(c)] = Number(n);
+          total += Number(n);
+        }
+        bytes = Math.max(bytes, total);
       } catch {
         /* keep the listing size */
       }
@@ -181,12 +193,34 @@ export function viewScale(ref: TableRef): Promise<ViewScale> {
       } catch {
         /* no footer key */
       }
-      return { remote, rows, bytes, large: remote && bytes >= LARGE_STREAM_BYTES, sortedBy };
+      return { remote, rows, bytes, large: remote && bytes >= LARGE_STREAM_BYTES, sortedBy, colBytes };
     })();
     p.catch(() => scaleCache.delete(key));
     scaleCache.set(key, p);
   }
   return p;
+}
+
+/** Compressed bytes a full scan of these columns reads (unknown columns count 0). */
+export function scanBytes(scale: ViewScale, cols: Iterable<string>): number {
+  let n = 0;
+  for (const c of new Set([...cols].map((x) => x.toLowerCase()))) n += scale.colBytes[c] ?? 0;
+  return n;
+}
+
+/** The large streamed views among these, with their scale (footer reads only). */
+export async function largeViews(refs: (TableRef | undefined)[]): Promise<{ ref: TableRef; scale: ViewScale }[]> {
+  const out: { ref: TableRef; scale: ViewScale }[] = [];
+  for (const ref of refs) {
+    if (!ref || !/^(s3|https?):\/\//.test(ref.view.path)) continue;
+    try {
+      const scale = await viewScale(ref);
+      if (scale.large) out.push({ ref, scale });
+    } catch {
+      /* treat as small */
+    }
+  }
+  return out;
 }
 
 /** Column names from a `qpx.sort_order` value: a JSON list of names or of

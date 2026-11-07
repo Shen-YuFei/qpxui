@@ -16,6 +16,8 @@ import {
   type DatasetTables,
 } from "../../lib/report";
 import { useSlots } from "../../lib/useSlots";
+import { useLargeGate } from "../../lib/useLargeGate";
+import LargeGate from "./LargeGate.vue";
 
 const props = defineProps<{ ds: DatasetInfo; t: DatasetTables; fileBase: string }>();
 
@@ -24,6 +26,7 @@ const { slots, progress, run } = useSlots(KEYS);
 
 const ev = evidence(props.t);
 const evName = props.t.feature ? "features" : "PSMs";
+const { gate, check, release } = useLargeGate();
 
 async function counts(key: string, sql: string, xName: string, yName = evName): Promise<ChartSpec> {
   const r = await cachedSql(props.ds, key, sql);
@@ -51,7 +54,9 @@ onMounted(() => {
   const has = (c: string) => ev.cols.has(c);
   const prot = proteinExpr(ev);
   const isum = intensitySumExpr(ev);
-  run({
+  const cols = ["is_decoy", "run_file_name", "charge", "sequence", "peptidoform", "missed_cleavages", "anchor_protein",
+    "protein_accessions", "pg_accessions", "mass_error_ppm", "rt", "intensities", "posterior_error_probability", "peptide_qvalue"];
+  check([{ ref: ev, cols }], () => run({
     perRun: has("run_file_name")
       ? async () => {
           const r = await cachedSql(
@@ -107,13 +112,15 @@ onMounted(() => {
     qvalue: has("peptide_qvalue")
       ? () => hist("ov.q", "peptide_qvalue", W, "peptide q-value", evName)
       : undefined,
-  });
+  }));
 });
 </script>
 
 <template>
   <div>
     <div v-if="!ev" class="muted pad">This dataset has no feature or PSM view, so there are no peptide-level distributions.</div>
+    <LargeGate v-else-if="gate.blocked" :bytes="gate.bytes" :size="gate.size" what="Building the distributions" @go="release" />
+    <div v-else-if="gate.checking" class="muted pad"><span class="spinner"></span></div>
     <template v-else>
       <p class="muted note">
         <span v-if="progress.running">Computing statistics · {{ progress.done }} of {{ progress.total }} <span class="spinner"></span> · </span>
