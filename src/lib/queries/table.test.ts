@@ -32,6 +32,10 @@ describe("cellFilter", () => {
     expect(cellFilter("charge", 3)).toBe('"charge" = 3');
     expect(cellFilter("psm_id", 3619665049874577583n)).toBe('"psm_id" = 3619665049874577583');
   });
+  it("matches fractions as the DOUBLE read, not a decimal literal", () => {
+    expect(cellFilter("mass_error_ppm", -0.9335779547691345)).toBe(`"mass_error_ppm" = '-0.9335779547691345'::DOUBLE`);
+    expect(cellFilter("x", 1e21)).toBe(`"x" = '1e+21'::DOUBLE`);
+  });
   it("compares other values as text", () => {
     expect(cellFilter("decoy", true)).toBe(`CAST("decoy" AS VARCHAR) = 'true'`);
     expect(cellFilter("x", Infinity)).toBe(`CAST("x" AS VARCHAR) = 'Infinity'`);
