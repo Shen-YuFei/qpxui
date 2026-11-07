@@ -7,7 +7,8 @@ import SpectrumViewer, { type PsmKey } from "../SpectrumViewer.vue";
 import type { Column } from "../../lib/report";
 import type { DatasetInfo } from "../../lib/api";
 import { evidence, hasSpectra, proteinExpr, viewScale, type DatasetTables, type ViewScale } from "../../lib/report";
-import { PEPTIDOFORM_LIMIT as LIMIT, modificationNames, peptidoformEvidence, searchPeptidoforms } from "../../lib/queries/peptides";
+import { PEPTIDOFORM_LIMIT as LIMIT, peptidoformEvidence, searchPeptidoforms } from "../../lib/queries/peptides";
+import { modificationCounts } from "../../lib/queries/ptms";
 import { fmtBytes, listText } from "../../lib/format";
 import { openProtein, state } from "../../store";
 
@@ -136,7 +137,7 @@ async function loadMods() {
   if (!ev || modsLoaded.value || modsBusy.value || !ev.cols.has("modifications")) return;
   modsBusy.value = true;
   try {
-    modNames.value = await modificationNames(props.ds, ev);
+    modNames.value = (await modificationCounts(props.ds, ev)).map((m) => String(m.name)).filter((x) => x && x !== "null");
     modsLoaded.value = true;
   } catch {
     /* optional filter */

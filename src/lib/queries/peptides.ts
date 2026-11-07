@@ -1,8 +1,7 @@
 // The Peptidoforms tab: peptidoform search over the evidence view and one
 // peptidoform's per-run evidence (features, or PSMs when they carry spectra).
-import type { DatasetInfo } from "../api";
 import { runSql } from "../duck";
-import { cachedSql, ident, intensitySumExpr, likePattern, lit, objects, targetWhere, type TableRef } from "../report";
+import { ident, intensitySumExpr, likePattern, lit, objects, targetWhere, type TableRef } from "../report";
 
 /** Rows a search lists; one more is read to tell that there are more. */
 export const PEPTIDOFORM_LIMIT = 500;
@@ -92,19 +91,4 @@ export async function peptidoformEvidence(E: TableRef, peptidoform: string): Pro
        ORDER BY ${has("run_file_name") ? "run_file_name" : "1"}${has("posterior_error_probability") ? ", posterior_error_probability" : ""} LIMIT 5000`
   );
   return objects(r);
-}
-
-/** Names of the modifications in the target rows of `ev`, most rows first
- * (the modification filter). */
-export async function modificationNames(ds: DatasetInfo, ev: TableRef): Promise<string[]> {
-  const r = await cachedSql(
-    ds,
-    "ptm.mods",
-    `SELECT m.name AS name, any_value(m.accession) AS accession,
-              count(DISTINCT pf)::BIGINT AS n_pf, count(DISTINCT seq)::BIGINT AS n_pep, count(*)::BIGINT AS n_ev
-       FROM (SELECT unnest(modifications) AS m, ${ev.cols.has("peptidoform") ? "peptidoform" : ev.seq} AS pf, ${ev.seq} AS seq
-             FROM ${ident(ev.table)} WHERE ${targetWhere(ev)})
-       GROUP BY 1 ORDER BY n_ev DESC`
-  );
-  return r.rows.map((x) => String(x[0])).filter((x) => x && x !== "null");
 }
