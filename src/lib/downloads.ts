@@ -5,6 +5,32 @@ import { ask, message } from "@tauri-apps/plugin-dialog";
 import { api, type ViewInfo } from "./api";
 import { fmtBytes } from "./format";
 
+/** Ids of downloads still running, so leaving a source can cancel them. */
+const active = new Set<string>();
+
+export function trackDownload(id: string) {
+  active.add(id);
+}
+
+export function untrackDownload(id: string) {
+  active.delete(id);
+}
+
+/** Cancel one running download (no-op when it already finished). */
+export async function cancelDownload(id: string) {
+  if (!id) return;
+  try {
+    await api.cancelDownload(id);
+  } catch {
+    /* already finished */
+  }
+}
+
+/** Cancel every running download, e.g. on "New source". */
+export function cancelAllDownloads() {
+  for (const id of active) void cancelDownload(id);
+}
+
 /** Ask for confirmation above this size. */
 export const CONFIRM_BYTES = 2 * 1024 ** 3;
 

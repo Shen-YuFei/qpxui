@@ -1,4 +1,5 @@
 import { reactive } from "vue";
+import { cancelAllDownloads } from "./lib/downloads";
 import type { DatasetInfo, ViewInfo } from "./lib/api";
 import { clearReportCache } from "./lib/report";
 
@@ -47,6 +48,7 @@ export function openProtein(acc: string) {
 }
 
 export function reset() {
+  cancelAllDownloads();
   clearReportCache();
   state.datasets = [];
   state.sourceKind = "none";
