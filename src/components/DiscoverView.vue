@@ -4,6 +4,14 @@ import { api, type DatasetInfo, type PortalDataset, type PortalFacets, type Port
 import { loadDatasets } from "../store";
 import { installProgress, overall, progress } from "../lib/progress";
 import { cancelDownload, confirmDownload, totalBytes, trackDownload, untrackDownload } from "../lib/downloads";
+import PeptideSearchPane from "./PeptideSearchPane.vue";
+
+const TABS = [
+  { key: "datasets", label: "Dataset search" },
+  { key: "peptides", label: "Peptide & protein search" },
+];
+
+const tab = ref<"datasets" | "peptides">("datasets");
 
 const PAGE_SIZE = 50;
 
@@ -270,13 +278,27 @@ function fmtPx(n: number): string {
     <div class="head">
       <h3>Discover datasets on the quantms portal</h3>
       <p class="muted">
-        Search and filter the reanalysed datasets published on the
-        <a href="https://portal.quantms.org" target="_blank" rel="noopener">quantms portal</a> by
-        text, organism, instrument and collection. Pick an interesting one to list its QPX views,
-        then <b>Stream</b> them lazily or <b>download to cache</b> for offline inspection.
+        Find reanalysed QPX datasets published on the
+        <a href="https://portal.quantms.org" target="_blank" rel="noopener">quantms portal</a> — by
+        metadata, or by the actual peptides / proteins / genes they contain — then pick an interesting
+        one to list its QPX views and <b>Stream</b> them lazily or <b>download to cache</b> for offline
+        inspection.
       </p>
     </div>
 
+    <div class="tabbar">
+      <button
+        v-for="t in TABS"
+        :key="t.key"
+        class="tab"
+        :class="{ on: tab === t.key }"
+        @click="tab = t.key as any"
+      >
+        {{ t.label }}
+      </button>
+    </div>
+
+    <template v-if="tab === 'datasets'">
     <div class="filters">
       <input
         v-model="q"
@@ -416,6 +438,11 @@ function fmtPx(n: number): string {
       <span class="muted">Page {{ page }} / {{ results.totalPages }}</span>
       <button :disabled="!hasNext" @click="gotoPage(page + 1)">Next →</button>
     </div>
+    </template>
+
+    <template v-else-if="tab === 'peptides'">
+      <PeptideSearchPane :organisms="facets.organisms" />
+    </template>
   </div>
 </template>
 
@@ -431,6 +458,26 @@ function fmtPx(n: number): string {
 }
 a {
   color: var(--accent);
+}
+.tabbar {
+  display: inline-flex;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px;
+  margin-bottom: 4px;
+}
+.tab {
+  padding: 6px 14px;
+  font-size: 13px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+}
+.tab.on {
+  background: var(--accent);
+  color: #10142b;
+  font-weight: 600;
 }
 .filters {
   display: flex;
