@@ -338,7 +338,9 @@ Many reanalysed datasets (e.g. `PXD014414`) can be opened directly with the **Qu
 │  sources.rs     QPX discovery (file / folder / collection)        │
 │  io.rs          write exports                                     │
 │  s3.rs          list / download S3 objects (aws-sdk-s3, rustls)   │
-│  portal.rs      portal registry, search, listing, downloads       │
+│  portal/        catalogue.rs  registry, search, facets            │
+│                 listing.rs    a dataset's runs and views          │
+│                 download.rs   views into the download cache       │
 │  peptide_search.rs  datasets holding a peptide, protein or gene   │
 │  portal_http.rs shared HTTPS client, certificate settings         │
 │  s3stream.rs    127.0.0.1 range proxy with block cache            │
