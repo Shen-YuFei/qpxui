@@ -120,8 +120,15 @@ async fn proxy() -> Result<Arc<Proxy>, String> {
             let served = p.clone();
             tokio::spawn(async move {
                 loop {
-                    let Ok((stream, _)) = listener.accept().await else {
-                        continue;
+                    let stream = match listener.accept().await {
+                        Ok((stream, _)) => stream,
+                        Err(e) => {
+                            // E.g. out of file descriptors: the connection
+                            // stays queued, so retrying at once would spin.
+                            log::warn!("stream proxy accept: {e}");
+                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                            continue;
+                        }
                     };
                     let p = served.clone();
                     tokio::spawn(async move {
