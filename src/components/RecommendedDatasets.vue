@@ -6,7 +6,6 @@ import PortalViews from "./PortalViews.vue";
 
 const datasets = ref<PortalDataset[]>([]);
 const busy = ref(false);
-const loadingMsg = ref("Loading recommended datasets…");
 const error = ref("");
 
 const selected = ref<PortalDataset | null>(null);
@@ -39,10 +38,8 @@ async function loadRecommended() {
       }
     }
     datasets.value = picked;
-    if (!datasets.value.length) loadingMsg.value = "No featured datasets available.";
   } catch (e: any) {
     error.value = String(e);
-    loadingMsg.value = "";
   } finally {
     busy.value = false;
   }
@@ -69,9 +66,8 @@ onMounted(() => {
     </div>
 
     <div v-if="error" class="error">{{ error }}</div>
-    <div v-if="busy && !datasets.length" class="muted">
-      {{ loadingMsg }} <span class="spinner"></span>
-    </div>
+    <div v-else-if="busy" class="muted">Loading recommended datasets… <span class="spinner"></span></div>
+    <div v-else-if="!datasets.length" class="muted">No featured datasets available.</div>
 
     <div v-if="datasets.length" class="grid">
       <article
