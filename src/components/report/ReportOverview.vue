@@ -2,118 +2,27 @@
 import { onMounted, onUnmounted } from "vue";
 import ChartCard from "../ChartCard.vue";
 import type { DatasetInfo } from "../../lib/api";
-import type { ChartSpec } from "../../lib/charts";
-import {
-  cachedSql,
-  evidence,
-  histogramData,
-  histogramSql,
-  ident,
-  intensitySumExpr,
-  log10Expr,
-  proteinExpr,
-  targetWhere,
-  type DatasetTables,
-} from "../../lib/report";
+import { evidence, type DatasetTables } from "../../lib/report";
+import { OVERVIEW_CHARTS, OVERVIEW_COLUMNS, overviewCharts } from "../../lib/queries/overview";
 import { useSlots } from "../../lib/useSlots";
 import { useLargeGate } from "../../lib/useLargeGate";
 import LargeGate from "./LargeGate.vue";
 
 const props = defineProps<{ ds: DatasetInfo; t: DatasetTables; fileBase: string }>();
 
-const KEYS = ["perRun", "charge", "length", "mc", "ppg", "ppm", "rt", "intensity", "pep", "qvalue"] as const;
-const { slots, progress, run } = useSlots(KEYS);
+const { slots, progress, run } = useSlots(OVERVIEW_CHARTS);
 
 const ev = evidence(props.t);
 const evName = props.t.feature ? "features" : "PSMs";
 const { gate, check, release, dispose } = useLargeGate();
 onUnmounted(dispose);
 
-async function counts(key: string, sql: string, xName: string, yName = evName): Promise<ChartSpec> {
-  const r = await cachedSql(props.ds, key, sql);
-  return {
-    kind: "bar",
-    labels: r.rows.map((x) => String(x[0] ?? "∅")),
-    series: [{ name: yName, values: r.rows.map((x) => Number(x[1])) }],
-    xName,
-  };
-}
-
-async function hist(key: string, expr: string, where: string, xName: string, yName = evName, robust = false): Promise<ChartSpec | null> {
-  const r = await cachedSql(props.ds, key, histogramSql(ev!.table, expr, where, 40, robust));
-  const h = histogramData(r);
-  return { kind: "bar", labels: h.labels, series: [{ name: yName, values: h.values }], xName };
-}
-
 onMounted(() => {
   if (!ev) {
     run({});
     return;
   }
-  const T = ident(ev.table);
-  const W = targetWhere(ev);
-  const has = (c: string) => ev.cols.has(c);
-  const prot = proteinExpr(ev);
-  const isum = intensitySumExpr(ev);
-  const cols = ["is_decoy", "run_file_name", "charge", "sequence", "peptidoform", "missed_cleavages", "anchor_protein",
-    "protein_accessions", "pg_accessions", "mass_error_ppm", "rt", "intensities", "posterior_error_probability", "peptide_qvalue"];
-  check([{ ref: ev, cols }], () => run({
-    perRun: has("run_file_name")
-      ? async () => {
-          const r = await cachedSql(
-            props.ds,
-            "ov.perRun",
-            `SELECT run_file_name, count(*) AS n FROM ${T} WHERE ${W} GROUP BY 1 ORDER BY 2 DESC`
-          );
-          return {
-            kind: "line",
-            labels: r.rows.map((x) => String(x[0] ?? "∅")),
-            series: [{ name: evName, values: r.rows.map((x) => Number(x[1])) }],
-            xName: `runs (${r.rows.length}), most first`,
-            hideLabels: r.rows.length > 30,
-            zeroBased: true,
-          };
-        }
-      : undefined,
-    charge: has("charge")
-      ? () => counts("ov.charge", `SELECT charge, count(*) FROM ${T} WHERE ${W} GROUP BY 1 ORDER BY 1`, "charge")
-      : undefined,
-    length: ev.seq !== "NULL"
-      ? () =>
-          counts(
-            "ov.length",
-            `SELECT length(${ev.seq}) AS len, count(*) FROM ${T} WHERE ${W} AND ${ev.seq} IS NOT NULL GROUP BY 1 ORDER BY 1`,
-            "residues"
-          )
-      : undefined,
-    mc: has("missed_cleavages")
-      ? () => counts("ov.mc", `SELECT missed_cleavages, count(*) FROM ${T} WHERE ${W} GROUP BY 1 ORDER BY 1`, "missed cleavages")
-      : undefined,
-    ppg: prot && ev.seq !== "NULL"
-      ? async () => {
-          const s = await counts(
-            "ov.ppg",
-            `SELECT least(n, 20) AS k, count(*) FROM (
-               SELECT ${prot} AS p, count(DISTINCT ${ev.seq}) AS n FROM ${T}
-               WHERE ${W} AND ${prot} IS NOT NULL GROUP BY 1
-             ) GROUP BY 1 ORDER BY 1`,
-            "peptides (20 = 20 or more)",
-            "protein groups"
-          );
-          s.labels = s.labels.map((l) => (l === "20" ? "20+" : l));
-          return s;
-        }
-      : undefined,
-    ppm: has("mass_error_ppm") ? () => hist("ov.ppm", "mass_error_ppm", W, "ppm", evName, true) : undefined,
-    rt: has("rt") ? () => hist("ov.rt", "rt / 60.0", W, "minutes") : undefined,
-    intensity: isum ? () => hist("ov.int", log10Expr(isum), W, "log10 intensity") : undefined,
-    pep: has("posterior_error_probability")
-      ? () => hist("ov.pep", log10Expr("posterior_error_probability"), W, "log10 PEP", evName)
-      : undefined,
-    qvalue: has("peptide_qvalue")
-      ? () => hist("ov.q", "peptide_qvalue", W, "peptide q-value", evName)
-      : undefined,
-  }));
+  check([{ ref: ev, cols: OVERVIEW_COLUMNS }], () => run(overviewCharts(props.ds, ev, evName)));
 });
 </script>
 
