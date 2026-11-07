@@ -52,6 +52,8 @@ async function runSearch() {
   const id = ++searchSeq;
   busy.value = true;
   error.value = "";
+  // The new hits replace the open one, and with it its download.
+  void cancel();
   expanded.value = null;
   views.value = [];
   checked.value = {};

@@ -63,12 +63,13 @@ async function load() {
     });
     if (id !== searchSeq) return;
     results.value = res;
-    // Drop the expanded dataset if it is no longer on this page.
+    // Drop the expanded dataset, and its download, if it is no longer on this page.
     if (selected.value) {
       const stillThere = results.value.datasets.some(
         (d) => rowKey(d) === rowKey(selected.value!)
       );
       if (!stillThere) {
+        void cancel();
         selected.value = null;
         views.value = [];
         checked.value = {};
