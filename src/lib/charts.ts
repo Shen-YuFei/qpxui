@@ -11,12 +11,12 @@ import {
   MarkLineComponent,
   TitleComponent,
   TooltipComponent,
-  VisualMapComponent,
+  VisualMapContinuousComponent,
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 
 use([
-  BarChart, LineChart, BoxplotChart, ScatterChart, CustomChart, HeatmapChart, VisualMapComponent,
+  BarChart, LineChart, BoxplotChart, ScatterChart, CustomChart, HeatmapChart, VisualMapContinuousComponent,
   GraphicComponent, GridComponent, TooltipComponent, LegendComponent, DataZoomComponent, MarkLineComponent, TitleComponent,
   CanvasRenderer,
 ]);
