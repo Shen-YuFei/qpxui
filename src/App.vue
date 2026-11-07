@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, defineAsyncComponent, onMounted, ref } from "vue";
 import { state, reset } from "./store";
 import { applyTheme } from "./lib/settings";
 import SourcePicker from "./components/SourcePicker.vue";
 import DatasetExplorer from "./components/DatasetExplorer.vue";
-import ViewPanel from "./components/ViewPanel.vue";
-import ReportView from "./components/ReportView.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
+
+// Views and the report (with ECharts) load once a source is open, which keeps
+// them out of the start-up bundle.
+const ViewPanel = defineAsyncComponent(() => import("./components/ViewPanel.vue"));
+const ReportView = defineAsyncComponent(() => import("./components/ReportView.vue"));
 
 const hasData = computed(() => state.datasets.length > 0);
 const settingsOpen = ref(false);
