@@ -16,21 +16,8 @@ import type { TableRef } from "../lib/report";
 import { psmRecord, type PsmKey } from "../lib/queries/spectrum";
 import { cvMap } from "../lib/qpx";
 import { useMirror } from "../lib/useMirror";
-import {
-  annotatePeaks,
-  coverageMarks,
-  fragmentIons,
-  ionTableCharges,
-  ionTableRows,
-  matchedIonKeys,
-  parsePeptidoform,
-  precursorMz,
-  spectrumStats,
-  storedAnnotations,
-  toProForma,
-  type Peak,
-  type Tolerance,
-} from "../lib/fragments";
+import { annotatePeaks, fragmentIons, parsePeptidoform, precursorMz, storedAnnotations, toProForma, type Peak, type Tolerance } from "../lib/fragments";
+import { coverageMarks, ionTableCharges, ionTableRows, matchedIonKeys, spectrumStats } from "../lib/spectrumSummary";
 
 const props = defineProps<{ psm: TableRef; target: PsmKey; accession?: string; fileBase?: string }>();
 const emit = defineEmits<{ (e: "close"): void }>();

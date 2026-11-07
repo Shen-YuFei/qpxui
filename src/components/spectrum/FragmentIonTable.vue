@@ -2,7 +2,7 @@
 // Fragment ion table (USI viewer / Lorikeet style): per residue, the m/z of
 // the b ion ending and the y ion starting there at each charge, matched ions
 // highlighted.
-import type { IonRow } from "../../lib/fragments";
+import type { IonRow } from "../../lib/spectrumSummary";
 
 defineProps<{ charges: number[]; rows: IonRow[] }>();
 </script>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Sequence coverage of the spectrum: the residues, with the matched b ions
 // (blue, below) and y ions (red, above) marked at each cleavage.
-import type { CoverageMark } from "../../lib/fragments";
+import type { CoverageMark } from "../../lib/spectrumSummary";
 
 defineProps<{ marks: CoverageMark[] }>();
 </script>
