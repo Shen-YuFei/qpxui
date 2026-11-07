@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
-import { countRows, describeTable, ensureViewReady, runSql, type QueryResult } from "../lib/duck";
+import { countRows, describeTable, ensureViewReady, type QueryResult } from "../lib/duck";
 import { isStructured, formatCompact, scalarText } from "../lib/format";
 import type { ViewInfo } from "../lib/api";
 import type { TableRef } from "../lib/report";
-import { lit, ident, viewScale } from "../lib/report";
+import { viewScale } from "../lib/report";
+import { cellFilter, isPeakColumn, tablePage } from "../lib/queries/table";
 import { state } from "../store";
 import PTMBadges from "./PTMBadges.vue";
 import PTMSegs from "./PTMSegs.vue";
@@ -30,23 +31,14 @@ const expanded = ref<Record<string, boolean>>({});
 // cells fall back to the plain scalar/structured rendering.
 const ptmOn = ref(true);
 
-// Per-peak arrays of a QPX psm row. They hold hundreds of values each, so they
-// are shown as a short "N peaks" summary and moved after the other columns.
-const PEAK_COLS = new Set(["mz_array", "intensity_array", "charge_array", "ion_type_array", "ion_mobility_array"]);
+// Per-peak arrays of a psm view: shown as "N peaks", after the other columns.
 const showPeaks = ref(true);
 // Large streamed views start with peaks hidden: a page with peaks reads a
 // whole row group of peak arrays (often 100+ MB).
 const largeRemote = ref(false);
 const colTypes = ref<Record<string, string>>({});
 const colNames = ref<string[]>([]);
-const hasPeakCols = computed(() => colNames.value.some((c) => PEAK_COLS.has(c.toLowerCase())));
-
-function selectList(): string {
-  if (!colNames.value.length) return "*";
-  const plain = colNames.value.filter((c) => !PEAK_COLS.has(c.toLowerCase()));
-  const peaks = showPeaks.value ? colNames.value.filter((c) => PEAK_COLS.has(c.toLowerCase())) : [];
-  return [...plain, ...peaks].map(ident).join(", ");
-}
+const hasPeakCols = computed(() => colNames.value.some(isPeakColumn));
 
 let loadSeq = 0;
 async function load() {
@@ -72,12 +64,15 @@ async function load() {
     if (id !== loadSeq) return;
     total.value = n;
 
-    const whereClause = where.value.trim() ? ` WHERE ${where.value.trim()}` : "";
-    const orderClause = sortCol.value ? ` ORDER BY ${ident(sortCol.value)} ${sortDir.value}` : "";
-    const off = page.value * pageSize;
-    const res = await runSql(
-      `SELECT ${selectList()} FROM "${table.value}"${whereClause}${orderClause} LIMIT ${pageSize} OFFSET ${off}`
-    );
+    const res = await tablePage({
+      table: table.value,
+      cols: colNames.value,
+      peaks: showPeaks.value,
+      where: where.value,
+      sort: sortCol.value ? { col: sortCol.value, dir: sortDir.value } : null,
+      page: page.value,
+      pageSize,
+    });
     if (id === loadSeq) result.value = res;
   } catch (e: any) {
     if (id === loadSeq) error.value = String(e);
@@ -90,7 +85,7 @@ onMounted(load);
 watch(showPeaks, () => load());
 
 function isPeakCol(j: number): boolean {
-  return PEAK_COLS.has((result.value.columns[j] ?? "").toLowerCase());
+  return isPeakColumn(result.value.columns[j] ?? "");
 }
 function peakSummary(v: unknown): string {
   if (!Array.isArray(v)) return "∅";
@@ -199,13 +194,7 @@ function filterBy() {
   const m = menu.value;
   closeMenu();
   if (!m) return;
-  const col = result.value.columns[m.j];
-  const v = result.value.rows[m.i]?.[m.j];
-  const cond = v == null ? `${ident(col)} IS NULL` : typeof v === "string"
-        ? `${ident(col)} = ${lit(v)}`
-        : typeof v === "number" && Number.isFinite(v) && Number.isSafeInteger(Math.trunc(v))
-          ? `${ident(col)} = ${v}`
-          : `CAST(${ident(col)} AS VARCHAR) = ${lit(String(v))}`;
+  const cond = cellFilter(result.value.columns[m.j], result.value.rows[m.i]?.[m.j]);
   where.value = where.value.trim() ? `${where.value.trim()} AND ${cond}` : cond;
 }
 function expandCell() {
