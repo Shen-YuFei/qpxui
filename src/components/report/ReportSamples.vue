@@ -69,7 +69,9 @@ onMounted(async () => {
         });
       }
     } else if (runV) {
-      const r = await cachedSql(props.ds, "smp.runs", `SELECT * EXCLUDE (modification_parameters) FROM ${ident(runV.table)}`, 50000);
+      // modification_parameters is optional in the QPX run view.
+      const cols = runV.cols.has("modification_parameters") ? "* EXCLUDE (modification_parameters)" : "*";
+      const r = await cachedSql(props.ds, "smp.runs", `SELECT ${cols} FROM ${ident(runV.table)}`, 50000);
       rows.value = objects(r);
     }
   } catch (e: any) {
