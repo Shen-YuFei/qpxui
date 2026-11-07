@@ -374,7 +374,10 @@ qpxui/
 │   │   ├── qpx.ts                 # QPX view names, footer key, sample facets
 │   │   ├── report.ts              # report SQL helpers, dataset table registry, search
 │   │   ├── charts.ts              # ECharts setup and option builders, CSV export
-│   │   ├── quant.ts               # normalisation, correlation, clustering, PCA
+│   │   ├── quantCharts.ts         # Quantification tab charts: correlation, PCA, profile
+│   │   ├── peptidoformCharts.ts   # peptidoform profile charts: samples, distribution, RT
+│   │   ├── spectrumChart.ts       # annotated spectrum chart (PRIDE USI viewer style)
+│   │   ├── quant.ts               # normalisation, correlation, clustering, PCA, grouping
 │   │   ├── fragments.ts           # peptidoform parsing, fragment ions, annotation
 │   │   ├── mirror.ts              # Koina predictions, PROXI/USI, spectrum similarity
 │   │   ├── downloads.ts           # free-space check, confirm, cancel
