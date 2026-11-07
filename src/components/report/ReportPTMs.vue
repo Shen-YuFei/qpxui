@@ -2,10 +2,10 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import ChartCard from "../ChartCard.vue";
 import ReportTable from "../ReportTable.vue";
-import type { Column } from "../../lib/report";
 import type { DatasetInfo } from "../../lib/api";
 import type { ChartSpec } from "../../lib/charts";
-import { cachedSql, evidence, ident, objects, targetWhere, type DatasetTables } from "../../lib/report";
+import { evidence, type Column, type DatasetTables } from "../../lib/report";
+import { PTM_COLUMNS, modificationCounts, modificationSites, modificationsPerPeptide, targetCount } from "../../lib/queries/ptms";
 import { ptmColor, shortCode } from "../../lib/ptm";
 import { searchFor } from "../../store";
 import { useLargeGate } from "../../lib/useLargeGate";
@@ -87,48 +87,17 @@ onMounted(() => {
     busy.value = false;
     return;
   }
-  check([{ ref: ev, cols: ["is_decoy", "modifications", "peptidoform", "sequence"] }], build);
+  check([{ ref: ev, cols: PTM_COLUMNS }], build);
 });
 
 async function build() {
   if (!ev) return;
   busy.value = true;
-  const T = ident(ev.table);
-  const W = targetWhere(ev);
-  const pf = ev.cols.has("peptidoform") ? "peptidoform" : ev.seq;
   try {
-    const total = await cachedSql(props.ds, "ptm.total", `SELECT count(*) FROM ${T} WHERE ${W}`);
-    const n = Number(total.rows[0]?.[0] ?? 0) || 1;
-    const r = await cachedSql(
-      props.ds,
-      "ptm.mods",
-      `SELECT m.name AS name, any_value(m.accession) AS accession,
-              count(DISTINCT pf)::BIGINT AS n_pf, count(DISTINCT seq)::BIGINT AS n_pep, count(*)::BIGINT AS n_ev
-       FROM (SELECT unnest(modifications) AS m, ${pf} AS pf, ${ev.seq} AS seq FROM ${T} WHERE ${W})
-       GROUP BY 1 ORDER BY n_ev DESC`
-    );
-    mods.value = objects(r).map((m) => ({ ...m, pct: (100 * m.n_ev) / n }));
-    const s = await cachedSql(
-      props.ds,
-      "ptm.sites",
-      `SELECT name, coalesce(p.amino_acid, CASE WHEN p.position = 0 THEN 'N-term' ELSE '?' END) AS aa, count(*)::BIGINT AS n
-       FROM (SELECT m.name AS name, unnest(m.positions) AS p
-             FROM (SELECT unnest(modifications) AS m FROM ${T} WHERE ${W}))
-       GROUP BY ALL ORDER BY n DESC`
-    );
-    sites.value = objects(s);
-    const k = await cachedSql(
-      props.ds,
-      "ptm.perpep",
-      `SELECT least(len(list_filter(modifications, x -> x.name IS NOT NULL)), 6) AS k, count(*)::BIGINT
-       FROM ${T} WHERE ${W} GROUP BY 1 ORDER BY 1`
-    );
-    modsPerPep.value = {
-      kind: "bar",
-      labels: k.rows.map((x) => (Number(x[0]) === 6 ? "6+" : String(x[0]))),
-      series: [{ name: evName, values: k.rows.map((x) => Number(x[1])) }],
-      xName: "modification types per peptide (incl. fixed)",
-    };
+    const n = (await targetCount(props.ds, ev)) || 1;
+    mods.value = (await modificationCounts(props.ds, ev)).map((m) => ({ ...m, pct: (100 * m.n_ev) / n }));
+    sites.value = await modificationSites(props.ds, ev);
+    modsPerPep.value = await modificationsPerPeptide(props.ds, ev, evName);
   } catch (e: any) {
     error.value = String(e?.message ?? e);
   } finally {
