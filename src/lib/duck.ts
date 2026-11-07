@@ -184,15 +184,7 @@ function normalize(v: unknown): unknown {
   // Arrow Vector / chunk -> collapse to a friendly JS array of values, then
   // normalise recursively (a LIST of STRUCT becomes [{...}, {...}], not a dump
   // of the Vector's internal buffers).
-  if (isArrowVector(v)) {
-    let arr: unknown;
-    try {
-      arr = (v as { toArray: () => unknown }).toArray();
-    } catch {
-      arr = [];
-    }
-    return normalize(arr);
-  }
+  if (isArrowVector(v)) return normalize((v as { toArray: () => unknown }).toArray());
   if (v instanceof Map) {
     const out: Record<string, unknown> = {};
     for (const [k, val] of v) out[String(k)] = normalize(val);
@@ -200,12 +192,8 @@ function normalize(v: unknown): unknown {
   }
   // Arrow rows (StructRow / MapRow) expose toJSON() with the real fields.
   if (typeof (v as { toJSON?: unknown }).toJSON === "function" && !(v instanceof Date)) {
-    try {
-      const j = (v as { toJSON: () => unknown }).toJSON();
-      if (j !== v) return normalize(j);
-    } catch {
-      /* fall through */
-    }
+    const j = (v as { toJSON: () => unknown }).toJSON();
+    if (j !== v) return normalize(j);
   }
   // Typed arrays (Float64Array, Int32Array, …) have numeric-ish elements.
   if (ArrayBuffer.isView(v)) {
@@ -249,23 +237,13 @@ export async function runSql(
     if (import.meta.env.DEV) w.__qpending--;
   }
   if (import.meta.env.DEV) logQuery(sql, performance.now() - t0, res.numRows);
-  let objects: Record<string, unknown>[] = [];
-  try {
-    objects = res.toArray() as Record<string, unknown>[];
-  } catch {
-    // Non-row queries (e.g. CREATE/UPDATE) or empty result.
-  }
-  const truncated = objects.length > maxRows;
-  if (truncated) objects = objects.slice(0, maxRows);
-
-  const columns = objects.length ? Object.keys(objects[0]) : [];
-  const rows = objects.map((o) => columns.map((c) => normalize(o[c]) as never));
-  return {
-    columns,
-    rows,
-    rowCount: objects.length,
-    truncated,
-  };
+  const truncated = res.numRows > maxRows;
+  const table = truncated ? res.slice(0, maxRows) : res;
+  // Columns come from the schema, so an empty result keeps them, and values
+  // are read by position, so duplicate column names keep their own values.
+  const columns = table.schema.fields.map((f) => f.name);
+  const rows = table.toArray().map((row) => (row.toArray() as unknown[]).map((v) => normalize(v) as never));
+  return { columns, rows, rowCount: rows.length, truncated };
 }
 
 export async function countRows(table: string): Promise<number> {
@@ -277,8 +255,7 @@ export async function countRows(table: string): Promise<number> {
   } catch (e) {
     throw new Error(engineErrorText(e));
   }
-  const objects = res.toArray() as { n: string | number }[];
-  return Number(objects[0]?.n ?? 0);
+  return Number(res.toArray()[0].n);
 }
 
 export interface ColumnInfo {
@@ -296,9 +273,5 @@ export async function describeTable(table: string): Promise<ColumnInfo[]> {
   } catch (e) {
     throw new Error(engineErrorText(e));
   }
-  const objects = res.toArray() as Record<string, unknown>[];
-  return objects.map((o) => ({
-    name: String(o["column_name"] ?? ""),
-    type: String(o["column_type"] ?? ""),
-  }));
+  return res.toArray().map((o) => ({ name: String(o.column_name), type: String(o.column_type) }));
 }
