@@ -341,13 +341,9 @@ async fn registry(client: &Client, page_size: Option<usize>) -> Result<Vec<Porta
 #[serde(rename_all = "camelCase")]
 pub struct PortalSearchResult {
     pub datasets: Vec<PortalDataset>,
-    #[serde(default)]
     pub total: usize,
-    #[serde(default)]
     pub page: usize,
-    #[serde(default, rename(serialize = "totalPages"))]
     pub total_pages: usize,
-    #[serde(default)]
     pub sort: String,
 }
 
@@ -359,7 +355,7 @@ struct SearchPageRaw {
     total: usize,
     #[serde(default)]
     page: usize,
-    #[serde(default, rename = "total_pages")]
+    #[serde(default)]
     total_pages: usize,
     #[serde(default)]
     sort: String,
@@ -421,7 +417,7 @@ pub async fn portal_search(
     }
 
     let raw = client
-        .get(url.clone())
+        .get(url)
         .send()
         .await
         .map_err(|e| format!("request: {e:?}"))?
@@ -845,6 +841,30 @@ mod tests {
     /// A client configured like the app's, owned by one test's runtime.
     fn portal_client() -> Client {
         portal_http::client_builder().unwrap().build().unwrap()
+    }
+
+    #[test]
+    fn search_results_read_snake_case_and_send_camel_case() {
+        let raw: SearchPageRaw = serde_json::from_value(serde_json::json!({
+            "datasets": [{ "accession": "PXD1", "psm_count": 5, "dataset_ref": "PXD1/ab" }],
+            "total": 1,
+            "page": 1,
+            "total_pages": 1,
+            "sort": "samples"
+        }))
+        .unwrap();
+        let result = PortalSearchResult {
+            datasets: raw.datasets,
+            total: raw.total,
+            page: raw.page,
+            total_pages: raw.total_pages,
+            sort: raw.sort,
+        };
+        let out = serde_json::to_value(result).unwrap();
+        assert_eq!(out["totalPages"], 1);
+        assert_eq!(out["sort"], "samples");
+        assert_eq!(out["datasets"][0]["psmCount"], 5);
+        assert_eq!(out["datasets"][0]["datasetRef"], "PXD1/ab");
     }
 
     #[test]

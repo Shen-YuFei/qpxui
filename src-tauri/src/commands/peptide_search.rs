@@ -49,10 +49,8 @@ pub struct PsHit {
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PsSearchResult {
-    #[serde(rename(serialize = "totalDatasets"))]
     pub total_datasets: usize,
     pub datasets: Vec<PsHit>,
-    #[serde(default)]
     pub unmapped: bool,
 }
 
@@ -135,7 +133,7 @@ pub async fn ps_search(
 
     #[derive(serde::Deserialize)]
     struct Raw {
-        #[serde(rename = "total_datasets", default)]
+        #[serde(default)]
         total_datasets: usize,
         #[serde(default)]
         datasets: Vec<PsHit>,
@@ -179,4 +177,54 @@ pub async fn ps_modifications() -> Result<Vec<PsModification>, String> {
         .await
         .map_err(|e| format!("parse: {e}"))?;
     Ok(raw.modifications)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn results_read_snake_case_and_send_camel_case() {
+        let hit: PsHit = serde_json::from_value(json!({
+            "dataset_accession": "PXD1",
+            "dataset_ref": "PXD1/ab",
+            "organism_part": "liver",
+            "n_peptidoforms": 3,
+            "n_peptides": 2,
+            "total_obs": 17,
+            "sample_peptidoforms": ["PEPK"]
+        }))
+        .unwrap();
+        let result = PsSearchResult {
+            total_datasets: 1,
+            datasets: vec![hit],
+            unmapped: false,
+        };
+        assert_eq!(
+            serde_json::to_value(result).unwrap(),
+            json!({
+                "totalDatasets": 1,
+                "unmapped": false,
+                "datasets": [{
+                    "datasetAccession": "PXD1",
+                    "datasetRef": "PXD1/ab",
+                    "collection": null,
+                    "organism": null,
+                    "organismPart": "liver",
+                    "instrument": null,
+                    "nPeptidoforms": 3,
+                    "nPeptides": 2,
+                    "totalObs": 17,
+                    "samplePeptidoforms": ["PEPK"]
+                }]
+            })
+        );
+        let m: PsModification =
+            serde_json::from_value(json!({ "name": "Oxidation", "n_datasets": 4 })).unwrap();
+        assert_eq!(
+            serde_json::to_value(m).unwrap(),
+            json!({ "name": "Oxidation", "nDatasets": 4 })
+        );
+    }
 }
