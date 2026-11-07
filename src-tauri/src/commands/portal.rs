@@ -99,17 +99,27 @@ async fn remote_size(client: &Client, url: &str, token: &AtomicBool) -> Result<u
 }
 
 async fn get_html(client: &Client, url: &str) -> Result<String, String> {
+    get_listing(client, url)
+        .await?
+        .ok_or_else(|| format!("request {url}: HTTP 404 Not Found"))
+}
+
+/// A listing page, or `None` when the portal answers 404.
+async fn get_listing(client: &Client, url: &str) -> Result<Option<String>, String> {
     let resp = client
         .get(url)
         .header("Accept", "text/html")
         .send()
         .await
         .map_err(|e| format!("request {url}: {e}"))?;
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
     if !resp.status().is_success() {
         return Err(format!("request {url}: HTTP {}", resp.status()));
     }
     let body = resp.text().await.map_err(|e| format!("read {url}: {e}"))?;
-    Ok(body)
+    Ok(Some(body))
 }
 
 /// Very small HTML anchor extractor: returns `(href, link_text)` pairs.
@@ -540,37 +550,15 @@ async fn list_views(
         None => (dataset.to_string(), None),
     };
     let ds_url = format!("{}{accession}/", view_base());
-    let direct = match &wanted {
-        Some(run) => {
-            let run_url = format!("{ds_url}{run}/");
-            get_html(client, &run_url)
-                .await
-                .ok()
-                .map(|html| (run_url, html))
-        }
-        None => None,
-    };
-    let (run_url, run_html) = match direct {
-        Some(found) => found,
-        None => {
-            // The registry can name a run folder that was since replaced, so
-            // pick one of the runs the server holds now.
-            let ds_html = get_html(client, &ds_url)
-                .await
-                .map_err(|e| format!("dataset {accession} not found on the portal ({e})"))?;
-            let run = pick_run(client, &ds_url, &ds_html, organism, psm_count)
-                .await
-                .map_err(|e| match &wanted {
-                    Some(run) => {
-                        format!("the registry's run {accession}/{run} is gone from the portal; {e}")
-                    }
-                    None => e,
-                })?;
-            let run_url = format!("{ds_url}{run}/");
-            let run_html = get_html(client, &run_url).await?;
-            (run_url, run_html)
-        }
-    };
+    let (run_url, run_html) = run_listing(
+        client,
+        &ds_url,
+        &accession,
+        wanted.as_deref(),
+        organism,
+        psm_count,
+    )
+    .await?;
 
     // Prefer the `qpx/` sub-folder, else fall back to the run folder directly.
     let qpx_url = if run_html.contains(">qpx/</a>") || run_html.contains(">qpx/<") {
@@ -597,6 +585,40 @@ async fn list_views(
     }
     views.sort_by(|a, b| a.view.cmp(&b.view));
     Ok(views)
+}
+
+/// The URL and listing of the run to open: `wanted` (the registry's run)
+/// when the portal still has it, else the run picked from `ds_url`.
+async fn run_listing(
+    client: &Client,
+    ds_url: &str,
+    accession: &str,
+    wanted: Option<&str>,
+    organism: Option<&str>,
+    psm_count: Option<u64>,
+) -> Result<(String, String), String> {
+    if let Some(run) = wanted {
+        let run_url = format!("{ds_url}{run}/");
+        if let Some(html) = get_listing(client, &run_url).await? {
+            return Ok((run_url, html));
+        }
+    }
+    // The registry can name a run folder that was since replaced, so pick
+    // one of the runs the server holds now.
+    let ds_html = get_listing(client, ds_url)
+        .await?
+        .ok_or_else(|| format!("dataset {accession} not found on the portal"))?;
+    let run = pick_run(client, ds_url, &ds_html, organism, psm_count)
+        .await
+        .map_err(|e| match wanted {
+            Some(run) => {
+                format!("the registry's run {accession}/{run} is gone from the portal; {e}")
+            }
+            None => e,
+        })?;
+    let run_url = format!("{ds_url}{run}/");
+    let run_html = get_html(client, &run_url).await?;
+    Ok((run_url, run_html))
 }
 
 /// Run folders (`<run-hash>`) listed on an accession page.
@@ -1081,6 +1103,62 @@ mod tests {
             }
         });
         format!("http://{addr}")
+    }
+
+    /// Answers GETs of the listed paths with `(status, body)`; anything else
+    /// gets a 404.
+    async fn route_server(routes: Vec<(&'static str, &'static str, &'static str)>) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let routes = std::sync::Arc::new(routes);
+        tokio::spawn(async move {
+            loop {
+                let (mut sock, _) = listener.accept().await.unwrap();
+                let routes = routes.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let n = sock.read(&mut buf).await.unwrap_or(0);
+                    let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let path = req.split_whitespace().nth(1).unwrap_or("");
+                    let (status, body) = routes
+                        .iter()
+                        .find(|r| r.0 == path)
+                        .map_or(("404 Not Found", ""), |r| (r.1, r.2));
+                    let resp = format!(
+                        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = sock.write_all(resp.as_bytes()).await;
+                });
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn registry_run_is_replaced_only_when_gone() {
+        let base = route_server(vec![
+            ("/ds/aaaaaaaa1111/", "500 Internal Server Error", ""),
+            ("/ds/", "200 OK", r#"<a href="bbbbbbbb2222/">b</a>"#),
+            ("/ds/bbbbbbbb2222/", "200 OK", "run b"),
+        ])
+        .await;
+        let ds_url = format!("{base}/ds/");
+        let client = Client::new();
+        // The registry's run is missing (404): open the run the portal has.
+        let (url, html) = run_listing(&client, &ds_url, "X", Some("cccccccc3333"), None, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            (url.as_str(), html.as_str()),
+            (format!("{ds_url}bbbbbbbb2222/").as_str(), "run b")
+        );
+        // The registry's run failed for another reason: report it.
+        let e = run_listing(&client, &ds_url, "X", Some("aaaaaaaa1111"), None, None)
+            .await
+            .unwrap_err();
+        assert!(e.contains("500"), "{e}");
     }
 
     #[tokio::test]
