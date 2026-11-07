@@ -17,6 +17,8 @@ const mods = ref<PsModification[]>([]);
 
 const result = ref<PsSearchResult | null>(null);
 const busy = ref(false);
+/** The open hit is downloading; like a search, it holds the Search button. */
+const viewsDownloading = ref(false);
 const error = ref("");
 
 const expanded = ref<PsHit | null>(null);
@@ -101,8 +103,8 @@ onMounted(async () => {
         :placeholder="explicitType === 'peptide' ? 'Peptide sequence, e.g. AVGKVLPELNGK…' : 'Peptide, protein or gene — e.g. GAPDH, P04406, AVGKVLPELNGK…'"
         @keydown.enter="runSearch"
       />
-      <button class="primary" @click="runSearch" :disabled="busy || !query.trim()">
-        {{ busy ? "Searching…" : "Search" }}
+      <button class="primary" @click="runSearch" :disabled="busy || viewsDownloading || !query.trim()">
+        {{ busy || viewsDownloading ? "Searching…" : "Search" }}
       </button>
     </div>
 
@@ -171,6 +173,8 @@ onMounted(async () => {
             :accession="h.datasetAccession"
             :dataset-ref="hitRef(h)"
             :organism="h.organism"
+            :disabled="busy"
+            @downloading="viewsDownloading = $event"
           />
         </article>
       </div>

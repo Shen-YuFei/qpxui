@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { api, portalRef, type PortalDataset, type PortalFacets, type PortalSearchResult } from "../lib/api";
-import { fmtBytes, fmtCount } from "../lib/format";
+import { fmtCount, fmtSize } from "../lib/format";
 import PortalViews from "./PortalViews.vue";
 import PeptideSearchPane from "./PeptideSearchPane.vue";
 
@@ -190,7 +190,7 @@ const hasNext = computed(() => page.value < results.value.totalPages);
             <span class="acc">{{ ds.accession }}</span>
             <span v-if="ds.collectionTitle" class="chip" :title="ds.collectionTitle">{{ ds.collectionTitle }}</span>
             <span class="spacer"></span>
-            <span v-if="ds.totalSize" class="size muted">{{ fmtBytes(ds.totalSize) }}</span>
+            <span v-if="ds.totalSize" class="size muted">{{ fmtSize(ds.totalSize) }}</span>
             <span class="chev">{{ isOpen(ds) ? "▾" : "▸" }}</span>
           </div>
           <h4>{{ ds.title || ds.accession }}</h4>
@@ -231,6 +231,7 @@ const hasNext = computed(() => page.value < results.value.totalPages);
           :dataset-ref="portalRef(ds)"
           :organism="ds.organism"
           :psm-count="ds.psmCount"
+          :disabled="busy"
         />
       </article>
     </div>

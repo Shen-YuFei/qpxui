@@ -96,7 +96,7 @@ onMounted(() => {
           :dataset-ref="portalRef(ds)"
           :organism="ds.organism"
           :psm-count="ds.psmCount"
-          all-when-none
+          featured
         />
       </article>
     </div>

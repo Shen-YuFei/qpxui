@@ -2,11 +2,11 @@
 // The QPX views of one portal dataset: list them, tick some, then stream them
 // in place or download them to the cache. Unmounting (the dataset closed, or
 // hidden by a new search) cancels a running download.
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { api, type DatasetInfo, type ViewInfo } from "../lib/api";
 import { loadDatasets } from "../store";
 import { confirmDownload, totalBytes, useDownload } from "../lib/downloads";
-import { fmtBytes } from "../lib/format";
+import { fmtSize } from "../lib/format";
 import DownloadProgress from "./DownloadProgress.vue";
 
 const props = defineProps<{
@@ -15,9 +15,14 @@ const props = defineProps<{
   datasetRef: string;
   organism?: string | null;
   psmCount?: number | null;
-  /** With no view ticked, Stream and Download take them all. */
-  allWhenNone?: boolean;
+  /** The recommended strip: with no view ticked, Stream and Download take
+   * them all; its toolbar is smaller, Stream has no tooltip and the streamed
+   * source is labelled like a download. */
+  featured?: boolean;
+  /** The parent list is searching: hold the actions until it is done. */
+  disabled?: boolean;
 }>();
+const emit = defineEmits<{ downloading: [boolean] }>();
 
 const views = ref<ViewInfo[]>([]);
 const checked = ref<Record<string, boolean>>({});
@@ -28,7 +33,12 @@ const { id: downloadId, cancelling, files: downloadFiles, cancel, run: runDownlo
 
 const ticked = computed(() => views.value.filter((v) => checked.value[v.path]));
 /** The views Stream and Download act on. */
-const chosen = computed(() => (props.allWhenNone && !ticked.value.length ? views.value : ticked.value));
+const chosen = computed(() => (props.featured && !ticked.value.length ? views.value : ticked.value));
+
+watch(downloading, (d) => emit("downloading", d));
+onBeforeUnmount(() => {
+  if (downloading.value) emit("downloading", false);
+});
 
 onMounted(async () => {
   try {
@@ -56,7 +66,7 @@ function open(list: ViewInfo[], label: string) {
 
 function stream() {
   error.value = "";
-  open(chosen.value.map((v) => ({ ...v })), `portal | ${props.accession} (stream)`);
+  open(chosen.value.map((v) => ({ ...v })), `portal | ${props.accession}${props.featured ? "" : " (stream)"}`);
 }
 
 async function download() {
@@ -85,15 +95,19 @@ async function download() {
 
 <template>
   <div class="loadbox">
-    <div class="toolbar">
+    <div class="toolbar" :class="{ small: featured }">
       <span class="muted">
-        {{ views.length }} view(s) · {{ ticked.length }} selected<template v-if="ticked.length"> · {{ fmtBytes(totalBytes(ticked)) }}</template>
+        {{ views.length }} view(s) · {{ ticked.length }} selected<template v-if="ticked.length"> · {{ fmtSize(totalBytes(ticked), "0 B") }}</template>
       </span>
       <div class="actions">
-        <button @click="stream" :disabled="downloading || !chosen.length" title="Query the files in place — each query fetches only the byte ranges it needs">
+        <button
+          @click="stream"
+          :disabled="disabled || downloading || !chosen.length"
+          :title="featured ? undefined : 'Query the files in place — each query fetches only the byte ranges it needs'"
+        >
           ⚡ Stream (lazy)
         </button>
-        <button class="primary" @click="download" :disabled="downloading || !chosen.length">
+        <button class="primary" @click="download" :disabled="disabled || downloading || !chosen.length">
           {{ downloading ? "Downloading…" : "Download to cache" }}
         </button>
       </div>
@@ -106,6 +120,7 @@ async function download() {
       :files="downloadFiles"
       :cancelling="cancelling"
       label="Transferring to cache…"
+      compact
       @cancel="cancel"
     />
 
@@ -117,10 +132,10 @@ async function download() {
       <label v-for="v in views" :key="v.path" class="view">
         <input v-model="checked[v.path]" type="checkbox" />
         <span class="mono view-name">{{ v.name }}</span>
-        <span class="muted">{{ fmtBytes(v.sizeBytes) }}</span>
+        <span class="muted">{{ fmtSize(v.sizeBytes, "0 B") }}</span>
       </label>
     </div>
-    <div v-else-if="listing" class="muted">Loading views… <span class="spinner"></span></div>
+    <div v-else-if="listing || disabled" class="muted">Loading views… <span class="spinner"></span></div>
     <div v-else class="muted">No QPX views listed for this dataset.</div>
   </div>
 </template>
@@ -139,6 +154,9 @@ async function download() {
   flex-wrap: wrap;
   font-size: 13px;
   margin-bottom: 8px;
+}
+.toolbar.small {
+  font-size: 12px;
 }
 .actions {
   display: flex;

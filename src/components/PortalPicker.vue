@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { api, portalRef, type DatasetInfo, type PortalDataset, type ViewInfo } from "../lib/api";
 import { loadDatasets } from "../store";
 import { confirmDownload, totalBytes, useDownload } from "../lib/downloads";
-import { fmtBytes, fmtCount } from "../lib/format";
+import { fmtCount, fmtSize } from "../lib/format";
 import DownloadProgress from "./DownloadProgress.vue";
 
 const rows = ref<PortalDataset[]>([]);
@@ -150,11 +150,6 @@ function toggleAll() {
   for (const v of views.value) checked.value[v.path] = !allOn;
 }
 
-/** A dataset's size, or a dash when the registry has none. */
-function size(n: number | null | undefined): string {
-  return n ? fmtBytes(n) : "—";
-}
-
 onMounted(loadRegistry);
 </script>
 
@@ -209,7 +204,7 @@ onMounted(loadRegistry);
           >
             <div class="row-top">
               <span class="mono acc">{{ r.accession }}</span>
-              <span class="muted size" v-if="r.totalSize">{{ fmtBytes(r.totalSize) }}</span>
+              <span class="muted size" v-if="r.totalSize">{{ fmtSize(r.totalSize) }}</span>
             </div>
             <div class="title">{{ r.title || "—" }}</div>
             <div class="muted sub" v-if="r.organism || r.instrument">
@@ -241,7 +236,7 @@ onMounted(loadRegistry);
               <span v-if="selected.samples"> · {{ selected.samples }} samples</span>
             </div>
             <div class="stats">
-              <div><b>{{ size(selected.totalSize) }}</b><span class="muted">size</span></div>
+              <div><b>{{ fmtSize(selected.totalSize) }}</b><span class="muted">size</span></div>
               <div><b>{{ selected.peptides?.toLocaleString() ?? "—" }}</b><span class="muted">peptides</span></div>
               <div><b>{{ selected.psmCount?.toLocaleString() ?? "—" }}</b><span class="muted">PSMs</span></div>
               <div><b>{{ selected.proteins?.toLocaleString() ?? "—" }}</b><span class="muted">proteins</span></div>
@@ -250,7 +245,7 @@ onMounted(loadRegistry);
           </div>
 
           <div v-if="views.length" class="toolbar">
-            <span class="muted">{{ views.length }} view(s) · {{ selectedCount }} selected<template v-if="selectedCount"> · {{ fmtBytes(selectedBytes) }}</template></span>
+            <span class="muted">{{ views.length }} view(s) · {{ selectedCount }} selected<template v-if="selectedCount"> · {{ fmtSize(selectedBytes) }}</template></span>
             <div class="actions">
               <button
                 @click="streamSelection"
@@ -288,7 +283,7 @@ onMounted(loadRegistry);
             <label v-for="v in views" :key="v.path" class="view">
               <input v-model="checked[v.path]" type="checkbox" />
               <span class="mono view-name">{{ v.name }}</span>
-              <span class="muted">{{ fmtBytes(v.sizeBytes) }}</span>
+              <span class="muted">{{ fmtSize(v.sizeBytes, "0 B") }}</span>
             </label>
           </div>
           <div v-else-if="busy" class="muted">Loading views… <span class="spinner"></span></div>

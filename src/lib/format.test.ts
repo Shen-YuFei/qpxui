@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fmtBytes, fmtCount, formatCompact, listText, scalarText } from "./format";
+import { fmtBytes, fmtCount, fmtSize, formatCompact, listText, scalarText } from "./format";
 
 describe("scalarText", () => {
   it("marks missing values", () => {
@@ -39,6 +39,17 @@ describe("fmtBytes", () => {
     expect(fmtBytes(512)).toBe("512 B");
     expect(fmtBytes(1536)).toBe("1.5 KB");
     expect(fmtBytes(5 * 1024 ** 3)).toBe("5.0 GB");
+  });
+});
+
+describe("fmtSize", () => {
+  it("keeps one decimal in every unit and names a missing size", () => {
+    expect(fmtSize(512)).toBe("512.0 B");
+    expect(fmtSize(1536)).toBe("1.5 KB");
+    expect(fmtSize(150 * 1024 ** 2)).toBe("150.0 MB");
+    expect(fmtSize(0)).toBe("—");
+    expect(fmtSize(null)).toBe("—");
+    expect(fmtSize(0, "0 B")).toBe("0 B");
   });
 });
 

@@ -71,6 +71,16 @@ export function formatCompact(v: unknown): string {
   return scalarText(v);
 }
 
+/** A file size with one decimal in every unit ("512.0 B", "1.5 MB"), as the
+ * sidebar, the source pickers and the portal lists show sizes; `zero` stands
+ * for a missing or zero size. */
+export function fmtSize(n: number | null | undefined, zero = "—"): string {
+  if (!n) return zero;
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(n) / Math.log(1024));
+  return `${(n / 1024 ** i).toFixed(1)} ${u[i]}`;
+}
+
 /** Byte count in binary units ("1.5 GB"). */
 export function fmtBytes(n: number): string {
   if (!n || n < 0) return "0 B";
