@@ -200,7 +200,10 @@ pub async fn cache_s3_views(
     std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
 
     let result: Result<Vec<ViewInfo>, String> = (async {
-        let mut out = Vec::new();
+        // Size everything still to fetch first, so a download that cannot
+        // fit on the cache disk is refused before any byte is written.
+        let mut plan = Vec::new();
+        let mut need = 0u64;
         for p in &paths {
             if xfers::is_cancelled(&token) {
                 return Err("cancelled".to_string());
@@ -208,25 +211,12 @@ pub async fn cache_s3_views(
             let key = p
                 .trim_start_matches(&format!("s3://{bucket}/"))
                 .to_string();
-            let base = key.rsplit('/').next().unwrap_or(&key).to_string();
-            let (_, view, format) = qpx::parse_filename(&base).unwrap_or_else(|| {
-                (String::new(), String::new(), "parquet".to_string())
-            });
-
             // Use the bucket as a top-level cache dir to avoid key collisions.
-            let local = root
-                .join(&bucket)
-                .join(key.replace('/', "_"));
-            if let Some(parent) = local.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-            }
-
+            let local = root.join(&bucket).join(key.replace('/', "_"));
             let size = if local.exists() {
-                // Already cached — no transfer needed.
-                std::fs::metadata(&local).map(|m| m.len()).unwrap_or(0)
+                0
             } else {
-                // HEAD first so we can report an accurate progress bar.
-                let head = client
+                client
                     .head_object()
                     .bucket(&bucket)
                     .key(&key)
@@ -235,8 +225,30 @@ pub async fn cache_s3_views(
                     .map_err(|e| format!("S3 head {key}: {e}"))?
                     .content_length()
                     .unwrap_or(0)
-                    .max(0) as u64;
+                    .max(0) as u64
+            };
+            need += size;
+            plan.push((key, local, size));
+        }
+        xfers::ensure_space(&root, need)?;
 
+        let mut out = Vec::new();
+        for (key, local, head) in plan {
+            if xfers::is_cancelled(&token) {
+                return Err("cancelled".to_string());
+            }
+            let base = key.rsplit('/').next().unwrap_or(&key).to_string();
+            let (_, view, format) = qpx::parse_filename(&base).unwrap_or_else(|| {
+                (String::new(), String::new(), "parquet".to_string())
+            });
+            if let Some(parent) = local.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+
+            let size = if local.exists() {
+                // Already cached — no transfer needed.
+                std::fs::metadata(&local).map(|m| m.len()).unwrap_or(0)
+            } else {
                 let mut resp = client
                     .get_object()
                     .bucket(&bucket)
@@ -245,20 +257,26 @@ pub async fn cache_s3_views(
                     .await
                     .map_err(|e| format!("S3 get {key}: {e}"))?;
 
-                let mut buf: Vec<u8> = Vec::new();
-                let mut done = 0u64;
-                while let Some(chunk) = resp.body.try_next().await.map_err(|e| e.to_string())? {
+                // Stream to `<file>.part` (constant memory); the partial file
+                // is removed if we bail out on cancel or error.
+                let mut part = xfers::PartFile::create(&local).await?;
+                loop {
+                    let next = match tokio::time::timeout(xfers::POLL, resp.body.try_next()).await {
+                        Ok(n) => n.map_err(|e| e.to_string())?,
+                        Err(_) if xfers::is_cancelled(&token) => return Err("cancelled".to_string()),
+                        Err(_) => continue,
+                    };
                     if xfers::is_cancelled(&token) {
                         return Err("cancelled".to_string());
                     }
-                    buf.extend_from_slice(&chunk);
-                    done += chunk.len() as u64;
-                    progress::chunk(&app, &base, done, head);
+                    let Some(chunk) = next else { break };
+                    part.write(&chunk).await?;
+                    progress::chunk(&app, &base, part.written, head);
                 }
-                if xfers::is_cancelled(&token) {
-                    return Err("cancelled".to_string());
+                if head > 0 && part.written != head {
+                    return Err(format!("S3 get {key}: got {} of {} bytes", part.written, head));
                 }
-                std::fs::write(&local, &buf).map_err(|e| e.to_string())?;
+                let done = part.finish().await?;
                 progress::done(&app, &base, done);
                 done
             };

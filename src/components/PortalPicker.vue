@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { api, type DatasetInfo, type PortalDataset, type ViewInfo } from "../lib/api";
 import { loadDatasets } from "../store";
 import { installProgress, overall, progress } from "../lib/progress";
+import { confirmDownload, totalBytes } from "../lib/downloads";
 
 const rows = ref<PortalDataset[]>([]);
 const selected = ref<PortalDataset | null>(null);
@@ -13,6 +14,7 @@ const busy = ref(false);
 const error = ref("");
 const downloading = ref(false);
 const downloadId = ref("");
+const cancelling = ref(false);
 
 function generateId(): string {
   return crypto?.randomUUID?.() ?? `d${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -25,6 +27,7 @@ function clearProgressFor(files: string[]) {
 }
 async function cancel() {
   if (!downloadId.value) return;
+  cancelling.value = true;
   try {
     await api.cancelDownload(downloadId.value);
   } catch {
@@ -90,6 +93,7 @@ function fmtCount(n: number | null | undefined): string {
 const selectedCount = computed(
   () => views.value.filter((v) => checked.value[v.path]).length
 );
+const selectedBytes = computed(() => totalBytes(views.value.filter((v) => checked.value[v.path])));
 
 async function loadRegistry() {
   busy.value = true;
@@ -139,7 +143,9 @@ async function loadSelection() {
   const sel = views.value.filter((v) => checked.value[v.path]);
   try {
     if (!sel.length) throw new Error("Select at least one view to load.");
+    if (!(await confirmDownload(sel, "portal"))) return;
     const files = sel.map((v) => v.name);
+    cancelling.value = false;
     downloadId.value = generateId();
     try {
       const local = await api.portalCacheViews(sel.map((v) => v.path), downloadId.value);
@@ -152,13 +158,15 @@ async function loadSelection() {
       loadDatasets([ds], "portal | " + selected.value.accession);
     } catch (e: any) {
       if (isCancelledErr(e)) {
-        error.value = "Transfer cancelled.";
+        error.value = "Download cancelled; partial files were removed.";
         clearProgressFor(files);
       } else {
+        clearProgressFor(files);
         throw e;
       }
     } finally {
       downloadId.value = "";
+      cancelling.value = false;
     }
   } catch (e: any) {
     error.value = String(e);
@@ -314,7 +322,7 @@ function fmtPx(n: number): string {
           </div>
 
           <div v-if="views.length" class="toolbar">
-            <span class="muted">{{ views.length }} view(s) · {{ selectedCount }} selected</span>
+            <span class="muted">{{ views.length }} view(s) · {{ selectedCount }} selected<template v-if="selectedCount"> · {{ fmt(selectedBytes) }}</template></span>
             <div class="actions">
               <button
                 @click="streamSelection"
@@ -329,12 +337,12 @@ function fmtPx(n: number): string {
             </div>
           </div>
 
-          <div v-if="downloading && activeBars.length" class="progress-box">
+          <div v-if="downloading && downloadId" class="progress-box">
             <div class="overall">
-              <span class="muted">Transferring to cache…</span>
+              <span class="muted">{{ cancelling ? "Cancelling…" : activeBars.length ? "Transferring to cache…" : "Checking sizes and disk space…" }}</span>
               <span class="right">
                 <span class="muted">{{ overallPct !== null ? pct(overallPct) : "" }}</span>
-                <button class="cancel" @click="cancel" :disabled="!downloadId">Cancel</button>
+                <button class="cancel" @click="cancel" :disabled="!downloadId || cancelling">Cancel download</button>
               </span>
             </div>
             <div class="bar"><div class="fill" :style="{ width: pct(overallPct ?? 0) }"></div></div>

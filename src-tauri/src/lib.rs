@@ -22,6 +22,7 @@ pub fn run() {
             commands::s3stream::stream_http_urls,
             commands::s3stream::stream_local_files,
             commands::transfers::cancel_download,
+            commands::transfers::cache_free_space,
             commands::portal::portal_datasets,
             commands::portal::portal_registry,
             commands::portal::portal_list_views,

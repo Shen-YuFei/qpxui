@@ -96,6 +96,9 @@ export const api = {
 
   /** Ask the backend to abort an in-flight download batch. */
   cancelDownload: (id: string) => invoke<void>("cancel_download", { id }),
+  /** Free bytes on the download cache disk, and the spare amount always kept free. */
+  cacheFreeSpace: (kind: "portal" | "s3") =>
+    invoke<{ free: number; reserve: number; dir: string }>("cache_free_space", { kind }),
 
   readFileBytes: (path: string) => invoke<string>("read_file_bytes", { path }),
   writeFileBytes: (path: string, base64: string) =>
