@@ -16,7 +16,15 @@ export function scalarText(v: unknown): string {
     if (!Number.isInteger(v)) return v.toLocaleString(undefined, { maximumFractionDigits: 4 });
     return v.toLocaleString();
   }
+  if (typeof v === "bigint") return v.toLocaleString();
   return String(v);
+}
+
+/** JSON text of a value. JSON.stringify rejects BigInt (64-bit integers past
+ * 2^53, see normalize in duck): they are written as numbers with all their
+ * digits. */
+export function toJson(v: unknown, space?: number): string {
+  return JSON.stringify(v, (_k, x) => (typeof x === "bigint" ? `\u0000${x}` : x), space).replace(/"\\u0000(-?\d+)"/g, "$1");
 }
 
 /** A QPX score list: STRUCTs with a `score_name`. A QPX 1.3 relayout may

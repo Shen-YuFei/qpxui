@@ -45,6 +45,7 @@ export function tablePage(r: PageRequest): Promise<QueryResult> {
 export function cellFilter(col: string, v: unknown): string {
   if (v == null) return `${ident(col)} IS NULL`;
   if (typeof v === "string") return `${ident(col)} = ${lit(v)}`;
+  if (typeof v === "bigint") return `${ident(col)} = ${v}`;
   if (typeof v === "number" && Number.isFinite(v) && Number.isSafeInteger(Math.trunc(v))) return `${ident(col)} = ${v}`;
   return `CAST(${ident(col)} AS VARCHAR) = ${lit(String(v))}`;
 }

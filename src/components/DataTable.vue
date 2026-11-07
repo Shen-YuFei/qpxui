@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import { countRows, describeTable, ensureViewReady, type QueryResult } from "../lib/duck";
-import { isStructured } from "../lib/format";
+import { isStructured, toJson } from "../lib/format";
 import type { ViewInfo } from "../lib/api";
 import type { TableRef } from "../lib/report";
 import { viewScale } from "../lib/report";
@@ -129,7 +129,7 @@ function viewSpectrum() {
 }
 
 function cellText(v: unknown): string {
-  return isStructured(v) ? JSON.stringify(v) : v == null ? "" : String(v);
+  return isStructured(v) ? toJson(v) : v == null ? "" : String(v);
 }
 async function copyCell() {
   const m = menu.value;
@@ -143,7 +143,7 @@ async function copyRow() {
   if (!m) return;
   const cols = result.value.columns;
   const row = result.value.rows[m.i] ?? [];
-  await copy(JSON.stringify(Object.fromEntries(cols.map((c, j) => [c, row[j]])), null, 2), "Row copied as JSON");
+  await copy(toJson(Object.fromEntries(cols.map((c, j) => [c, row[j]])), 2), "Row copied as JSON");
 }
 async function copy(text: string, ok: string) {
   try {
@@ -311,7 +311,7 @@ function isModsCell(j: number): boolean {
             <td
               v-for="(v, j) in row"
               :key="j"
-              :class="{ num: typeof v === 'number', 'mono': typeof v === 'string', active: menu && menu.i === i && menu.j === j }"
+              :class="{ num: typeof v === 'number' || typeof v === 'bigint', 'mono': typeof v === 'string', active: menu && menu.i === i && menu.j === j }"
               @contextmenu.prevent="openMenu($event, i, j)"
             >
               <ResultCell

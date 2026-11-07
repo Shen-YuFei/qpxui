@@ -30,10 +30,10 @@ describe("cellFilter", () => {
     expect(cellFilter("run", null)).toBe('"run" IS NULL');
     expect(cellFilter("run", "a'b")).toBe(`"run" = 'a''b'`);
     expect(cellFilter("charge", 3)).toBe('"charge" = 3');
+    expect(cellFilter("psm_id", 3619665049874577583n)).toBe('"psm_id" = 3619665049874577583');
   });
   it("compares other values as text", () => {
     expect(cellFilter("decoy", true)).toBe(`CAST("decoy" AS VARCHAR) = 'true'`);
-    expect(cellFilter("id", 12n)).toBe(`CAST("id" AS VARCHAR) = '12'`);
     expect(cellFilter("x", Infinity)).toBe(`CAST("x" AS VARCHAR) = 'Infinity'`);
   });
 });

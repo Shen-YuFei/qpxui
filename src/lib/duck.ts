@@ -175,7 +175,7 @@ async function initDb(): Promise<{ db: duckdb.AsyncDuckDB; conn: duckdb.AsyncDuc
   return { db: db!, conn: conn! };
 }
 
-export type Cell = string | number | boolean | null;
+export type Cell = string | number | bigint | boolean | null;
 
 export interface QueryResult {
   columns: string[];
@@ -203,7 +203,9 @@ function isArrowVector(v: unknown): boolean {
 function normalize(v: unknown): unknown {
   if (v === null || v === undefined) return null;
   const t = typeof v;
-  if (t === "bigint") return Number(v);
+  // 64-bit integers past 2^53 (QPX's hashed ids) stay BigInt: as a Number
+  // they would lose their last digits.
+  if (t === "bigint") return Number.isSafeInteger(Number(v)) ? Number(v) : v;
   if (t === "string" || t === "number" || t === "boolean") return v;
   if (Array.isArray(v)) return v.map(normalize);
   // Arrow Vector / chunk -> collapse to a friendly JS array of values, then

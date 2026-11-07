@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fmtBytes, fmtCount, fmtSize, formatCompact, listText, peakSummary, scalarText } from "./format";
+import { fmtBytes, fmtCount, fmtSize, formatCompact, listText, peakSummary, scalarText, toJson } from "./format";
 
 describe("scalarText", () => {
   it("marks missing values", () => {
@@ -80,5 +80,17 @@ describe("peakSummary", () => {
     expect(peakSummary([1, 2, 3])).toBe("3 peaks");
     expect(peakSummary([])).toBe("no peaks");
     expect(peakSummary(null)).toBe("∅");
+  });
+});
+
+describe("64-bit integers", () => {
+  it("show every digit", () => {
+    expect(scalarText(-2767409227554884324n)).toBe((-2767409227554884324n).toLocaleString());
+  });
+  it("are written to JSON as exact numbers", () => {
+    expect(toJson({ psm_id: 3619665049874577583n, ids: [-2767409227554884324n, 7], run: "a" })).toBe(
+      '{"psm_id":3619665049874577583,"ids":[-2767409227554884324,7],"run":"a"}'
+    );
+    expect(toJson([1n], 2)).toBe("[\n  1\n]");
   });
 });
