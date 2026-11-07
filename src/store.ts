@@ -7,16 +7,13 @@ import { abandonQueries } from "./lib/duck";
 // Simple reactive store (no Pinia needed for this scale).
 export const state = reactive({
   datasets: [] as DatasetInfo[],
-  sourceKind: "none" as string, // single-file | dataset | collection | s3
+  /** Source badge in the top bar: "single-file", "collection", "s3" or "portal | <accession>". */
+  sourceKind: "none" as string,
   selectedDataset: null as DatasetInfo | null,
   selectedView: null as ViewInfo | null,
-  /** Set of local file paths already registered as DuckDB tables. */
+  /** Paths of the views registered as DuckDB tables (ticked in the sidebar). */
   registered: new Set<string>(),
-  /** Map of view path -> DuckDB table name. */
-  tableName: {} as Record<string, string>,
-  busy: false,
   status: "" as string,
-  error: "" as string,
   /** Main panel: a single view (browse/summary/query) or the dataset report. */
   page: "view" as "view" | "report",
   reportTab: "overview" as ReportTab,
@@ -54,7 +51,6 @@ export function stopQueries() {
   if (!abandonQueries()) return;
   clearReportCache();
   state.registered = new Set();
-  state.tableName = {};
 }
 
 export function reset() {
@@ -66,10 +62,7 @@ export function reset() {
   state.selectedDataset = null;
   state.selectedView = null;
   state.registered = new Set();
-  state.tableName = {};
-  state.busy = false;
   state.status = "";
-  state.error = "";
   state.page = "view";
   state.reportTab = "overview";
   state.search = { proteins: "", peptides: "", mod: "", nonce: 0 };
@@ -84,15 +77,10 @@ export function loadDatasets(datasets: DatasetInfo[], kind: string) {
   state.selectedDataset = datasets[0] ?? null;
   state.selectedView = datasets[0]?.views[0] ?? null;
   state.registered = new Set();
-  state.tableName = {};
   state.page = hasReport(datasets[0]) ? "report" : "view";
   state.reportTab = "overview";
   state.proteinFocus = null;
   state.status = `Loaded ${datasets.length} dataset(s)`;
-}
-
-export function datasetByView(view: ViewInfo): DatasetInfo | undefined {
-  return state.datasets.find((d) => d.views.some((v) => v.path === view.path));
 }
 
 /** A dataset gets a report when it has peptide-level evidence or protein groups. */

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { api } from "../lib/api";
-import { loadDatasets, state } from "../store";
+import { loadDatasets } from "../store";
 import S3Picker from "./S3Picker.vue";
 import PortalPicker from "./PortalPicker.vue";
 import DiscoverView from "./DiscoverView.vue";
@@ -89,7 +89,6 @@ async function openFolder() {
 
     <div class="err" v-if="error">⚠ {{ error }}</div>
     <div v-if="busy" class="muted">Working… <span class="spinner"></span></div>
-    <div v-if="state.error">{{ state.error }}</div>
 
     <S3Picker v-if="showS3" style="margin-top: 20px" />
     <PortalPicker v-if="showPortal" style="margin-top: 20px" />

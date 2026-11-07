@@ -124,7 +124,6 @@ export async function ensureViewReady(view: ViewInfo): Promise<string> {
   // The engine was restarted meanwhile: the table belongs to the old one.
   if (gen !== generation) throw new Error(CANCELLED);
   state.registered.add(view.path);
-  state.tableName[view.path] = table;
   return table;
 }
 
