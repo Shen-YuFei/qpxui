@@ -601,10 +601,7 @@ pub async fn register(
 /// 1-byte range GET is made per file, to learn its size; data is fetched lazily.
 pub async fn register_http(urls: &[String]) -> Result<BTreeMap<String, StreamHandle>, String> {
     let p = proxy().await?;
-    let client = portal_http::client_builder()?
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|e| format!("portal HTTP client: {e:?}"))?;
+    let client = portal_http::stream_client()?;
     let mut out = BTreeMap::new();
     for url in urls {
         // Only the quantms portal: the proxy must not fetch arbitrary hosts.
