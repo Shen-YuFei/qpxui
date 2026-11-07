@@ -121,7 +121,7 @@ async function loadSelection(h: PsHit) {
   } catch (e: any) {
     error.value = String(e);
   } finally {
-    if (expanded.value === h) busy.value = false;
+    busy.value = false;
     downloading.value = false;
   }
 }

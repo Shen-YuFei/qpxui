@@ -142,7 +142,7 @@ async function openDownload(ds: PortalDataset) {
   } catch (e: any) {
     error.value = String(e);
   } finally {
-    if (selected.value === target) busy.value = false;
+    busy.value = false;
     downloading.value = false;
   }
 }
