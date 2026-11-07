@@ -4,11 +4,13 @@ import { api } from "../lib/api";
 import { loadDatasets, state } from "../store";
 import S3Picker from "./S3Picker.vue";
 import PortalPicker from "./PortalPicker.vue";
+import DiscoverView from "./DiscoverView.vue";
 
 const busy = ref(false);
 const error = ref("");
 const showS3 = ref(false);
 const showPortal = ref(false);
+const showDiscover = ref(false);
 
 async function run(fn: () => Promise<void>) {
   busy.value = true;
@@ -76,6 +78,11 @@ async function openFolder() {
         <div class="card-title">🌍 Quantms portal</div>
         <div class="card-desc">Open a reanalysed dataset from the public quantms portal over HTTPS.</div>
       </button>
+
+      <button class="card" @click="showDiscover = !showDiscover" :disabled="busy">
+        <div class="card-title">🔎 Discover quantms data</div>
+        <div class="card-desc">Search and filter datasets by text, organism, instrument or collection to find interesting QPX files.</div>
+      </button>
     </div>
 
     <div class="err" v-if="error">⚠ {{ error }}</div>
@@ -84,6 +91,7 @@ async function openFolder() {
 
     <S3Picker v-if="showS3" style="margin-top: 20px" />
     <PortalPicker v-if="showPortal" style="margin-top: 20px" />
+    <DiscoverView v-if="showDiscover" style="margin-top: 20px" />
   </div>
 </template>
 

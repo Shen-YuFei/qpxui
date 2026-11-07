@@ -42,6 +42,35 @@ export interface PortalDataset {
   datasetRef?: string | null;
   pxUrl?: string | null;
   collectionTitle?: string | null;
+  description?: string | null;
+  summary?: string | null;
+  keywords?: string[] | null;
+  diseases?: string[] | null;
+  tissues?: string[] | null;
+  publication?: { doi?: string | null } | null;
+  source?: string | null;
+  count?: number | null;
+  collection?: string | null;
+}
+
+export interface PortalSearchResult {
+  datasets: PortalDataset[];
+  total: number;
+  page: number;
+  totalPages: number;
+  sort: string;
+}
+
+export interface CollectionOption {
+  name: string;
+  title?: string | null;
+  datasetCount?: number | null;
+}
+
+export interface PortalFacets {
+  organisms: string[];
+  instruments: string[];
+  collections: CollectionOption[];
 }
 
 export interface StreamHandle {
@@ -111,6 +140,29 @@ export const api = {
   portalDatasets: (limit?: number) => invoke<string[]>("portal_datasets", { limit }),
   portalRegistry: (pageSize?: number) =>
     invoke<PortalDataset[]>("portal_registry", { pageSize }),
+  /** Server-side search over the quantms portal catalogue (q text + facets + sort). */
+  portalSearch: (
+    query?: string | null,
+    opts?: {
+      collection?: string | null;
+      organism?: string | null;
+      instrument?: string | null;
+      sort?: string | null;
+      page?: number | null;
+      pageSize?: number | null;
+    }
+  ) =>
+    invoke<PortalSearchResult>("portal_search", {
+      query: query ?? null,
+      collection: opts?.collection ?? null,
+      organism: opts?.organism ?? null,
+      instrument: opts?.instrument ?? null,
+      sort: opts?.sort ?? null,
+      page: opts?.page ?? null,
+      pageSize: opts?.pageSize ?? null,
+    }),
+  /** Organism / instrument / collection facet options for the discover UI. */
+  portalFacets: () => invoke<PortalFacets>("portal_facets"),
   portalListViews: (dataset: string, organism?: string | null, psmCount?: number | null) =>
     invoke<ViewInfo[]>("portal_list_views", { dataset, organism: organism ?? null, psmCount: psmCount ?? null }),
   portalCacheViews: (urls: string[], cancelId?: string) =>
