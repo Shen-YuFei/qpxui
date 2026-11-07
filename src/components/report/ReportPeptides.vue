@@ -242,8 +242,13 @@ onMounted(async () => {
   if (large.value) {
     // Listing the top peptidoforms or the modifications reads whole columns of
     // the file; on a big streamed file wait for a search term instead. Exact
-    // matches can skip row groups when the file is sorted by peptidoform.
-    mode.value = "exact";
+    // matches skip row groups only when the file is sorted by peptidoform, so
+    // don't force the mode otherwise.
+    if (sorted.value) mode.value = "exact";
+    // The profile scans the whole peptidoform + intensities columns per click;
+    // on a large unsorted file open the list pane instead so a click doesn't
+    // read the whole file.
+    if (!sorted.value) pane.value = "list";
     if (!q.value.trim() && !mod.value) {
       waiting.value = true;
       return;

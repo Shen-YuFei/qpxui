@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { onMounted, onUnmounted } from "vue";
 import ChartCard from "../ChartCard.vue";
 import type { DatasetInfo } from "../../lib/api";
 import type { ChartSpec } from "../../lib/charts";
@@ -26,7 +26,8 @@ const { slots, progress, run } = useSlots(KEYS);
 
 const ev = evidence(props.t);
 const evName = props.t.feature ? "features" : "PSMs";
-const { gate, check, release } = useLargeGate();
+const { gate, check, release, dispose } = useLargeGate();
+onUnmounted(dispose);
 
 async function counts(key: string, sql: string, xName: string, yName = evName): Promise<ChartSpec> {
   const r = await cachedSql(props.ds, key, sql);

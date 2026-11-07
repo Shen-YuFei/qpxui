@@ -127,6 +127,7 @@ async function compute(k: Kpi) {
   if (!f) return;
   k.defer = undefined;
   k.value = null;
+  k.title = undefined;
   k.busy = true;
   kpis.value = [...kpis.value];
   try {

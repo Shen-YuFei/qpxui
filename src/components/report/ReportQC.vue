@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { onMounted, onUnmounted, ref } from "vue";
 import ChartCard from "../ChartCard.vue";
 import ReportTable from "../ReportTable.vue";
 import type { Column } from "../../lib/report";
@@ -24,7 +24,8 @@ const props = defineProps<{ ds: DatasetInfo; t: DatasetTables; fileBase: string 
 
 const ev = evidence(props.t);
 const evName = props.t.feature ? "features" : "PSMs";
-const { gate, check, release } = useLargeGate();
+const { gate, check, release, dispose } = useLargeGate();
+onUnmounted(dispose);
 
 const runRows = ref<Record<string, any>[]>([]);
 const runCols = ref<Column[]>([]);

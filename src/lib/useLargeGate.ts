@@ -13,10 +13,14 @@ export interface GateNeed {
 export function useLargeGate() {
   const gate = reactive({ checking: true, blocked: false, bytes: 0, size: 0 });
   let resume: (() => void) | null = null;
+  let disposed = false;
 
   async function check(needs: GateNeed[], go: () => void): Promise<void> {
     gate.checking = true;
     const big = await largeViews(needs.map((n) => n.ref));
+    // The tab was unmounted (dataset switched) while the footer read was in
+    // flight: don't start its whole-file queries on the new dataset.
+    if (disposed) return;
     gate.checking = false;
     if (!big.length) {
       go();
@@ -32,11 +36,17 @@ export function useLargeGate() {
   }
 
   function release() {
+    if (disposed) return;
     gate.blocked = false;
     const r = resume;
     resume = null;
     r?.();
   }
 
-  return { gate, check, release };
+  // Called by the component when it unmounts.
+  function dispose() {
+    disposed = true;
+  }
+
+  return { gate, check, release, dispose };
 }

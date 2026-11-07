@@ -29,13 +29,25 @@ let initPromise: Promise<void> | null = null;
 /** Engine queries and registrations still running, and the engine they run on. */
 let pending = 0;
 let generation = 0;
+/** Rejections for in-flight `tracked` calls, so abandonment settles them. */
+const trackedCancels = new Set<(e: unknown) => void>();
 
 async function tracked<T>(fn: () => Promise<T>): Promise<T> {
   const gen = generation;
   pending++;
+  let rejectFn: (e: unknown) => void = () => {};
+  // `cancelled` settles as soon as abandonQueries() runs: a query that was
+  // running when the worker was killed would otherwise never resolve (duckdb-wasm
+  // terminate() leaves pending requests hanging forever), leaving loading flags
+  // stuck. Raced against the real work so a normal result still wins.
+  const cancelled = new Promise<never>((_, reject) => {
+    rejectFn = reject;
+    trackedCancels.add(reject);
+  });
   try {
-    return await fn();
+    return await Promise.race([fn(), cancelled]);
   } finally {
+    trackedCancels.delete(rejectFn);
     if (gen === generation) pending--;
   }
 }
@@ -52,6 +64,9 @@ export function abandonQueries(): boolean {
   initPromise = null;
   pending = 0;
   generation++;
+  const toCancel = Array.from(trackedCancels);
+  trackedCancels.clear();
+  for (const r of toCancel) r(new Error("cancelled"));
   void old.terminate().catch(() => {});
   return true;
 }

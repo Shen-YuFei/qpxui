@@ -16,6 +16,7 @@ use crate::commands::transfers as xfers;
 use crate::qpx::ViewInfo;
 use reqwest::Client;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use tauri::AppHandle;
 
 const BASE: &str = "https://browse.quantms.org";
@@ -45,31 +46,53 @@ fn run_cache_dir(root: &std::path::Path, url: &str) -> PathBuf {
 
 /// Size of a remote file. The portal answers HEAD with 405, so fall back to a
 /// one-byte ranged GET and read the total from `Content-Range`.
-async fn remote_size(client: &Client, url: &str) -> Result<u64, String> {
+async fn remote_size(client: &Client, url: &str, token: &AtomicBool) -> Result<u64, String> {
+    // reqwest's `.content_length()` returns the *body* length, which is 0 for
+    // a HEAD reply, so size HEADs by the Content-Length header directly.
     if let Ok(r) = client.head(url).send().await {
         if r.status().is_success() {
-            if let Some(n) = r.content_length().filter(|n| *n > 0) {
+            let cl = r
+                .headers()
+                .get(reqwest::header::CONTENT_LENGTH)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.trim().parse::<u64>().ok())
+                .filter(|n| *n > 0);
+            if let Some(n) = cl {
                 return Ok(n);
             }
         }
     }
-    let r = client
-        .get(url)
-        .header(reqwest::header::RANGE, "bytes=0-0")
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !r.status().is_success() {
-        return Err(format!("HTTP {}", r.status()));
-    }
-    let total = r
-        .headers()
-        .get(reqwest::header::CONTENT_RANGE)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.rsplit('/').next())
-        .and_then(|v| v.trim().parse::<u64>().ok());
-    // A server that ignores Range sends the whole body: use its length.
-    Ok(total.or_else(|| r.content_length()).unwrap_or(0))
+    let total = xfers::cancellable(token, async {
+        let r = client
+            .get(url)
+            .header(reqwest::header::RANGE, "bytes=0-0")
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !r.status().is_success() {
+            return Err(format!("HTTP {}", r.status()));
+        }
+        let total = r
+            .headers()
+            .get(reqwest::header::CONTENT_RANGE)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.rsplit('/').next())
+            .and_then(|v| v.trim().parse::<u64>().ok());
+        // A server that ignores Range sends the whole (200) body: use its
+        // length. On a 206 without a size the probe read is one byte, which
+        // is not a real total, so don't trust it.
+        let status = r.status();
+        Ok(total.or_else(|| {
+            if status == reqwest::StatusCode::OK {
+                r.content_length()
+            } else {
+                None
+            }
+        })
+        .unwrap_or(0))
+    })
+    .await?;
+    Ok(total)
 }
 
 fn cache_root() -> Result<PathBuf, String> {
@@ -500,10 +523,14 @@ async fn portal_cache_views_impl(
     cancel_id: String,
     urls: Vec<String>,
 ) -> Result<Vec<ViewInfo>, String> {
-    let token = xfers::begin(&cancel_id);
     let client = Client::builder().build().map_err(|e| e.to_string())?;
     let root = cache_root()?;
     std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+
+    // Register the cancel token only after the setup that can fail, so a
+    // failed setup never leaks a registry entry (it is cleaned up by `end`
+    // below once registered).
+    let token = xfers::begin(&cancel_id);
 
     let result: Result<Vec<ViewInfo>, String> = (async {
         // Resolve names and cache paths, then size everything still to fetch
@@ -531,9 +558,9 @@ async fn portal_cache_views_impl(
             let size = if local.exists() {
                 0
             } else {
-                remote_size(&client, url).await.map_err(|e| format!("size of {name}: {e}"))?
+                remote_size(&client, url, &token).await.map_err(|e| format!("size of {name}: {e}"))?
             };
-            need += size;
+            need = need.saturating_add(size);
             sizes.push(size);
         }
         xfers::ensure_space(&root, need)?;
@@ -550,14 +577,18 @@ async fn portal_cache_views_impl(
             let size = if local.exists() {
                 std::fs::metadata(&local).map(|m| m.len()).unwrap_or(0)
             } else {
-                let resp = client
-                    .get(&url)
-                    .send()
-                    .await
-                    .map_err(|e| format!("download {name}: {e}"))?;
-                if !resp.status().is_success() {
-                    return Err(format!("download {name}: HTTP {}", resp.status()));
-                }
+                let resp = xfers::cancellable(&token, async {
+                    let resp = client
+                        .get(&url)
+                        .send()
+                        .await
+                        .map_err(|e| format!("download {name}: {e}"))?;
+                    if !resp.status().is_success() {
+                        return Err(format!("download {name}: HTTP {}", resp.status()));
+                    }
+                    Ok(resp)
+                })
+                .await?;
                 let total = resp.content_length().unwrap_or(head_size);
                 if total > head_size {
                     xfers::ensure_space(&dir, total)?;
@@ -673,8 +704,7 @@ mod tests {
     }
 
     /// HTTP server like the portal's: HEAD is 405, GET honours `Range`.
-    async fn no_head_server(body: Vec<u8>) -> String {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    async fn no_head_server(body: Vec<u8>) -> String {        use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let body = std::sync::Arc::new(body);
@@ -713,7 +743,7 @@ mod tests {
         let body: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
         let base = no_head_server(body.clone()).await;
         let client = Client::new();
-        assert_eq!(remote_size(&client, &format!("{base}/x")).await.unwrap(), body.len() as u64);
+        assert_eq!(remote_size(&client, &format!("{base}/x"), &AtomicBool::new(false)).await.unwrap(), body.len() as u64);
 
         let name = format!("nohead-test-{}.feature.parquet", std::process::id());
         let url = format!("{base}/{name}");
@@ -721,6 +751,43 @@ mod tests {
         let got = std::fs::read(&out[0].path).unwrap();
         std::fs::remove_file(&out[0].path).ok();
         assert_eq!(got, body);
+    }
+
+    /// HTTP server where HEAD answers 200 with a Content-Length; the size
+    /// lookup must use that header (not reqwest's body length, which is 0).
+    async fn head_server(body: Vec<u8>) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let body = std::sync::Arc::new(body);
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else { return };
+                let body = body.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let n = sock.read(&mut buf).await.unwrap_or(0);
+                    let req = String::from_utf8_lossy(&buf[..n]).to_lowercase();
+                    let resp = if req.starts_with("head") {
+                        format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).into_bytes()
+                    } else {
+                        let mut r = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).into_bytes();
+                        r.extend_from_slice(&body);
+                        r
+                    };
+                    let _ = sock.write_all(&resp).await;
+                });
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn sizes_by_head_content_length_when_head_supported() {
+        let body: Vec<u8> = (0..10_000u32).map(|i| (i % 253) as u8).collect();
+        let base = head_server(body.clone()).await;
+        let client = Client::new();
+        assert_eq!(remote_size(&client, &format!("{base}/x"), &AtomicBool::new(false)).await.unwrap(), body.len() as u64);
     }
 
     #[tokio::test]

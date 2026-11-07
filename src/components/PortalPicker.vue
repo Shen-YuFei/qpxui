@@ -151,6 +151,9 @@ async function loadSelection() {
   try {
     if (!sel.length) throw new Error("Select at least one view to load.");
     if (!(await confirmDownload(sel, "portal"))) return;
+    // The user may have left this dataset or source while the dialog was
+    // open; don't start a transfer for a dataset they've already moved on from.
+    if (unmounted || selected.value !== target) return;
     const files = sel.map((v) => v.name);
     cancelling.value = false;
     const id = generateId();

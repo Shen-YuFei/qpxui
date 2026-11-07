@@ -114,6 +114,8 @@ async function loadSelection() {
     const sel = selection();
     if (!sel.length) throw new Error("Select at least one view to load.");
     if (!(await confirmDownload(sel.map((s) => s.view), "s3"))) return;
+    // The user may have left this source while the dialog was open.
+    if (unmounted) return;
 
     // Download to cache (offline) with progress bars.
     const paths = sel.map((s) => s.view.path);

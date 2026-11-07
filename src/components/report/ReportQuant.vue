@@ -2,7 +2,7 @@
 // Quantification: protein x sample abundance matrix built from the pg view
 // (or features summed per anchor protein), with intensity distributions,
 // sample-sample correlation, PCA and a per-protein abundance profile.
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import ChartCard from "../ChartCard.vue";
 import ReportTable from "../ReportTable.vue";
 import type { DatasetInfo } from "../../lib/api";
@@ -47,7 +47,8 @@ const src: TableRef | undefined = hasInt(props.t.pg) ? props.t.pg : hasInt(props
 const srcKind = src === props.t.pg ? "pg" : "feature";
 
 const busy = ref(true);
-const { gate, check, release } = useLargeGate();
+const { gate, check, release, dispose } = useLargeGate();
+onUnmounted(dispose);
 const error = ref("");
 const raw = ref<QuantMatrix | null>(null);
 const contaminant = ref<Uint8Array>(new Uint8Array());
@@ -546,6 +547,7 @@ const sourceText = computed(() => {
   <div>
     <div v-if="!src" class="muted pad">This dataset has no quantitative intensities (pg or feature view with <code>intensities</code>).</div>
     <div v-else-if="error" class="error pad">⚠ {{ error }}</div>
+    <div v-else-if="gate.checking" class="muted pad"><span class="spinner"></span></div>
     <LargeGate v-else-if="gate.blocked" :bytes="gate.bytes" :size="gate.size" what="Building the protein × sample matrix" @go="release" />
     <div v-else-if="busy" class="muted pad">Building the protein × sample matrix… <span class="spinner"></span></div>
     <template v-else-if="matrix">
