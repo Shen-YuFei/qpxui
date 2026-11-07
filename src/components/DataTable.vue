@@ -9,7 +9,8 @@ import { state } from "../store";
 import PTMBadges from "./PTMBadges.vue";
 import PTMSegs from "./PTMSegs.vue";
 import StructuredView from "./StructuredView.vue";
-import SpectrumViewer, { type PsmKey } from "./SpectrumViewer.vue";
+import SpectrumViewer from "./SpectrumViewer.vue";
+import type { PsmKey } from "../lib/queries/spectrum";
 import { isModificationsCol, peptideCells, type PTMSeg } from "../lib/ptm";
 
 const props = defineProps<{ view: ViewInfo }>();

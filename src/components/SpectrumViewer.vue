@@ -5,12 +5,12 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import VChart from "vue-echarts";
 import PeptideSeq from "./PeptideSeq.vue";
-import { runSql } from "../lib/duck";
 import { chartTheme, toCsv } from "../lib/charts";
 import { spectrumOption } from "../lib/spectrumChart";
 import { savePng, saveText } from "../lib/export";
 import { settings } from "../lib/settings";
-import { ident, lit, objects, type TableRef } from "../lib/report";
+import type { TableRef } from "../lib/report";
+import { peptidoformPsms, psmPeaks, psmRecord, type PsmKey } from "../lib/queries/spectrum";
 import {
   KOINA_MODELS,
   fetchUsi,
@@ -32,13 +32,6 @@ import {
   type Peak,
   type Tolerance,
 } from "../lib/fragments";
-
-export interface PsmKey {
-  peptidoform: string;
-  run_file_name?: string | null;
-  scan?: number | null;
-  charge?: number | null;
-}
 
 const props = defineProps<{ psm: TableRef; target: PsmKey; accession?: string; fileBase?: string }>();
 const emit = defineEmits<{ (e: "close"): void }>();
@@ -142,14 +135,11 @@ function psmLabel(r: Record<string, any>): string {
 }
 
 async function listOtherPsms() {
-  const P = props.psm;
-  const want = ["run_file_name", "scan", "charge", "posterior_error_probability"].filter((c) => P.cols.has(c));
-  const order = P.cols.has("posterior_error_probability") ? " ORDER BY posterior_error_probability" : "";
   const pf = String(rec.value?.peptidoform ?? props.target.peptidoform);
-  const r = await runSql(`SELECT ${want.map(ident).join(", ")} FROM ${ident(P.table)} WHERE peptidoform = ${lit(pf)}${order} LIMIT 201`, 201);
+  const r = await peptidoformPsms(props.psm, pf);
   const curScan = scan.value;
   const curRun = rec.value?.run_file_name ?? props.target.run_file_name;
-  otherPsms.value = objects(r).filter((x) => {
+  otherPsms.value = r.filter((x) => {
     const sc = Array.isArray(x.scan) ? x.scan[0] : x.scan;
     return !(sc == curScan && (x.run_file_name ?? null) == (curRun ?? null) && (x.charge == null || x.charge == charge.value));
   });
@@ -189,14 +179,7 @@ async function loadMirror() {
 }
 
 async function loadOtherPsm(o: Record<string, any>): Promise<MirrorSpectrum> {
-  const P = props.psm;
-  const sc = Array.isArray(o.scan) ? o.scan[0] : o.scan;
-  const parts = [`peptidoform = ${lit(String(rec.value?.peptidoform ?? props.target.peptidoform))}`];
-  if (o.run_file_name != null) parts.push(`run_file_name = ${lit(String(o.run_file_name))}`);
-  if (sc != null) parts.push(/\[\]|list/i.test(P.types.scan ?? "") ? `list_contains(scan, ${Number(sc)})` : `scan = ${Number(sc)}`);
-  if (o.charge != null) parts.push(`charge = ${Number(o.charge)}`);
-  const r = await runSql(`SELECT mz_array, intensity_array, charge FROM ${ident(P.table)} WHERE ${parts.join(" AND ")} LIMIT 1`, 1);
-  const row = objects(r)[0];
+  const row = await psmPeaks(props.psm, String(rec.value?.peptidoform ?? props.target.peptidoform), o);
   if (!row || !Array.isArray(row.mz_array) || !row.mz_array.length) throw new Error("That PSM has no stored peaks.");
   const z = Number(row.charge ?? charge.value) || 2;
   const ionsO = fragmentIons(parsed.value, Math.max(1, Math.min(2, z - 1)), true);
@@ -286,30 +269,14 @@ const option = computed(() => {
   });
 });
 
-function where(): string {
-  const t = props.target;
-  const P = props.psm;
-  const parts = [`peptidoform = ${lit(t.peptidoform)}`];
-  if (t.run_file_name != null && P.cols.has("run_file_name")) parts.push(`run_file_name = ${lit(String(t.run_file_name))}`);
-  if (t.scan != null && P.cols.has("scan")) {
-    parts.push(/\[\]|list/i.test(P.types.scan ?? "") ? `list_contains(scan, ${Number(t.scan)})` : `scan = ${Number(t.scan)}`);
-  }
-  if (t.charge != null && P.cols.has("charge")) parts.push(`charge = ${Number(t.charge)}`);
-  return parts.join(" AND ");
-}
-
 let loadSeq = 0;
 async function load() {
   const id = ++loadSeq;
   loading.value = true;
   error.value = "";
   try {
-    const P = props.psm;
-    const want = ["peptidoform", "charge", "run_file_name", "scan", "calculated_mz", "observed_mz", "posterior_error_probability",
-      "rt", "cv_params", "mz_array", "intensity_array", "charge_array", "ion_type_array"].filter((c) => P.cols.has(c));
-    const r = await runSql(`SELECT ${want.map(ident).join(", ")} FROM ${ident(P.table)} WHERE ${where()} LIMIT 1`, 1);
+    const row = await psmRecord(props.psm, props.target);
     if (id !== loadSeq) return;
-    const row = objects(r)[0];
     if (!row) throw new Error("PSM not found in the psm view.");
     if (!Array.isArray(row.mz_array) || !row.mz_array.length) throw new Error("This PSM has no stored peaks (mz_array is empty).");
     rec.value = row;
