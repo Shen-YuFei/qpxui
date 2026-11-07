@@ -3,5 +3,9 @@
   "identifier": "default",
   "description": "Default capability for the main window",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:default"]
+  "permissions": [
+    "core:event:allow-listen",
+    "core:webview:allow-internal-toggle-devtools",
+    "dialog:default"
+  ]
 }
