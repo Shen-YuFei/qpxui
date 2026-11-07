@@ -19,7 +19,6 @@ const result = shallowRef<QueryResult>({ columns: [], rows: [], rowCount: 0, tru
 const total = ref(0);
 const page = ref(0);
 const pageSize = 500;
-const limit = ref(500);
 const where = ref("");
 const sortCol = ref<string | null>(null);
 const sortDir = ref<"ASC" | "DESC">("ASC");
@@ -76,7 +75,7 @@ async function load() {
     const orderClause = sortCol.value ? ` ORDER BY ${ident(sortCol.value)} ${sortDir.value}` : "";
     const off = page.value * pageSize;
     const res = await runSql(
-      `SELECT ${selectList()} FROM "${table.value}"${whereClause}${orderClause} LIMIT ${limit.value} OFFSET ${off}`
+      `SELECT ${selectList()} FROM "${table.value}"${whereClause}${orderClause} LIMIT ${pageSize} OFFSET ${off}`
     );
     if (id === loadSeq) result.value = res;
   } catch (e: any) {
