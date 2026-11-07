@@ -2,11 +2,12 @@
 // KPI counts, and the instruments, enzymes and organisms of the dataset.
 import type { DatasetInfo } from "../api";
 import { cachedSql, evidence, ident, objects, proteinExpr, targetWhere, type DatasetTables, type TableRef } from "../report";
+import { COL } from "../qpx";
 
 /** Project metadata (accession, title, description, PubMed id, software) from
  * the dataset view. */
 export async function datasetMeta(ds: DatasetInfo, dataset: TableRef): Promise<Record<string, any>> {
-  const sel = ["project_accession", "project_title", "project_description", "pubmed_id", "software_name", "software_version", "creation_date"]
+  const sel = [COL.project_accession, COL.project_title, COL.project_description, COL.pubmed_id, COL.software_name, COL.software_version, COL.creation_date]
     .filter((c) => dataset.cols.has(c));
   if (!sel.length) return {};
   const r = await cachedSql(ds, "hdr.dataset", `SELECT ${sel.join(", ")} FROM ${ident(dataset.table)} LIMIT 1`);
@@ -33,7 +34,7 @@ export function kpiSources(t: DatasetTables): KpiSource[] {
   const rows = (ref: TableRef, key: string, label: string, cacheKey: string): KpiSource =>
     ({ key, label, kind: "rows", ref, cacheKey, sql: `SELECT count(*) FROM ${ident(ref.table)}` });
   if (t.pg) {
-    out.push({ key: "pg", label: "Protein groups", title: "Distinct anchor proteins (target) in the pg view", kind: "distinct", ref: t.pg, cacheKey: "kpi.pg", sql: `SELECT count(DISTINCT anchor_protein) FROM ${ident(t.pg.table)} WHERE ${targetWhere(t.pg)}` });
+    out.push({ key: "pg", label: "Protein groups", title: "Distinct anchor proteins (target) in the pg view", kind: "distinct", ref: t.pg, cacheKey: "kpi.pg", sql: `SELECT count(DISTINCT ${COL.anchor_protein}) FROM ${ident(t.pg.table)} WHERE ${targetWhere(t.pg)}` });
   } else if (ev && proteinExpr(ev)) {
     out.push({ key: "pg", label: "Proteins", kind: "distinct", ref: ev, cacheKey: "kpi.prot", sql: `SELECT count(DISTINCT ${proteinExpr(ev)}) FROM ${ident(ev.table)} WHERE ${targetWhere(ev)}` });
   }
@@ -43,7 +44,7 @@ export function kpiSources(t: DatasetTables): KpiSource[] {
   if (t.feature) out.push(rows(t.feature, "feat", "Features", "kpi.feat"));
   if (t.psm) out.push(rows(t.psm, "psm", "PSMs", "kpi.psm"));
   if (t.run) out.push({ key: "run", label: "Runs", kind: "count", ref: t.run, cacheKey: "kpi.run", sql: `SELECT count(*) FROM ${ident(t.run.table)}` });
-  else if (ev?.cols.has("run_file_name")) out.push({ key: "run", label: "Runs", kind: "distinct", ref: ev, cacheKey: "kpi.run2", sql: `SELECT count(DISTINCT run_file_name) FROM ${ident(ev.table)}` });
+  else if (ev?.cols.has(COL.run_file_name)) out.push({ key: "run", label: "Runs", kind: "distinct", ref: ev, cacheKey: "kpi.run2", sql: `SELECT count(DISTINCT ${COL.run_file_name}) FROM ${ident(ev.table)}` });
   if (t.sample) out.push({ key: "smp", label: "Samples", kind: "count", ref: t.sample, cacheKey: "kpi.smp", sql: `SELECT count(*) FROM ${ident(t.sample.table)}` });
   return out;
 }
@@ -62,8 +63,8 @@ export async function countValue(ds: DatasetInfo, s: KpiSource): Promise<number 
 export async function runInstrumentsEnzymes(ds: DatasetInfo, run: TableRef): Promise<{ instruments: string[]; enzymes: string[] }> {
   const c = run.cols;
   const parts = [
-    c.has("instrument") ? "list_sort(list_distinct(list(instrument))) AS instruments" : "[]::VARCHAR[] AS instruments",
-    c.has("enzymes") ? "list_sort(list_distinct(flatten(list(enzymes)))) AS enzymes" : "[]::VARCHAR[] AS enzymes",
+    c.has(COL.instrument) ? `list_sort(list_distinct(list(${COL.instrument}))) AS instruments` : "[]::VARCHAR[] AS instruments",
+    c.has(COL.enzymes) ? `list_sort(list_distinct(flatten(list(${COL.enzymes})))) AS enzymes` : "[]::VARCHAR[] AS enzymes",
   ];
   const r = objects(await cachedSql(ds, "hdr.run", `SELECT ${parts.join(", ")} FROM ${ident(run.table)}`))[0];
   return { instruments: (r?.instruments ?? []).filter(Boolean), enzymes: (r?.enzymes ?? []).filter(Boolean) };
@@ -71,6 +72,6 @@ export async function runInstrumentsEnzymes(ds: DatasetInfo, run: TableRef): Pro
 
 /** Organisms of the samples. */
 export async function sampleOrganisms(ds: DatasetInfo, sample: TableRef): Promise<string[]> {
-  const r = await cachedSql(ds, "hdr.org", `SELECT DISTINCT organism FROM ${ident(sample.table)} WHERE organism IS NOT NULL ORDER BY 1`);
+  const r = await cachedSql(ds, "hdr.org", `SELECT DISTINCT ${COL.organism} FROM ${ident(sample.table)} WHERE ${COL.organism} IS NOT NULL ORDER BY 1`);
   return r.rows.map((x) => String(x[0]));
 }

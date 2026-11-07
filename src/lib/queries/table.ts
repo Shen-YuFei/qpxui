@@ -2,10 +2,11 @@
 // and sorted by a column, with the per-peak arrays of a psm view last.
 import { runSql, type QueryResult } from "../duck";
 import { ident, lit } from "../report";
+import { COL } from "../qpx";
 
 /** Per-peak arrays of a QPX psm row. They hold hundreds of values each, so
  * the table shows them as "N peaks", after the other columns. */
-export const PEAK_COLS = new Set(["mz_array", "intensity_array", "charge_array", "ion_type_array", "ion_mobility_array"]);
+export const PEAK_COLS = new Set<string>([COL.mz_array, COL.intensity_array, COL.charge_array, COL.ion_type_array, COL.ion_mobility_array]);
 
 export const isPeakColumn = (c: string) => PEAK_COLS.has(c.toLowerCase());
 

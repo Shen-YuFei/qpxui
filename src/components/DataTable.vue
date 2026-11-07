@@ -13,6 +13,7 @@ import HScroll from "./table/HScroll.vue";
 import SpectrumViewer from "./SpectrumViewer.vue";
 import { psmKeyOf, whyNoSpectrum, type PsmKey } from "../lib/queries/spectrum";
 import { isModificationsCol, peptideCells, type PTMSeg } from "../lib/ptm";
+import { COL, type ViewKind } from "../lib/qpx";
 
 const props = defineProps<{ view: ViewInfo }>();
 const table = ref("");
@@ -94,10 +95,10 @@ const msg = ref("");
 const spectrum = ref<PsmKey | null>(null);
 
 const psmRef = computed<TableRef | null>(() => {
-  if (props.view.view !== "psm") return null;
+  if (props.view.view !== ("psm" satisfies ViewKind)) return null;
   const cols = new Set(Object.keys(colTypes.value));
-  if (!cols.has("peptidoform") || !cols.has("mz_array") || !cols.has("intensity_array")) return null;
-  return { view: props.view, table: table.value, cols, types: colTypes.value, seq: "sequence" };
+  if (!cols.has(COL.peptidoform) || !cols.has(COL.mz_array) || !cols.has(COL.intensity_array)) return null;
+  return { view: props.view, table: table.value, cols, types: colTypes.value, seq: COL.sequence };
 });
 
 /** Why the selected row cannot open the spectrum viewer, or "" when it can. */

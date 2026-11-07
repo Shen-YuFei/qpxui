@@ -10,6 +10,7 @@ import { ptmColor, shortCode } from "../../lib/ptm";
 import { searchFor } from "../../store";
 import { useLargeGate } from "../../lib/useLargeGate";
 import LargeGate from "./LargeGate.vue";
+import { COL } from "../../lib/qpx";
 
 const props = defineProps<{ ds: DatasetInfo; t: DatasetTables; fileBase: string }>();
 const ev = evidence(props.t);
@@ -83,7 +84,7 @@ const tableRows = computed(() =>
 );
 
 onMounted(() => {
-  if (!ev || !ev.cols.has("modifications")) {
+  if (!ev || !ev.cols.has(COL.modifications)) {
     busy.value = false;
     return;
   }
@@ -108,7 +109,7 @@ async function build() {
 
 <template>
   <div>
-    <div v-if="!ev || !ev.cols.has('modifications')" class="muted pad">No `modifications` column in this dataset's feature/PSM view.</div>
+    <div v-if="!ev || !ev.cols.has(COL.modifications)" class="muted pad">No `modifications` column in this dataset's feature/PSM view.</div>
     <div v-else-if="error" class="error pad">⚠ {{ error }}</div>
     <LargeGate v-else-if="gate.blocked" :bytes="gate.bytes" :size="gate.size" what="Counting modifications" @go="release" />
     <div v-else-if="gate.error" class="error pad">⚠ {{ gate.error }}</div>

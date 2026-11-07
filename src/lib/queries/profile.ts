@@ -6,6 +6,7 @@ import { runSql } from "../duck";
 import type { Feature } from "../peptidoformCharts";
 import { natural } from "../quant";
 import { cachedSql, ident, lit, objects, sampleMapSql, targetWhere, type DatasetTables, type TableRef } from "../report";
+import { COL } from "../qpx";
 
 /** Features read per peptidoform; one more is read to tell that there are more. */
 export const PROFILE_MAX_FEATURES = 20000;
@@ -18,14 +19,14 @@ export interface Channel {
   intensity: number;
 }
 
-const hasInt = (r?: TableRef) => !!r?.cols.has("intensities");
+const hasInt = (r?: TableRef) => !!r?.cols.has(COL.intensities);
 
 /** Quantified evidence first: features, then PSMs that carry intensities. */
 export function profileSource(t: DatasetTables): TableRef | undefined {
   return hasInt(t.feature) ? t.feature : hasInt(t.psm) ? t.psm : t.feature ?? t.psm;
 }
 
-const pfCol = (S: TableRef) => (S.cols.has("peptidoform") ? "peptidoform" : S.seq);
+const pfCol = (S: TableRef) => (S.cols.has(COL.peptidoform) ? COL.peptidoform : S.seq);
 
 function profileSql(t: DatasetTables, S: TableRef, peptidoform: string): string {
   const has = (c: string) => S.cols.has(c);
@@ -33,16 +34,16 @@ function profileSql(t: DatasetTables, S: TableRef, peptidoform: string): string 
   const quant = hasInt(S);
   const map = sampleMapSql(t.run);
   const f = `f AS MATERIALIZED (
-  SELECT row_number() OVER ()::BIGINT AS fid, ${has("run_file_name") ? "run_file_name" : "'all'"} AS r,
-         ${has("charge") ? "charge" : "NULL"} AS z, ${sec("rt")} AS rt, ${sec("rt_start")} AS rt_lo, ${sec("rt_stop")} AS rt_hi,
-         ${has("posterior_error_probability") ? "posterior_error_probability" : "NULL"} AS pep${quant ? ", intensities" : ""}
+  SELECT row_number() OVER ()::BIGINT AS fid, ${has(COL.run_file_name) ? COL.run_file_name : "'all'"} AS r,
+         ${has(COL.charge) ? COL.charge : "NULL"} AS z, ${sec(COL.rt)} AS rt, ${sec(COL.rt_start)} AS rt_lo, ${sec(COL.rt_stop)} AS rt_hi,
+         ${has(COL.posterior_error_probability) ? COL.posterior_error_probability : "NULL"} AS pep${quant ? `, ${COL.intensities}` : ""}
   FROM ${ident(S.table)} WHERE ${targetWhere(S)} AND ${pfCol(S)} = ${lit(peptidoform)}
   LIMIT ${PROFILE_MAX_FEATURES + 1})`;
   if (!quant) {
     return `WITH ${f} SELECT fid, r AS run, z AS charge, rt, rt_lo, rt_hi, pep, NULL AS label, NULL AS sample, NULL AS intensity FROM f ORDER BY fid`;
   }
   return `WITH ${f},
-x AS (SELECT fid, r, unnest(intensities) AS i FROM f WHERE len(intensities) > 0)${map.ctes},
+x AS (SELECT fid, r, unnest(${COL.intensities}) AS i FROM f WHERE len(${COL.intensities}) > 0)${map.ctes},
 s AS (SELECT x.fid, x.i.label AS label, ${map.col} AS sample, x.i.intensity::DOUBLE AS intensity FROM x ${map.joins} WHERE x.i.intensity > 0)
 SELECT f.fid, f.r AS run, f.z AS charge, f.rt, f.rt_lo, f.rt_hi, f.pep, s.label, s.sample, s.intensity
 FROM f LEFT JOIN s USING (fid) ORDER BY f.fid`;
@@ -81,7 +82,7 @@ export async function peptidoformProfile(
 
 /** Every run of the run view, in natural order. */
 export async function runNames(ds: DatasetInfo, run: TableRef): Promise<string[]> {
-  const r = await cachedSql(ds, "pep.runs", `SELECT DISTINCT run_file_name FROM ${ident(run.table)}`, 100000);
+  const r = await cachedSql(ds, "pep.runs", `SELECT DISTINCT ${COL.run_file_name} FROM ${ident(run.table)}`, 100000);
   return r.rows.map((x) => String(x[0])).sort(natural);
 }
 
@@ -92,7 +93,7 @@ export async function sampleMedians(ds: DatasetInfo, t: DatasetTables, S: TableR
   const r = await cachedSql(
     ds,
     `pep.medians.${S === t.feature ? "feature" : "psm"}`,
-    `WITH x AS (SELECT run_file_name AS r, unnest(intensities) AS i FROM ${ident(S.table)} WHERE ${targetWhere(S)} AND len(intensities) > 0)${map.ctes}
+    `WITH x AS (SELECT ${COL.run_file_name} AS r, unnest(${COL.intensities}) AS i FROM ${ident(S.table)} WHERE ${targetWhere(S)} AND len(${COL.intensities}) > 0)${map.ctes}
        SELECT ${map.col} AS sample, median(log2(x.i.intensity)) AS med FROM x ${map.joins} WHERE x.i.intensity > 0 GROUP BY 1`,
     100000
   );

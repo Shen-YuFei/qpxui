@@ -17,6 +17,7 @@
 // portal's colour-coded residue + short-notation style.
 
 import { resolvePtmColor } from "./settings";
+import { COL } from "./qpx";
 
 export interface PTMSeg {
   /** Residue text: a plain amino acid, a run of plain residues, or a modified AA. */
@@ -106,7 +107,7 @@ export function isPeptideCol(col: string): boolean {
 }
 
 export function isModificationsCol(col: string): boolean {
-  return col.trim().toLowerCase() === "modifications";
+  return col.trim().toLowerCase() === COL.modifications;
 }
 
 /**

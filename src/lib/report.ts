@@ -5,7 +5,7 @@
 import type { DatasetInfo, ViewInfo } from "./api";
 import { describeTable, ensureViewReady, runSql, type QueryResult } from "./duck";
 import { fmtNum } from "./format";
-import { SORT_ORDER_KEY, VIEW_KINDS, type ViewKind } from "./qpx";
+import { COL, SORT_ORDER_KEY, VIEW_KINDS, type ViewKind } from "./qpx";
 
 export interface TableRef {
   view: ViewInfo;
@@ -46,7 +46,7 @@ export function datasetTables(ds: DatasetInfo): Promise<DatasetTables> {
         const desc = await describeTable(table);
         const types: Record<string, string> = {};
         for (const c of desc) types[c.name.toLowerCase()] = c.type;
-        const ref: TableRef = { view, table, cols: new Set(Object.keys(types)), types, seq: "sequence" };
+        const ref: TableRef = { view, table, cols: new Set(Object.keys(types)), types, seq: COL.sequence };
         if (kind === "feature" || kind === "psm") ref.seq = await detectSeqExpr(ref);
         out[kind] = ref;
       }
@@ -59,7 +59,7 @@ export function datasetTables(ds: DatasetInfo): Promise<DatasetTables> {
 }
 
 /** Amino acids only from a ProForma peptidoform: drops [mods], {labile}, (…) and '-'. */
-export function strippedPeptidoform(col = "peptidoform"): string {
+export function strippedPeptidoform(col = COL.peptidoform): string {
   return `regexp_replace(${col}, '\\[[^\\]]*\\]|\\{[^}]*\\}|\\([^)]*\\)|[^A-Z]', '', 'g')`;
 }
 
@@ -67,13 +67,13 @@ export function strippedPeptidoform(col = "peptidoform"): string {
 // (e.g. "HCCARBAMIDOMETHYLS…"). Sample a few rows; if `sequence` disagrees with
 // the stripped peptidoform, derive the plain sequence from the peptidoform.
 async function detectSeqExpr(ref: TableRef): Promise<string> {
-  if (!ref.cols.has("sequence")) return ref.cols.has("peptidoform") ? strippedPeptidoform() : "NULL";
-  if (!ref.cols.has("peptidoform")) return "sequence";
+  if (!ref.cols.has(COL.sequence)) return ref.cols.has(COL.peptidoform) ? strippedPeptidoform() : "NULL";
+  if (!ref.cols.has(COL.peptidoform)) return COL.sequence;
   const r = await runSql(
-    `SELECT count(*) FILTER (WHERE sequence <> ${strippedPeptidoform()}) AS bad
-     FROM (SELECT sequence, peptidoform FROM ${ident(ref.table)} LIMIT 2000)`
+    `SELECT count(*) FILTER (WHERE ${COL.sequence} <> ${strippedPeptidoform()}) AS bad
+     FROM (SELECT ${COL.sequence}, ${COL.peptidoform} FROM ${ident(ref.table)} LIMIT 2000)`
   );
-  return Number(r.rows[0][0]) > 0 ? strippedPeptidoform() : "sequence";
+  return Number(r.rows[0][0]) > 0 ? strippedPeptidoform() : COL.sequence;
 }
 
 /** Query result rows as plain objects keyed by column name. */
@@ -110,7 +110,7 @@ const spectraCache = new Map<string, Promise<boolean>>();
 /** Does the psm view carry fragment spectra (non-null `mz_array`)? Answered
  * from the parquet footer statistics, so no column data is read. */
 export function hasSpectra(ref: TableRef | undefined): Promise<boolean> {
-  if (!ref || !ref.cols.has("mz_array") || !ref.cols.has("intensity_array")) return Promise.resolve(false);
+  if (!ref || !ref.cols.has(COL.mz_array) || !ref.cols.has(COL.intensity_array)) return Promise.resolve(false);
   const key = ref.view.path;
   let p = spectraCache.get(key);
   if (!p) {
@@ -122,7 +122,7 @@ export function hasSpectra(ref: TableRef | undefined): Promise<boolean> {
       const [vals, nulls, withStats, chunks] = stats.rows[0].map(Number);
       if (chunks > 0 && withStats === chunks) return vals > nulls;
       // Some writers leave out null counts: look for one spectrum instead.
-      const r = await runSql(`SELECT 1 FROM ${ident(ref.table)} WHERE len(mz_array) > 0 LIMIT 1`, 1);
+      const r = await runSql(`SELECT 1 FROM ${ident(ref.table)} WHERE len(${COL.mz_array}) > 0 LIMIT 1`, 1);
       return r.rows.length > 0;
     })();
     p.catch(() => spectraCache.delete(key));
@@ -212,7 +212,7 @@ export function parseSortOrder(v: string): string[] {
 
 /** WHERE clause keeping target (non-decoy) rows only. */
 export function targetWhere(ref: TableRef): string {
-  return ref.cols.has("is_decoy") ? "NOT coalesce(is_decoy, false)" : "TRUE";
+  return ref.cols.has(COL.is_decoy) ? `NOT coalesce(${COL.is_decoy}, false)` : "TRUE";
 }
 
 function isStructList(ref: TableRef, col: string): boolean {
@@ -221,25 +221,25 @@ function isStructList(ref: TableRef, col: string): boolean {
 
 /** Expression giving one protein (group) identifier per evidence row. */
 export function proteinExpr(ref: TableRef): string | null {
-  if (ref.cols.has("anchor_protein")) return "anchor_protein";
-  if (ref.cols.has("protein_accessions")) return "protein_accessions[1]";
-  if (ref.cols.has("pg_accessions")) return isStructList(ref, "pg_accessions") ? "pg_accessions[1].accession" : "pg_accessions[1]";
+  if (ref.cols.has(COL.anchor_protein)) return COL.anchor_protein;
+  if (ref.cols.has(COL.protein_accessions)) return `${COL.protein_accessions}[1]`;
+  if (ref.cols.has(COL.pg_accessions)) return isStructList(ref, COL.pg_accessions) ? `${COL.pg_accessions}[1].accession` : `${COL.pg_accessions}[1]`;
   return null;
 }
 
 /** Accession list (VARCHAR[]) expression for the row, whatever the schema. */
 function accessionListExpr(ref: TableRef): string | null {
-  if (ref.cols.has("pg_accessions")) {
-    return isStructList(ref, "pg_accessions") ? "list_transform(pg_accessions, x -> x.accession)" : "pg_accessions";
+  if (ref.cols.has(COL.pg_accessions)) {
+    return isStructList(ref, COL.pg_accessions) ? `list_transform(${COL.pg_accessions}, x -> x.accession)` : COL.pg_accessions;
   }
-  if (ref.cols.has("protein_accessions")) return "protein_accessions";
+  if (ref.cols.has(COL.protein_accessions)) return COL.protein_accessions;
   return null;
 }
 
 /** Rows that belong to protein `acc` (anchor protein or any group member). */
 export function proteinMatchWhere(ref: TableRef, acc: string): string {
   const parts: string[] = [];
-  if (ref.cols.has("anchor_protein")) parts.push(`anchor_protein = ${lit(acc)}`);
+  if (ref.cols.has(COL.anchor_protein)) parts.push(`${COL.anchor_protein} = ${lit(acc)}`);
   const l = accessionListExpr(ref);
   if (l) parts.push(`list_contains(${l}, ${lit(acc)})`);
   return parts.length ? `(${parts.join(" OR ")})` : "FALSE";
@@ -251,10 +251,10 @@ export function proteinTextWhere(ref: TableRef, q: string): string {
   if (!query) return "TRUE";
   const pat = likePattern(query);
   const parts: string[] = [];
-  if (ref.cols.has("anchor_protein")) parts.push(`anchor_protein ILIKE ${pat}`);
+  if (ref.cols.has(COL.anchor_protein)) parts.push(`${COL.anchor_protein} ILIKE ${pat}`);
   const l = accessionListExpr(ref);
   if (l) parts.push(`array_to_string(${l}, ' ') ILIKE ${pat}`);
-  for (const c of ["pg_names", "gg_names", "gg_accessions"]) {
+  for (const c of [COL.pg_names, COL.gg_names, COL.gg_accessions]) {
     if (ref.cols.has(c) && /\[\]|list/i.test(ref.types[c] ?? "")) parts.push(`array_to_string(${c}, ' ') ILIKE ${pat}`);
   }
   return parts.length ? `(${parts.join(" OR ")})` : "FALSE";
@@ -278,8 +278,8 @@ export function likePattern(s: string): string {
 
 /** Summed reporter/label intensity per row (works for LFQ and TMT). */
 export function intensitySumExpr(ref: TableRef): string | null {
-  if (!ref.cols.has("intensities")) return null;
-  return "list_sum(list_transform(intensities, x -> x.intensity))";
+  if (!ref.cols.has(COL.intensities)) return null;
+  return `list_sum(list_transform(${COL.intensities}, x -> x.intensity))`;
 }
 
 export function log10Expr(expr: string): string {
@@ -327,14 +327,14 @@ export function histogramData(r: QueryResult, bins = 40): { labels: string[]; va
  * names the sample, falling back to the run (and channel). The joins are
  * aliased `m` (run, label) and `m1` (single-sample run). */
 export function sampleMapSql(run: TableRef | undefined): { ctes: string; joins: string; col: string; mapped: boolean } {
-  const R = run?.cols.has("samples") ? run : undefined;
+  const R = run?.cols.has(COL.samples) ? run : undefined;
   // Channel names differ between converters ("TMT131" vs "TMT131N", case, spaces).
   const norm = (e: string) => `regexp_replace(upper(replace(${e}, ' ', '')), '^TMT131N$', 'TMT131')`;
   const fallback = `CASE WHEN x.i.label IS NULL OR x.i.label IN ('LFQ', 'label free sample') THEN x.r ELSE x.r || ' · ' || x.i.label END`;
   if (!R) return { ctes: "", joins: "", col: fallback, mapped: false };
   return {
-    ctes: `, m AS (SELECT run_file_name AS r, ${norm("s.label")} AS l, min(s.sample_accession) AS sa
-              FROM (SELECT run_file_name, unnest(samples) AS s FROM ${ident(R.table)}) GROUP BY 1, 2),
+    ctes: `, m AS (SELECT ${COL.run_file_name} AS r, ${norm("s.label")} AS l, min(s.sample_accession) AS sa
+              FROM (SELECT ${COL.run_file_name}, unnest(${COL.samples}) AS s FROM ${ident(R.table)}) GROUP BY 1, 2),
          m1 AS (SELECT r, min(sa) AS sa FROM m GROUP BY r HAVING count(DISTINCT sa) = 1)`,
     joins: `LEFT JOIN m ON m.r = x.r AND m.l = ${norm("x.i.label")} LEFT JOIN m1 ON m1.r = x.r`,
     col: `coalesce(m.sa, m1.sa, ${fallback})`,

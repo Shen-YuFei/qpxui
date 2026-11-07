@@ -2,6 +2,7 @@
 // the view's table, with a row cap when the query sets none.
 import { runSql, type QueryResult } from "../duck";
 import { ident } from "../report";
+import { COL } from "../qpx";
 
 /** Rows a query returns when it ends without a LIMIT of its own. */
 export const QUERY_LIMIT = 2000;
@@ -9,9 +10,9 @@ export const QUERY_LIMIT = 2000;
 /** Example queries; `{table}` stands for the view's table. */
 export const QUERY_EXAMPLES = [
   "SELECT * FROM {table} LIMIT 50",
-  "SELECT anchor_protein, COUNT(*) AS n FROM {table} WHERE anchor_protein IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 20",
-  "SELECT run_file_name, COUNT(*) AS n FROM {table} GROUP BY 1 ORDER BY 2 DESC",
-  "SELECT charge, COUNT(*) AS n FROM {table} GROUP BY 1 ORDER BY 1",
+  `SELECT ${COL.anchor_protein}, COUNT(*) AS n FROM {table} WHERE ${COL.anchor_protein} IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 20`,
+  `SELECT ${COL.run_file_name}, COUNT(*) AS n FROM {table} GROUP BY 1 ORDER BY 2 DESC`,
+  `SELECT ${COL.charge}, COUNT(*) AS n FROM {table} GROUP BY 1 ORDER BY 1`,
 ];
 
 /** The text with its first `{table}` replaced by the quoted table name. */

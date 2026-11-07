@@ -13,13 +13,14 @@ import {
   targetWhere,
   type TableRef,
 } from "../report";
+import { COL } from "../qpx";
 
 export const OVERVIEW_CHARTS = ["perRun", "charge", "length", "mc", "ppg", "ppm", "rt", "intensity", "pep", "qvalue"] as const;
 export type OverviewChart = (typeof OVERVIEW_CHARTS)[number];
 
 /** Evidence-view columns the charts read (for the large-view gate). */
-export const OVERVIEW_COLUMNS = ["is_decoy", "run_file_name", "charge", "sequence", "peptidoform", "missed_cleavages", "anchor_protein",
-  "protein_accessions", "pg_accessions", "mass_error_ppm", "rt", "intensities", "posterior_error_probability", "peptide_qvalue"];
+export const OVERVIEW_COLUMNS = [COL.is_decoy, COL.run_file_name, COL.charge, COL.sequence, COL.peptidoform, COL.missed_cleavages, COL.anchor_protein,
+  COL.protein_accessions, COL.pg_accessions, COL.mass_error_ppm, COL.rt, COL.intensities, COL.posterior_error_probability, COL.peptide_qvalue];
 
 /** A loader per chart the evidence view `ev` has the columns for; `evName`
  * names its rows ("features" or "PSMs"). */
@@ -51,12 +52,12 @@ export function overviewCharts(
   }
 
   return {
-    perRun: has("run_file_name")
+    perRun: has(COL.run_file_name)
       ? async () => {
           const r = await cachedSql(
             ds,
             "ov.perRun",
-            `SELECT run_file_name, count(*) AS n FROM ${T} WHERE ${W} GROUP BY 1 ORDER BY 2 DESC`
+            `SELECT ${COL.run_file_name}, count(*) AS n FROM ${T} WHERE ${W} GROUP BY 1 ORDER BY 2 DESC`
           );
           return {
             kind: "line",
@@ -68,8 +69,8 @@ export function overviewCharts(
           };
         }
       : undefined,
-    charge: has("charge")
-      ? () => counts("ov.charge", `SELECT charge, count(*) FROM ${T} WHERE ${W} GROUP BY 1 ORDER BY 1`, "charge")
+    charge: has(COL.charge)
+      ? () => counts("ov.charge", `SELECT ${COL.charge}, count(*) FROM ${T} WHERE ${W} GROUP BY 1 ORDER BY 1`, "charge")
       : undefined,
     length: ev.seq !== "NULL"
       ? () =>
@@ -79,8 +80,8 @@ export function overviewCharts(
             "residues"
           )
       : undefined,
-    mc: has("missed_cleavages")
-      ? () => counts("ov.mc", `SELECT missed_cleavages, count(*) FROM ${T} WHERE ${W} GROUP BY 1 ORDER BY 1`, "missed cleavages")
+    mc: has(COL.missed_cleavages)
+      ? () => counts("ov.mc", `SELECT ${COL.missed_cleavages}, count(*) FROM ${T} WHERE ${W} GROUP BY 1 ORDER BY 1`, "missed cleavages")
       : undefined,
     ppg: prot && ev.seq !== "NULL"
       ? async () => {
@@ -97,14 +98,14 @@ export function overviewCharts(
           return s;
         }
       : undefined,
-    ppm: has("mass_error_ppm") ? () => hist("ov.ppm", "mass_error_ppm", W, "ppm", evName, true) : undefined,
-    rt: has("rt") ? () => hist("ov.rt", "rt / 60.0", W, "minutes") : undefined,
+    ppm: has(COL.mass_error_ppm) ? () => hist("ov.ppm", COL.mass_error_ppm, W, "ppm", evName, true) : undefined,
+    rt: has(COL.rt) ? () => hist("ov.rt", `${COL.rt} / 60.0`, W, "minutes") : undefined,
     intensity: isum ? () => hist("ov.int", log10Expr(isum), W, "log10 intensity") : undefined,
-    pep: has("posterior_error_probability")
-      ? () => hist("ov.pep", log10Expr("posterior_error_probability"), W, "log10 PEP", evName)
+    pep: has(COL.posterior_error_probability)
+      ? () => hist("ov.pep", log10Expr(COL.posterior_error_probability), W, "log10 PEP", evName)
       : undefined,
-    qvalue: has("peptide_qvalue")
-      ? () => hist("ov.q", "peptide_qvalue", W, "peptide q-value", evName)
+    qvalue: has(COL.peptide_qvalue)
+      ? () => hist("ov.q", COL.peptide_qvalue, W, "peptide q-value", evName)
       : undefined,
   };
 }

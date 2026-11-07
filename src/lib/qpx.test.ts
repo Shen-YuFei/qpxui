@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cvMap } from "./qpx";
+import { COL, cvMap } from "./qpx";
 
 describe("cvMap", () => {
   it("reads a list of {cv_name, cv_value} structs", () => {
@@ -20,5 +20,12 @@ describe("cvMap", () => {
   it("gives an empty map for missing values", () => {
     expect(cvMap(null)).toEqual({});
     expect(cvMap(undefined)).toEqual({});
+  });
+});
+
+describe("COL", () => {
+  it("maps each column name to itself", () => {
+    for (const [k, v] of Object.entries(COL)) expect(v).toBe(k);
+    expect(COL.anchor_protein).toBe("anchor_protein");
   });
 });

@@ -13,6 +13,7 @@ import type { DatasetTables, TableRef } from "../../lib/report";
 import { PROFILE_MAX_FEATURES as MAX_FEATURES, peptidoformProfile, profileSource, runNames, sampleMedians, type Channel } from "../../lib/queries/profile";
 import { sampleMeta } from "../../lib/queries/quant";
 import { settings } from "../../lib/settings";
+import { COL } from "../../lib/qpx";
 
 const props = defineProps<{ ds: DatasetInfo; t: DatasetTables; peptidoform: string; fileBase: string }>();
 
@@ -58,10 +59,10 @@ async function load() {
 
 /** Sample metadata and the full run list, shared with the Quantification tab cache. */
 async function loadContext() {
-  if (!meta.value.size && props.t.sample?.cols.has("sample_accession")) {
+  if (!meta.value.size && props.t.sample?.cols.has(COL.sample_accession)) {
     meta.value = await sampleMeta(props.ds, props.t.sample);
   }
-  if (!allRuns.value.length && props.t.run?.cols.has("run_file_name")) {
+  if (!allRuns.value.length && props.t.run?.cols.has(COL.run_file_name)) {
     allRuns.value = await runNames(props.ds, props.t.run);
   }
 }
@@ -69,7 +70,7 @@ async function loadContext() {
 /** Median log2 intensity of every sample over all target evidence, for normalisation. */
 async function loadMedians() {
   const S = src.value;
-  if (!S || !S.cols.has("intensities") || medians.value || medBusy.value) return;
+  if (!S || !S.cols.has(COL.intensities) || medians.value || medBusy.value) return;
   medBusy.value = true;
   try {
     medians.value = await sampleMedians(props.ds, props.t, S);

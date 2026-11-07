@@ -12,6 +12,7 @@ import { PEPTIDOFORM_LIMIT as LIMIT, peptidoformEvidence, searchPeptidoforms } f
 import { modificationCounts } from "../../lib/queries/ptms";
 import { fmtBytes, listText } from "../../lib/format";
 import { openProtein, state } from "../../store";
+import { COL } from "../../lib/qpx";
 
 const props = defineProps<{ ds: DatasetInfo; t: DatasetTables; fileBase: string; accession?: string }>();
 
@@ -27,7 +28,10 @@ const scale = ref<ViewScale | null>(null);
 const large = computed(() => !!scale.value?.large);
 // Row-group statistics only help when the peptide is the leading sort key
 // (relayouted psm views; feature views lead with anchor_protein).
-const sorted = computed(() => ["peptidoform", "sequence"].includes(scale.value?.sortedBy[0] ?? ""));
+const sorted = computed(() => {
+  const first = scale.value?.sortedBy[0];
+  return first === COL.peptidoform || first === COL.sequence;
+});
 const waiting = ref(false);
 const modsLoaded = ref(false);
 const modsBusy = ref(false);
@@ -135,7 +139,7 @@ watch(
 );
 
 async function loadMods() {
-  if (!ev || modsLoaded.value || modsBusy.value || !ev.cols.has("modifications")) return;
+  if (!ev || modsLoaded.value || modsBusy.value || !ev.cols.has(COL.modifications)) return;
   modsBusy.value = true;
   try {
     modNames.value = (await modificationCounts(props.ds, ev)).map((m) => String(m.name)).filter((x) => x && x !== "null");
@@ -150,7 +154,7 @@ async function loadMods() {
 onMounted(async () => {
   if (!ev) return;
   hasSpectra(props.t.psm)
-    .then((v) => (spectra.value = v && !!props.t.psm?.cols.has("peptidoform")))
+    .then((v) => (spectra.value = v && !!props.t.psm?.cols.has(COL.peptidoform)))
     .catch((e) => (error.value = String(e?.message ?? e)));
   try {
     scale.value = await viewScale(ev);
@@ -191,7 +195,7 @@ onMounted(async () => {
         <option value="exact">exact</option>
       </select>
       <select
-        v-if="modNames.length || (large && ev.cols.has('modifications'))"
+        v-if="modNames.length || (large && ev.cols.has(COL.modifications))"
         v-model="mod"
         :title="modsLoaded ? 'Only peptidoforms carrying this modification' : 'Listing the modifications reads the modifications column of the whole file'"
         @focus="loadMods"

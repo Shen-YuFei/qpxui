@@ -42,6 +42,7 @@ import {
   type ProteinSummary,
   type QuantMatrix,
 } from "../../lib/quant";
+import { COL } from "../../lib/qpx";
 
 const props = defineProps<{ ds: DatasetInfo; t: DatasetTables; fileBase: string }>();
 
@@ -88,7 +89,7 @@ async function build() {
     contaminant.value = q.contaminant;
     byRunOnly.value = q.byRunOnly;
 
-    if (props.t.sample?.cols.has("sample_accession")) meta.value = await sampleMeta(props.ds, props.t.sample);
+    if (props.t.sample?.cols.has(COL.sample_accession)) meta.value = await sampleMeta(props.ds, props.t.sample);
     groupBy.value = groupOptions.value[0] ?? "";
     const want = state.proteinFocus;
     focus.value = want && raw.value.proteins.includes(want) ? want : (shownProts.value[0]?.protein ?? null);

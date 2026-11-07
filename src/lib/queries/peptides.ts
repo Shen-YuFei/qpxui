@@ -2,6 +2,7 @@
 // peptidoform's per-run evidence (features, or PSMs when they carry spectra).
 import { runSql } from "../duck";
 import { ident, intensitySumExpr, likePattern, lit, objects, targetWhere, type TableRef } from "../report";
+import { COL } from "../qpx";
 
 /** Rows a search lists; one more is read to tell that there are more. */
 export const PEPTIDOFORM_LIMIT = 500;
@@ -27,13 +28,13 @@ export function peptidoformWhere(ev: TableRef, f: PeptidoformFilter): string {
       : f.mode === "prefix" ? `starts_with(${ev.seq}, ${lit(aa)})`
       : `contains(${ev.seq}, ${lit(aa)})`;
     // Also match peptidoform text (e.g. "M[Oxidation]" or "UNIMOD:21").
-    const pfCond = ev.cols.has("peptidoform") && /[[\]:+]/.test(f.q) ? ` OR peptidoform ILIKE ${likePattern(f.q.trim())}` : "";
+    const pfCond = ev.cols.has(COL.peptidoform) && /[[\]:+]/.test(f.q) ? ` OR ${COL.peptidoform} ILIKE ${likePattern(f.q.trim())}` : "";
     parts.push(`(${aa ? seqCond : "FALSE"}${pfCond})`);
   }
-  if (f.mod && ev.cols.has("modifications")) {
-    parts.push(`list_contains(list_transform(modifications, x -> x.name), ${lit(f.mod)})`);
+  if (f.mod && ev.cols.has(COL.modifications)) {
+    parts.push(`list_contains(list_transform(${COL.modifications}, x -> x.name), ${lit(f.mod)})`);
   }
-  if (f.minCharge && ev.cols.has("charge")) parts.push(`charge >= ${Number(f.minCharge)}`);
+  if (f.minCharge && ev.cols.has(COL.charge)) parts.push(`${COL.charge} >= ${Number(f.minCharge)}`);
   return parts.join(" AND ");
 }
 
@@ -47,22 +48,22 @@ export async function searchPeptidoforms(
 ): Promise<{ rows: Record<string, any>[]; truncated: boolean }> {
   const has = (c: string) => ev.cols.has(c);
   const isum = intensitySumExpr(ev);
-  const pf = has("peptidoform") ? "peptidoform" : ev.seq;
+  const pf = has(COL.peptidoform) ? COL.peptidoform : ev.seq;
   const sel = [
     `${pf} AS peptidoform`,
     `any_value(${ev.seq}) AS sequence`,
-    has("modifications") ? "any_value(modifications) AS modifications" : null,
+    has(COL.modifications) ? `any_value(${COL.modifications}) AS modifications` : null,
     prot ? `any_value(${prot}) AS protein` : null,
-    has("gg_names") ? "any_value(gg_names) AS genes" : null,
-    has("charge") ? "list_sort(list_distinct(list(charge))) AS charges" : null,
+    has(COL.gg_names) ? `any_value(${COL.gg_names}) AS genes` : null,
+    has(COL.charge) ? `list_sort(list_distinct(list(${COL.charge}))) AS charges` : null,
     "count(*)::BIGINT AS n_ev",
-    has("run_file_name") ? "count(DISTINCT run_file_name)::BIGINT AS runs" : null,
-    has("posterior_error_probability") ? "min(posterior_error_probability) AS best_pep" : null,
+    has(COL.run_file_name) ? `count(DISTINCT ${COL.run_file_name})::BIGINT AS runs` : null,
+    has(COL.posterior_error_probability) ? `min(${COL.posterior_error_probability}) AS best_pep` : null,
     isum ? `avg(CASE WHEN ${isum} > 0 THEN log10(${isum}) END) AS log_int` : null,
   ].filter(Boolean);
   const r = await runSql(
     `SELECT ${sel.join(", ")} FROM ${ident(ev.table)} WHERE ${peptidoformWhere(ev, f)}
-       GROUP BY 1 ORDER BY n_ev DESC, peptidoform LIMIT ${PEPTIDOFORM_LIMIT + 1}`,
+       GROUP BY 1 ORDER BY n_ev DESC, ${COL.peptidoform} LIMIT ${PEPTIDOFORM_LIMIT + 1}`,
     PEPTIDOFORM_LIMIT + 1
   );
   const out = objects(r);
@@ -74,21 +75,21 @@ export async function searchPeptidoforms(
 export async function peptidoformEvidence(E: TableRef, peptidoform: string): Promise<Record<string, any>[]> {
   const has = (c: string) => E.cols.has(c);
   const isum = intensitySumExpr(E);
-  const pfCol = has("peptidoform") ? "peptidoform" : E.seq;
+  const pfCol = has(COL.peptidoform) ? COL.peptidoform : E.seq;
   const scanList = /\[\]|list/i.test(E.types.scan ?? "");
   const sel = [
-    has("run_file_name") ? "run_file_name" : null,
-    has("scan") ? (scanList ? "scan[1] AS scan_no" : "scan AS scan_no") : null,
-    has("charge") ? "charge" : null,
-    has("rt") ? "rt / 60.0 AS rt_min" : null,
-    has("observed_mz") ? "observed_mz" : null,
-    has("mass_error_ppm") ? "mass_error_ppm" : null,
-    has("posterior_error_probability") ? "posterior_error_probability" : null,
+    has(COL.run_file_name) ? COL.run_file_name : null,
+    has(COL.scan) ? (scanList ? `${COL.scan}[1] AS scan_no` : `${COL.scan} AS scan_no`) : null,
+    has(COL.charge) ? COL.charge : null,
+    has(COL.rt) ? `${COL.rt} / 60.0 AS rt_min` : null,
+    has(COL.observed_mz) ? COL.observed_mz : null,
+    has(COL.mass_error_ppm) ? COL.mass_error_ppm : null,
+    has(COL.posterior_error_probability) ? COL.posterior_error_probability : null,
     isum ? `CASE WHEN ${isum} > 0 THEN log10(${isum}) END AS log_int` : null,
   ].filter(Boolean);
   const r = await runSql(
     `SELECT ${sel.join(", ")} FROM ${ident(E.table)} WHERE ${targetWhere(E)} AND ${pfCol} = ${lit(peptidoform)}
-       ORDER BY ${has("run_file_name") ? "run_file_name" : "1"}${has("posterior_error_probability") ? ", posterior_error_probability" : ""} LIMIT 5000`
+       ORDER BY ${has(COL.run_file_name) ? COL.run_file_name : "1"}${has(COL.posterior_error_probability) ? `, ${COL.posterior_error_probability}` : ""} LIMIT 5000`
   );
   return objects(r);
 }

@@ -10,6 +10,7 @@ import { fmtNum } from "../../lib/format";
 import { useSlots } from "../../lib/useSlots";
 import { useLargeGate } from "../../lib/useLargeGate";
 import LargeGate from "./LargeGate.vue";
+import { COL } from "../../lib/qpx";
 
 const props = defineProps<{ ds: DatasetInfo; t: DatasetTables; fileBase: string }>();
 
@@ -29,7 +30,7 @@ const { slots, progress, run } = useSlots(KEYS);
 
 /** Per-run metrics from the evidence view joined with PSM / PG / run views. */
 async function loadRuns() {
-  if (!ev || !ev.cols.has("run_file_name")) {
+  if (!ev || !ev.cols.has(COL.run_file_name)) {
     runBusy.value = false;
     return;
   }

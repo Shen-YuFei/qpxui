@@ -7,6 +7,7 @@ import { scanBytes, viewScale, type ViewScale } from "../lib/report";
 import { columnHistogram, isNumericScalar, summaryCounts } from "../lib/queries/summary";
 import { chartTheme } from "../lib/charts";
 import { fmtBytes } from "../lib/format";
+import { COL } from "../lib/qpx";
 
 const props = defineProps<{ view: ViewInfo }>();
 const table = ref("");
@@ -18,7 +19,7 @@ const busy = ref(true);
 const scale = ref<ViewScale | null>(null);
 const held = ref(false);
 const heldBytes = computed(() =>
-  scale.value ? scanBytes(scale.value, ["charge", "anchor_protein", "pg_accessions", "run_file_name", "peptide_qvalue", "posterior_error_probability", "missed_cleavages", numericCol.value]) : 0
+  scale.value ? scanBytes(scale.value, [COL.charge, COL.anchor_protein, COL.pg_accessions, COL.run_file_name, COL.peptide_qvalue, COL.posterior_error_probability, COL.missed_cleavages, numericCol.value]) : 0
 );
 
 const cards = ref<any[]>([]);

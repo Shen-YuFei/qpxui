@@ -2,6 +2,7 @@
 // missed cleavages, and a histogram of one numeric column.
 import { runSql } from "../duck";
 import { ident } from "../report";
+import { COL } from "../qpx";
 
 /** Whether a column of this DuckDB type can be binned. Only types whose
  * scalar base is numeric qualify: nested types (MAP, LIST, ARRAY, STRUCT,
@@ -38,22 +39,22 @@ export async function summaryCounts(table: string, names: Set<string>, unit: str
   const push = (c: CountChart) => {
     if (c.values.length) list.push(c);
   };
-  if (names.has("charge")) {
-    push(await counts("Charge distribution", `SELECT charge AS k, COUNT(*) AS n FROM ${t} GROUP BY 1 ORDER BY 1`, "charge"));
+  if (names.has(COL.charge)) {
+    push(await counts("Charge distribution", `SELECT ${COL.charge} AS k, COUNT(*) AS n FROM ${t} GROUP BY 1 ORDER BY 1`, "charge"));
   }
-  if (names.has("anchor_protein") || names.has("pg_accessions")) {
-    const col = names.has("anchor_protein") ? "anchor_protein" : "pg_accessions";
-    push(await counts(`Top ${col === "anchor_protein" ? "anchor proteins" : "protein groups"} by ${unit}`, `SELECT ${col} AS k, COUNT(*) AS n FROM ${t} WHERE ${col} IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 25`, "protein"));
+  if (names.has(COL.anchor_protein) || names.has(COL.pg_accessions)) {
+    const col = names.has(COL.anchor_protein) ? COL.anchor_protein : COL.pg_accessions;
+    push(await counts(`Top ${col === COL.anchor_protein ? "anchor proteins" : "protein groups"} by ${unit}`, `SELECT ${col} AS k, COUNT(*) AS n FROM ${t} WHERE ${col} IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 25`, "protein"));
   }
-  if (names.has("run_file_name")) {
-    push(await counts(`${unit[0].toUpperCase()}${unit.slice(1)} per run`, `SELECT run_file_name AS k, COUNT(*) AS n FROM ${t} GROUP BY 1 ORDER BY 2 DESC LIMIT 25`, "run"));
+  if (names.has(COL.run_file_name)) {
+    push(await counts(`${unit[0].toUpperCase()}${unit.slice(1)} per run`, `SELECT ${COL.run_file_name} AS k, COUNT(*) AS n FROM ${t} GROUP BY 1 ORDER BY 2 DESC LIMIT 25`, "run"));
   }
-  if (names.has("peptide_qvalue") || names.has("posterior_error_probability")) {
-    const col = names.has("peptide_qvalue") ? "peptide_qvalue" : "posterior_error_probability";
+  if (names.has(COL.peptide_qvalue) || names.has(COL.posterior_error_probability)) {
+    const col = names.has(COL.peptide_qvalue) ? COL.peptide_qvalue : COL.posterior_error_probability;
     push(await counts(`${col} distribution`, `SELECT round(${col},2) AS k, COUNT(*) AS n FROM ${t} WHERE ${col} IS NOT NULL GROUP BY 1 ORDER BY 1`, "q"));
   }
-  if (names.has("missed_cleavages")) {
-    push(await counts("Missed cleavages", `SELECT missed_cleavages AS k, COUNT(*) AS n FROM ${t} GROUP BY 1 ORDER BY 1`, "mc"));
+  if (names.has(COL.missed_cleavages)) {
+    push(await counts("Missed cleavages", `SELECT ${COL.missed_cleavages} AS k, COUNT(*) AS n FROM ${t} GROUP BY 1 ORDER BY 1`, "mc"));
   }
   return list;
 }

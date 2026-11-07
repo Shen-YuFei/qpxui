@@ -1,3 +1,4 @@
+import { COL } from "./qpx";
 // Protein x sample abundance matrix and the statistics the Quantification tab
 // draws from it: normalisation, sample correlation, clustering order and PCA.
 
@@ -192,11 +193,11 @@ export function groupingColumns(samples: string[], meta: Map<string, Record<stri
   if (!rows.length) return [];
   const out: string[] = [];
   for (const k of Object.keys(rows[0])) {
-    if (k === "sample_accession") continue;
+    if (k === COL.sample_accession) continue;
     const vals = new Set(rows.map((r) => (r[k] == null ? null : String(r[k]))).filter((v) => v !== null && v !== ""));
     if (vals.size >= 2 && vals.size < rows.length && vals.size <= 12) out.push(k);
   }
-  const pref = ["disease", "histologic_subtype", "organism_part", "cell_type", "cell_line", "sex", "developmental_stage"];
+  const pref = [COL.disease, "histologic_subtype", COL.organism_part, COL.cell_type, COL.cell_line, COL.sex, COL.developmental_stage];
   return out.sort((a, b) => ((pref.indexOf(a) + 1 || 99) - (pref.indexOf(b) + 1 || 99)) || a.localeCompare(b));
 }
 

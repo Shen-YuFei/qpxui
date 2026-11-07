@@ -17,6 +17,7 @@ import {
 } from "../../lib/queries/proteins";
 import { fmtBytes, listText } from "../../lib/format";
 import { searchFor, state } from "../../store";
+import { COL } from "../../lib/qpx";
 
 const props = defineProps<{ ds: DatasetInfo; t: DatasetTables; fileBase: string }>();
 
@@ -121,7 +122,7 @@ async function loadDetail(acc: string) {
       peptides.value = await proteinPeptidoforms(ev, acc);
       perRun.value = await proteinRunsChart(ev, acc, evName);
     }
-    if (pg && pg.cols.has("run_file_name")) {
+    if (pg && pg.cols.has(COL.run_file_name)) {
       pgRuns.value = await proteinGroupRuns(pg, acc);
       if (!detail.value?.names && pgRuns.value.length) {
         detail.value = { ...detail.value, ...(await proteinGroupNames(pg, acc)) };

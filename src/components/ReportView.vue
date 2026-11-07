@@ -14,6 +14,7 @@ import ReportSamples from "./report/ReportSamples.vue";
 import ReportProteins from "./report/ReportProteins.vue";
 import ReportPeptides from "./report/ReportPeptides.vue";
 import ReportQuant from "./report/ReportQuant.vue";
+import { COL } from "../lib/qpx";
 
 const props = defineProps<{ ds: DatasetInfo }>();
 
@@ -51,8 +52,8 @@ const tabs = computed(() => {
   const ev = evidence(t);
   const ok: Record<ReportTab, boolean> = {
     overview: !!ev,
-    qc: !!ev?.cols.has("run_file_name"),
-    ptms: !!ev?.cols.has("modifications"),
+    qc: !!ev?.cols.has(COL.run_file_name),
+    ptms: !!ev?.cols.has(COL.modifications),
     samples: !!(t.sample || t.run),
     proteins: !!(t.pg || (ev && proteinExpr(ev))),
     peptides: !!ev,
@@ -141,7 +142,7 @@ async function loadHeader(t: DatasetTables) {
       runMeta.value.instruments = r.instruments;
       runMeta.value.enzymes = r.enzymes;
     }
-    if (t.sample?.cols.has("organism")) {
+    if (t.sample?.cols.has(COL.organism)) {
       runMeta.value.organisms = await sampleOrganisms(props.ds, t.sample);
     }
   } catch {
