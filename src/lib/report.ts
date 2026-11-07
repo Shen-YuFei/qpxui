@@ -206,18 +206,10 @@ export async function largeViews(refs: (TableRef | undefined)[]): Promise<{ ref:
   return out;
 }
 
-/** Column names from a `qpx.sort_order` value: a JSON list of names or of
- * `{column|name: …}` objects, or a comma-separated string. */
+/** Column names from a `qpx.sort_order` value, which QPX relayout writes as
+ * the comma-separated sort columns. */
 export function parseSortOrder(v: string): string[] {
-  try {
-    const j = JSON.parse(v);
-    const list = Array.isArray(j) ? j : Array.isArray(j?.columns) ? j.columns : [];
-    return list
-      .map((x: any) => (typeof x === "string" ? x : Array.isArray(x) ? x[0] : x?.column ?? x?.name))
-      .filter((x: unknown): x is string => typeof x === "string");
-  } catch {
-    return v.split(",").map((x) => x.trim().split(/\s+/)[0]).filter(Boolean);
-  }
+  return v.split(",").map((x) => x.trim()).filter(Boolean);
 }
 
 /** WHERE clause keeping target (non-decoy) rows only. */

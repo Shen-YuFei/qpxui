@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { QueryResult } from "./duck";
-import { histogramData, ident, likePattern, lit, proteinExpr, proteinMatchWhere, sampleMapSql, targetWhere, type TableRef } from "./report";
+import { histogramData, ident, likePattern, lit, parseSortOrder, proteinExpr, proteinMatchWhere, sampleMapSql, targetWhere, type TableRef } from "./report";
 
 function ref(types: Record<string, string>): TableRef {
   return {
@@ -53,5 +53,11 @@ describe("histogramData", () => {
   it("places counts at bin centres", () => {
     const r: QueryResult = { columns: ["bin", "n", "lo", "hi"], rows: [[0, 3, 0, 4], [3, 1, 0, 4]], rowCount: 2, truncated: false };
     expect(histogramData(r, 4)).toEqual({ labels: ["0.50", "1.50", "2.50", "3.50"], values: [3, 0, 0, 1] });
+  });
+});
+
+describe("parseSortOrder", () => {
+  it("splits the comma-separated sort columns", () => {
+    expect(parseSortOrder("anchor_protein,peptidoform,charge")).toEqual(["anchor_protein", "peptidoform", "charge"]);
   });
 });

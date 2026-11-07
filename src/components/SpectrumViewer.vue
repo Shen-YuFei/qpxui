@@ -481,17 +481,10 @@ async function load() {
 }
 
 /** `cv_params` as name -> value. Files store it as a list of
- * {cv_name, cv_value} structs, a MAP, a plain struct or a JSON string. */
-function cvMap(raw: unknown): Record<string, string> {
+ * {cv_name, cv_value} structs, a MAP, or (after a QPX 1.3 relayout) a struct
+ * with one field per name. */
+function cvMap(v: unknown): Record<string, string> {
   const out: Record<string, string> = {};
-  let v = raw;
-  if (typeof v === "string") {
-    try {
-      v = JSON.parse(v);
-    } catch {
-      return out;
-    }
-  }
   if (Array.isArray(v)) {
     for (const p of v as any[]) {
       if (!p || typeof p !== "object") continue;
