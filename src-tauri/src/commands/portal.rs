@@ -47,24 +47,25 @@ fn run_cache_dir(root: &std::path::Path, url: &str) -> PathBuf {
 }
 
 /// Size of a remote file. The portal answers HEAD with 405, so fall back to a
-/// one-byte ranged GET and read the total from `Content-Range`.
+/// one-byte ranged GET and read the total from `Content-Range`. Both requests
+/// stop as soon as `token` is cancelled.
 async fn remote_size(client: &Client, url: &str, token: &AtomicBool) -> Result<u64, String> {
-    // reqwest's `.content_length()` returns the *body* length, which is 0 for
-    // a HEAD reply, so size HEADs by the Content-Length header directly.
-    if let Ok(r) = client.head(url).send().await {
-        if r.status().is_success() {
-            let cl = r
-                .headers()
-                .get(reqwest::header::CONTENT_LENGTH)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.trim().parse::<u64>().ok())
-                .filter(|n| *n > 0);
-            if let Some(n) = cl {
-                return Ok(n);
+    xfers::cancellable(token, async {
+        // reqwest's `.content_length()` returns the *body* length, which is 0
+        // for a HEAD reply, so size HEADs by the Content-Length header directly.
+        if let Ok(r) = client.head(url).send().await {
+            if r.status().is_success() {
+                let cl = r
+                    .headers()
+                    .get(reqwest::header::CONTENT_LENGTH)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.trim().parse::<u64>().ok())
+                    .filter(|n| *n > 0);
+                if let Some(n) = cl {
+                    return Ok(n);
+                }
             }
         }
-    }
-    let total = xfers::cancellable(token, async {
         let r = client
             .get(url)
             .header(reqwest::header::RANGE, "bytes=0-0")
@@ -94,8 +95,7 @@ async fn remote_size(client: &Client, url: &str, token: &AtomicBool) -> Result<u
             })
             .unwrap_or(0))
     })
-    .await?;
-    Ok(total)
+    .await
 }
 
 async fn get_html(url: &str) -> Result<String, String> {
@@ -1037,6 +1037,28 @@ mod tests {
             }
         });
         format!("http://{addr}")
+    }
+
+    /// Accepts connections and never answers them.
+    async fn silent_server() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut open = Vec::new();
+            loop {
+                open.push(listener.accept().await.unwrap().0);
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn sizing_stops_when_cancelled() {
+        let (client, url) = (Client::new(), format!("{}/x", silent_server().await));
+        let cancelled = AtomicBool::new(true);
+        let size = remote_size(&client, &url, &cancelled);
+        let r = tokio::time::timeout(std::time::Duration::from_secs(2), size).await;
+        assert_eq!(r.expect("cancel is prompt"), Err("cancelled".to_string()));
     }
 
     #[tokio::test]
