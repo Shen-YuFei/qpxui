@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, ref } from "vue";
 import { api, type DatasetInfo, type S3Listing, type ViewInfo } from "../lib/api";
 import { loadDatasets } from "../store";
-import { installProgress, overall, progress } from "../lib/progress";
-import { isCancelled } from "../lib/errors";
-import { cancelDownload, confirmDownload, totalBytes, trackDownload, untrackDownload } from "../lib/downloads";
+import { confirmDownload, totalBytes, useDownload } from "../lib/downloads";
+import { fmtBytes } from "../lib/format";
+import DownloadProgress from "./DownloadProgress.vue";
 
 const bucket = ref("");
 const prefix = ref("");
@@ -12,36 +12,12 @@ const busy = ref(false);
 const error = ref("");
 const listing = ref<S3Listing | null>(null);
 const checked = ref<Record<string, boolean>>({});
-const downloadId = ref("");
-const cancelling = ref(false);
+const { id: downloadId, cancelling, files: downloadFiles, cancel, run: runDownload, unmounted } = useDownload();
 
 const remoteDatasets = computed<DatasetInfo[]>(() => listing.value?.datasets ?? []);
 
 const selectedCount = computed(() => selection().length);
 const selectedBytes = computed(() => totalBytes(selection().map((s) => s.view)));
-
-function generateId(): string {
-  return (crypto?.randomUUID?.() ?? `d${Date.now()}-${Math.random().toString(36).slice(2)}`);
-}
-function clearProgressFor(files: string[]) {
-  for (const f of files) delete progress[f];
-}
-
-async function cancel() {
-  if (!downloadId.value) return;
-  cancelling.value = true;
-  await cancelDownload(downloadId.value);
-}
-
-// Leaving the picker ("New source", switching source) cancels its download,
-// and a download that still finishes must not load into the new source.
-let unmounted = false;
-onBeforeUnmount(() => {
-  unmounted = true;
-  void cancelDownload(downloadId.value);
-});
-
-onMounted(installProgress);
 
 async function list() {
   busy.value = true;
@@ -109,34 +85,18 @@ async function loadSelection() {
     const sel = selection();
     if (!sel.length) throw new Error("Select at least one view to load.");
     if (!(await confirmDownload(sel.map((s) => s.view), "s3"))) return;
-    // The user may have left this source while the dialog was open.
-    if (unmounted) return;
-
-    // Download to cache (offline) with progress bars.
+    // The user may have left this source while the dialog was open, and a
+    // download that still finishes must not load into the new source.
+    if (unmounted()) return;
     const paths = sel.map((s) => s.view.path);
-    const files = sel.map((s) => s.view.name);
-    cancelling.value = false;
-    const id = generateId();
-    downloadId.value = id;
-    trackDownload(id);
-    try {
-      const locals = await api.cacheS3Views(listing.value!.bucket, paths, id);
-      if (unmounted) return;
-      const entries = sel.map((s, i) => ({ prefix: s.prefix, local: locals[i] }));
-      loadDatasets(groupLocal(entries), "s3");
-    } catch (e: any) {
-      if (isCancelled(e)) {
-        error.value = "Download cancelled; partial files were removed.";
-        clearProgressFor(files);
-      } else {
-        clearProgressFor(files);
-        throw e;
-      }
-    } finally {
-      untrackDownload(id);
-      if (downloadId.value === id) downloadId.value = "";
-      cancelling.value = false;
+    const locals = await runDownload((id) => api.cacheS3Views(listing.value!.bucket, paths, id));
+    if (unmounted()) return;
+    if (!locals) {
+      error.value = "Download cancelled; partial files were removed.";
+      return;
     }
+    const entries = sel.map((s, i) => ({ prefix: s.prefix, local: locals[i] }));
+    loadDatasets(groupLocal(entries), "s3");
   } catch (e: any) {
     error.value = String(e);
   } finally {
@@ -162,24 +122,6 @@ function toggle(ds: DatasetInfo) {
   const allOn = ds.views.every((v) => checked.value[v.path]);
   for (const v of ds.views) checked.value[v.path] = !allOn;
 }
-
-function fmt(n: number): string {
-  if (!n) return "0 B";
-  const u = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(n) / Math.log(1024));
-  return `${(n / Math.pow(1024, i)).toFixed(1)} ${u[i]}`;
-}
-
-function pct(n: number): string {
-  return `${Math.max(0, Math.min(100, n)).toFixed(0)}%`;
-}
-
-const activeBars = computed(() =>
-  Object.entries(progress)
-    .filter(([, b]) => b.phase === "downloading")
-    .map(([name, b]) => ({ name, ...b }))
-);
-const overallPct = computed(() => overall());
 
 const streamHint =
   "Opens the parquet in place on S3 — each query fetches only the byte ranges it needs " +
@@ -208,7 +150,7 @@ const streamHint =
 
     <template v-if="listing">
       <div class="toolbar">
-        <span class="muted">{{ remoteDatasets.length }} dataset(s) found<template v-if="selectedCount"> · {{ selectedCount }} selected · {{ fmt(selectedBytes) }}</template></span>
+        <span class="muted">{{ remoteDatasets.length }} dataset(s) found<template v-if="selectedCount"> · {{ selectedCount }} selected · {{ fmtBytes(selectedBytes) }}</template></span>
         <div class="actions">
           <button @click="streamSelection" :disabled="busy || !selectedCount" :title="streamHint">
             ⚡ Stream (lazy, no download)
@@ -220,24 +162,14 @@ const streamHint =
       </div>
       <div v-if="selectedCount" class="mode-hint muted">{{ streamHint }}</div>
 
-      <!-- progress bars for downloads -->
-      <div v-if="downloadId" class="progress-box">
-        <div class="overall">
-          <span class="muted">{{ cancelling ? "Cancelling…" : activeBars.length ? "Downloading…" : "Checking sizes and disk space…" }}</span>
-          <span class="right">
-            <span class="muted">{{ overallPct !== null ? pct(overallPct) : "" }}</span>
-            <button class="cancel" @click="cancel" :disabled="!downloadId || cancelling">Cancel download</button>
-          </span>
-        </div>
-        <div class="bar"><div class="fill" :style="{ width: pct(overallPct ?? 0) }"></div></div>
-        <div v-for="b in activeBars" :key="b.file" class="file-bar">
-          <div class="file-row">
-            <span class="mono file-name">{{ b.file }}</span>
-            <span class="muted">{{ fmt(b.done) }} / {{ b.total ? fmt(b.total) : "…" }} · {{ pct(b.percent) }}</span>
-          </div>
-          <div class="bar"><div class="fill" :style="{ width: pct(b.percent) }"></div></div>
-        </div>
-      </div>
+      <DownloadProgress
+        v-if="downloadId"
+        class="download"
+        :files="downloadFiles"
+        :cancelling="cancelling"
+        label="Downloading…"
+        @cancel="cancel"
+      />
 
       <div v-if="!remoteDatasets.length" class="empty">
         No QPX datasets (named <span class="mono">prefix.view.parquet</span>) were found under this
@@ -255,7 +187,7 @@ const streamHint =
             <label v-for="v in ds.views" :key="v.path" class="view">
               <input v-model="checked[v.path]" type="checkbox" />
               <span class="mono view-name">{{ v.name }}</span>
-              <span class="muted">{{ fmt(v.sizeBytes) }}</span>
+              <span class="muted">{{ fmtBytes(v.sizeBytes) }}</span>
             </label>
           </div>
         </div>
@@ -300,73 +232,8 @@ h3 {
   font-size: 11px;
   margin: -2px 0 10px;
 }
-.modes {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-.mode {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  color: var(--muted);
-  cursor: pointer;
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  padding: 4px 10px;
-}
-.mode.on {
-  color: var(--text);
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-}
-.progress-box {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px;
+.download {
   margin-bottom: 12px;
-  background: var(--bg-soft);
-}
-.overall,
-.file-row {
-  display: flex;
-  justify-content: space-between;
-  font-size: 12px;
-  margin-bottom: 4px;
-}
-.right {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-}
-.cancel {
-  padding: 3px 12px;
-  font-size: 12px;
-  border-color: #d33;
-  color: #d33;
-}
-.file-name {
-  max-width: 60%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.bar {
-  height: 8px;
-  background: var(--border);
-  border-radius: 6px;
-  overflow: hidden;
-  margin-bottom: 10px;
-}
-.fill {
-  height: 100%;
-  background: var(--accent);
-  border-radius: 6px;
-  transition: width 0.15s linear;
-}
-.file-bar:last-child .bar {
-  margin-bottom: 0;
 }
 .ds {
   border: 1px solid var(--border);

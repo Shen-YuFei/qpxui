@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { api, type DatasetInfo, type PortalDataset, type PortalFacets, type PortalSearchResult, type ViewInfo } from "../lib/api";
 import { loadDatasets } from "../store";
-import { installProgress, overall, progress } from "../lib/progress";
-import { cancelDownload, confirmDownload, totalBytes, trackDownload, untrackDownload } from "../lib/downloads";
+import { confirmDownload, totalBytes, useDownload } from "../lib/downloads";
+import DownloadProgress from "./DownloadProgress.vue";
 import PeptideSearchPane from "./PeptideSearchPane.vue";
 
 const TABS = [
@@ -30,8 +30,7 @@ const selected = ref<PortalDataset | null>(null);
 const views = ref<ViewInfo[]>([]);
 const checked = ref<Record<string, boolean>>({});
 const downloading = ref(false);
-const downloadId = ref("");
-const cancelling = ref(false);
+const { id: downloadId, cancelling, files: downloadFiles, cancel, run: runDownload, unmounted } = useDownload();
 
 const SORTS: { key: string; label: string }[] = [
   { key: "peptides", label: "Most peptides" },
@@ -39,27 +38,6 @@ const SORTS: { key: string; label: string }[] = [
   { key: "samples", label: "Most samples" },
   { key: "accession", label: "Accession A–Z" },
 ];
-
-function generateId(): string {
-  return crypto?.randomUUID?.() ?? `d${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-function isCancelledErr(e: unknown): boolean {
-  return /cancell?/i.test(String(e));
-}
-function clearProgressFor(files: string[]) {
-  for (const f of files) delete progress[f];
-}
-async function cancel() {
-  if (!downloadId.value) return;
-  cancelling.value = true;
-  await cancelDownload(downloadId.value);
-}
-
-let unmounted = false;
-onBeforeUnmount(() => {
-  unmounted = true;
-  void cancelDownload(downloadId.value);
-});
 
 function rowKey(ds: PortalDataset): string {
   return ds.datasetRef ?? ds.accession;
@@ -171,34 +149,20 @@ async function loadSelection() {
     const sel = views.value.filter((v) => checked.value[v.path]);
     if (!sel.length) throw new Error("Select at least one view to load.");
     if (!(await confirmDownload(sel, "portal"))) return;
-    if (unmounted || selected.value !== target) return;
-    const files = sel.map((v) => v.name);
-    cancelling.value = false;
-    const id = generateId();
-    downloadId.value = id;
-    trackDownload(id);
-    try {
-      const local = await api.portalCacheViews(sel.map((v) => v.path), id);
-      if (unmounted || selected.value !== target) return;
-      const ds: DatasetInfo = {
-        prefix: target.accession,
-        path: `quantms portal / ${portalName(target)}`,
-        views: local.sort((a, b) => a.view.localeCompare(b.view)),
-      };
-      loadDatasets([ds], "portal | " + target.accession);
-    } catch (e: any) {
-      if (isCancelledErr(e)) {
-        if (!unmounted && selected.value === target) error.value = "Download cancelled; partial files were removed.";
-        clearProgressFor(files);
-      } else {
-        clearProgressFor(files);
-        throw e;
-      }
-    } finally {
-      untrackDownload(id);
-      if (downloadId.value === id) downloadId.value = "";
-      cancelling.value = false;
+    if (unmounted() || selected.value !== target) return;
+    const local = await runDownload((id) => api.portalCacheViews(sel.map((v) => v.path), id));
+    // Left meanwhile (which also cancels): say nothing there.
+    if (unmounted() || selected.value !== target) return;
+    if (!local) {
+      error.value = "Download cancelled; partial files were removed.";
+      return;
     }
+    const ds: DatasetInfo = {
+      prefix: target.accession,
+      path: `quantms portal / ${portalName(target)}`,
+      views: local.sort((a, b) => a.view.localeCompare(b.view)),
+    };
+    loadDatasets([ds], "portal | " + target.accession);
   } catch (e: any) {
     error.value = String(e);
   } finally {
@@ -248,27 +212,12 @@ function doiUrl(doi: string): string {
 }
 
 onMounted(() => {
-  installProgress();
   api.portalFacets().then((f) => (facets.value = f)).catch(() => { /* non-fatal */ });
   load();
 });
 
 const hasPrev = computed(() => page.value > 1);
 const hasNext = computed(() => page.value < results.value.totalPages);
-const activeBars = computed(() =>
-  Object.entries(progress)
-    .filter(([, b]) => b.phase === "downloading")
-    .map(([name, b]) => ({ name, ...b }))
-);
-const overallPct = computed(() => overall());
-function pct(n: number): string {
-  return `${Math.max(0, Math.min(100, n)).toFixed(0)}%`;
-}
-function fmtPx(n: number): string {
-  const u = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(n) / Math.log(1024));
-  return `${(n / Math.pow(1024, i)).toFixed(1)} ${u[i]}`;
-}
 </script>
 
 <template>
@@ -394,23 +343,13 @@ function fmtPx(n: number): string {
 
           <div v-if="error" class="error">{{ error }}</div>
 
-          <div v-if="downloading && downloadId" class="progress-box">
-            <div class="overall">
-              <span class="muted">{{ cancelling ? "Cancelling…" : activeBars.length ? "Transferring to cache…" : "Checking sizes and disk space…" }}</span>
-              <span class="right">
-                <span class="muted">{{ overallPct !== null ? pct(overallPct) : "" }}</span>
-                <button class="cancel" @click="cancel" :disabled="!downloadId || cancelling">Cancel</button>
-              </span>
-            </div>
-            <div class="bar"><div class="fill" :style="{ width: pct(overallPct ?? 0) }"></div></div>
-            <div v-for="b in activeBars" :key="b.file" class="file-bar">
-              <div class="file-row">
-                <span class="mono file-name">{{ b.file }}</span>
-                <span class="muted">{{ fmtPx(b.done) }} / {{ b.total ? fmtPx(b.total) : "…" }} · {{ pct(b.percent) }}</span>
-              </div>
-              <div class="bar"><div class="fill" :style="{ width: pct(b.percent) }"></div></div>
-            </div>
-          </div>
+          <DownloadProgress
+            v-if="downloadId"
+            :files="downloadFiles"
+            :cancelling="cancelling"
+            label="Transferring to cache…"
+            @cancel="cancel"
+          />
 
           <label class="all">
             <input type="checkbox" :checked="views.length > 0 && selectedCount() === views.length" @change="toggleAll" />
@@ -654,53 +593,6 @@ a {
   margin: 8px 0;
   color: var(--err);
   font-size: 12px;
-}
-.progress-box {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px;
-  margin: 8px 0;
-  background: var(--bg-panel);
-}
-.overall,
-.file-row {
-  display: flex;
-  justify-content: space-between;
-  font-size: 12px;
-  margin-bottom: 4px;
-}
-.right {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-}
-.cancel {
-  padding: 3px 12px;
-  font-size: 12px;
-  border-color: #d33;
-  color: #d33;
-}
-.file-name {
-  max-width: 60%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.bar {
-  height: 8px;
-  background: var(--border);
-  border-radius: 6px;
-  overflow: hidden;
-  margin-bottom: 8px;
-}
-.fill {
-  height: 100%;
-  background: var(--accent);
-  border-radius: 6px;
-  transition: width 0.15s linear;
-}
-.file-bar:last-child .bar {
-  margin-bottom: 0;
 }
 .empty {
   padding: 14px 0;

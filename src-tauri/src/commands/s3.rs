@@ -288,7 +288,7 @@ async fn cache_s3_views_impl(
                         .map_err(|e| format!("S3 get {key}: {e}"))?;
                     Ok(chunk.map(|c| (c, body)))
                 });
-                xfers::save(app, token, &name, &local, head, body).await?
+                xfers::save(app, &batch, &name, &local, head, body).await?
             }
         };
         out.push(ViewInfo {

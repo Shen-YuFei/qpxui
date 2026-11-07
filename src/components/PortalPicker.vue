@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { api, type DatasetInfo, type PortalDataset, type ViewInfo } from "../lib/api";
 import { loadDatasets } from "../store";
-import { installProgress, overall, progress } from "../lib/progress";
-import { isCancelled } from "../lib/errors";
-import { cancelDownload, confirmDownload, totalBytes, trackDownload, untrackDownload } from "../lib/downloads";
+import { confirmDownload, totalBytes, useDownload } from "../lib/downloads";
+import { fmtBytes } from "../lib/format";
+import DownloadProgress from "./DownloadProgress.vue";
 
 const rows = ref<PortalDataset[]>([]);
 const selected = ref<PortalDataset | null>(null);
@@ -14,28 +14,7 @@ const checked = ref<Record<string, boolean>>({});
 const busy = ref(false);
 const error = ref("");
 const downloading = ref(false);
-const downloadId = ref("");
-const cancelling = ref(false);
-
-function generateId(): string {
-  return crypto?.randomUUID?.() ?? `d${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-function clearProgressFor(files: string[]) {
-  for (const f of files) delete progress[f];
-}
-async function cancel() {
-  if (!downloadId.value) return;
-  cancelling.value = true;
-  await cancelDownload(downloadId.value);
-}
-
-// Leaving the picker ("New source", switching source) cancels its download,
-// and a download that still finishes must not load into the new source.
-let unmounted = false;
-onBeforeUnmount(() => {
-  unmounted = true;
-  void cancelDownload(downloadId.value);
-});
+const { id: downloadId, cancelling, files: downloadFiles, cancel, run: runDownload, unmounted } = useDownload();
 
 type SortKey = "accession" | "totalSize" | "peptides" | "psmCount" | "proteins" | "samples";
 const SORTS: { key: SortKey; label: string }[] = [
@@ -151,35 +130,20 @@ async function loadSelection() {
     if (!(await confirmDownload(sel, "portal"))) return;
     // The user may have left this dataset or source while the dialog was
     // open; don't start a transfer for a dataset they've already moved on from.
-    if (unmounted || selected.value !== target) return;
-    const files = sel.map((v) => v.name);
-    cancelling.value = false;
-    const id = generateId();
-    downloadId.value = id;
-    trackDownload(id);
-    try {
-      const local = await api.portalCacheViews(sel.map((v) => v.path), id);
-      if (unmounted || selected.value !== target) return;
-      const ds: DatasetInfo = {
-        prefix: target.accession,
-        path: `quantms portal / ${portalName(target)}`,
-        views: local.sort((a, b) => a.view.localeCompare(b.view)),
-      };
-      loadDatasets([ds], "portal | " + target.accession);
-    } catch (e: any) {
-      if (isCancelled(e)) {
-        // Cancelled by switching dataset or source: say nothing there.
-        if (!unmounted && selected.value === target) error.value = "Download cancelled; partial files were removed.";
-        clearProgressFor(files);
-      } else {
-        clearProgressFor(files);
-        throw e;
-      }
-    } finally {
-      untrackDownload(id);
-      if (downloadId.value === id) downloadId.value = "";
-      cancelling.value = false;
+    if (unmounted() || selected.value !== target) return;
+    const local = await runDownload((id) => api.portalCacheViews(sel.map((v) => v.path), id));
+    // Left meanwhile (which also cancels): say nothing there.
+    if (unmounted() || selected.value !== target) return;
+    if (!local) {
+      error.value = "Download cancelled; partial files were removed.";
+      return;
     }
+    const ds: DatasetInfo = {
+      prefix: target.accession,
+      path: `quantms portal / ${portalName(target)}`,
+      views: local.sort((a, b) => a.view.localeCompare(b.view)),
+    };
+    loadDatasets([ds], "portal | " + target.accession);
   } catch (e: any) {
     error.value = String(e);
   } finally {
@@ -212,34 +176,12 @@ function toggleAll() {
   for (const v of views.value) checked.value[v.path] = !allOn;
 }
 
-function fmt(n: number | null | undefined, force?: boolean): string {
-  if (!n) return force === undefined ? "—" : "0 B";
-  const u = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(n) / Math.log(1024));
-  return `${(n / Math.pow(1024, i)).toFixed(1)} ${u[i]}`;
+/** A dataset's size, or a dash when the registry has none. */
+function size(n: number | null | undefined): string {
+  return n ? fmtBytes(n) : "—";
 }
 
-onMounted(() => {
-  installProgress();
-  loadRegistry();
-});
-
-const activeBars = computed(() =>
-  Object.entries(progress)
-    .filter(([, b]) => b.phase === "downloading")
-    .map(([name, b]) => ({ name, ...b }))
-);
-const overallPct = computed(() => overall());
-
-function pct(n: number): string {
-  return `${Math.max(0, Math.min(100, n)).toFixed(0)}%`;
-}
-
-function fmtPx(n: number): string {
-  const u = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(n) / Math.log(1024));
-  return `${(n / Math.pow(1024, i)).toFixed(1)} ${u[i]}`;
-}
+onMounted(loadRegistry);
 </script>
 
 <template>
@@ -293,7 +235,7 @@ function fmtPx(n: number): string {
           >
             <div class="row-top">
               <span class="mono acc">{{ r.accession }}</span>
-              <span class="muted size" v-if="r.totalSize">{{ fmt(r.totalSize) }}</span>
+              <span class="muted size" v-if="r.totalSize">{{ fmtBytes(r.totalSize) }}</span>
             </div>
             <div class="title">{{ r.title || "—" }}</div>
             <div class="muted sub" v-if="r.organism || r.instrument">
@@ -325,7 +267,7 @@ function fmtPx(n: number): string {
               <span v-if="selected.samples"> · {{ selected.samples }} samples</span>
             </div>
             <div class="stats">
-              <div><b>{{ fmt(selected.totalSize) }}</b><span class="muted">size</span></div>
+              <div><b>{{ size(selected.totalSize) }}</b><span class="muted">size</span></div>
               <div><b>{{ selected.peptides?.toLocaleString() ?? "—" }}</b><span class="muted">peptides</span></div>
               <div><b>{{ selected.psmCount?.toLocaleString() ?? "—" }}</b><span class="muted">PSMs</span></div>
               <div><b>{{ selected.proteins?.toLocaleString() ?? "—" }}</b><span class="muted">proteins</span></div>
@@ -334,7 +276,7 @@ function fmtPx(n: number): string {
           </div>
 
           <div v-if="views.length" class="toolbar">
-            <span class="muted">{{ views.length }} view(s) · {{ selectedCount }} selected<template v-if="selectedCount"> · {{ fmt(selectedBytes) }}</template></span>
+            <span class="muted">{{ views.length }} view(s) · {{ selectedCount }} selected<template v-if="selectedCount"> · {{ fmtBytes(selectedBytes) }}</template></span>
             <div class="actions">
               <button
                 @click="streamSelection"
@@ -351,23 +293,14 @@ function fmtPx(n: number): string {
 
           <div v-if="error" class="error">{{ error }}</div>
 
-          <div v-if="downloading && downloadId" class="progress-box">
-            <div class="overall">
-              <span class="muted">{{ cancelling ? "Cancelling…" : activeBars.length ? "Transferring to cache…" : "Checking sizes and disk space…" }}</span>
-              <span class="right">
-                <span class="muted">{{ overallPct !== null ? pct(overallPct) : "" }}</span>
-                <button class="cancel" @click="cancel" :disabled="!downloadId || cancelling">Cancel download</button>
-              </span>
-            </div>
-            <div class="bar"><div class="fill" :style="{ width: pct(overallPct ?? 0) }"></div></div>
-            <div v-for="b in activeBars" :key="b.file" class="file-bar">
-              <div class="file-row">
-                <span class="mono file-name">{{ b.file }}</span>
-                <span class="muted">{{ fmtPx(b.done) }} / {{ b.total ? fmtPx(b.total) : "…" }} · {{ pct(b.percent) }}</span>
-              </div>
-              <div class="bar"><div class="fill" :style="{ width: pct(b.percent) }"></div></div>
-            </div>
-          </div>
+          <DownloadProgress
+            v-if="downloadId"
+            class="download"
+            :files="downloadFiles"
+            :cancelling="cancelling"
+            label="Transferring to cache…"
+            @cancel="cancel"
+          />
 
           <div class="view-list" v-if="views.length">
             <label class="all">
@@ -381,7 +314,7 @@ function fmtPx(n: number): string {
             <label v-for="v in views" :key="v.path" class="view">
               <input v-model="checked[v.path]" type="checkbox" />
               <span class="mono view-name">{{ v.name }}</span>
-              <span class="muted">{{ fmt(v.sizeBytes, true) }}</span>
+              <span class="muted">{{ fmtBytes(v.sizeBytes) }}</span>
             </label>
           </div>
           <div v-else-if="busy" class="muted">Loading views… <span class="spinner"></span></div>
@@ -592,51 +525,7 @@ a {
 .view-name {
   flex: 1;
 }
-.progress-box {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px;
+.download {
   margin: 10px 0;
-  background: var(--bg-soft);
-}
-.overall,
-.file-row {
-  display: flex;
-  justify-content: space-between;
-  font-size: 12px;
-  margin-bottom: 4px;
-}
-.right {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-}
-.cancel {
-  padding: 3px 12px;
-  font-size: 12px;
-  border-color: #d33;
-  color: #d33;
-}
-.file-name {
-  max-width: 60%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.bar {
-  height: 8px;
-  background: var(--border);
-  border-radius: 6px;
-  overflow: hidden;
-  margin-bottom: 10px;
-}
-.fill {
-  height: 100%;
-  background: var(--accent);
-  border-radius: 6px;
-  transition: width 0.15s linear;
-}
-.file-bar:last-child .bar {
-  margin-bottom: 0;
 }
 </style>

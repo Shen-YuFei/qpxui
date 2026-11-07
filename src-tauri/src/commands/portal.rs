@@ -859,7 +859,7 @@ async fn portal_cache_views_impl(
                 let body = resp
                     .bytes_stream()
                     .map(|chunk| chunk.map_err(|e| format!("read {name}: {e}")));
-                xfers::save(app, token, &name, &local, total, body).await?
+                xfers::save(app, &batch, &name, &local, total, body).await?
             }
         };
         out.push(ViewInfo {

@@ -111,6 +111,18 @@ export interface StreamHandle {
   sizeBytes: number;
 }
 
+/** Payload of the backend's `download-progress` event, one per transferred chunk. */
+export interface DownloadProgress {
+  /** The download's `cancelId`. */
+  download: string;
+  file: string;
+  done: number;
+  /** Total bytes, or 0 when unknown. */
+  total: number;
+  percent: number;
+  phase: "downloading" | "done";
+}
+
 export interface StreamStat {
   sizeBytes: number;
   fetchedBytes: number;

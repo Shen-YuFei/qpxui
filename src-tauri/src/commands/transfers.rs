@@ -238,16 +238,18 @@ impl Drop for PartFile {
 }
 
 /// Stream one response body to `dest` through its `.part` file, reporting
-/// progress for `name` and stopping once `token` is set, also while the
-/// server stalls between chunks. `total` is the expected size, 0 if unknown.
+/// progress for `name` in `batch` and stopping once the batch is cancelled,
+/// also while the server stalls between chunks. `total` is the expected size,
+/// 0 if unknown.
 pub async fn save(
     app: Option<&AppHandle>,
-    token: &AtomicBool,
+    batch: &Batch,
     name: &str,
     dest: &Path,
     total: u64,
     body: impl Stream<Item = Result<Bytes, String>>,
 ) -> Result<u64, String> {
+    let token = &batch.token;
     let mut body = std::pin::pin!(body);
     let mut part = PartFile::create(dest).await?;
     loop {
@@ -262,7 +264,7 @@ pub async fn save(
         let Some(chunk) = next else { break };
         part.write(&chunk?).await?;
         if let Some(app) = app {
-            progress::chunk(app, name, part.written, total);
+            progress::chunk(app, &batch.id, name, part.written, total);
         }
     }
     if total > 0 && part.written != total {
@@ -270,7 +272,7 @@ pub async fn save(
     }
     let done = part.finish().await?;
     if let Some(app) = app {
-        progress::done(app, name, done);
+        progress::done(app, &batch.id, name, done);
     }
     Ok(done)
 }
