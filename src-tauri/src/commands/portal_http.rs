@@ -5,7 +5,12 @@ use std::path::Path;
 pub(super) fn client_builder() -> Result<ClientBuilder, String> {
     let file = std::env::var_os("SSL_CERT_FILE");
     let dirs = std::env::var_os("SSL_CERT_DIR");
-    client_builder_with_sources(file.as_deref(), dirs.as_deref())
+    let builder = client_builder_with_sources(file.as_deref(), dirs.as_deref());
+    builder.map_err(|error| {
+        format!(
+            "{error} (if this is unexpected, unset SSL_CERT_FILE / SSL_CERT_DIR to use your system's trust store)"
+        )
+    })
 }
 
 fn client_builder_with_sources(
@@ -51,7 +56,11 @@ fn load_certs(
     };
     let result = rustls_native_certs::load_certs_from_paths(file, dir);
     if !result.errors.is_empty() {
-        return Err(format!("{source}: {:?}", result.errors));
+        let path = file
+            .or(dir)
+            .map(|path| path.display().to_string())
+            .unwrap_or_default();
+        return Err(format!("{source} ({path}): {:?}", result.errors));
     }
     for cert in result.certs {
         certs.push(
@@ -122,5 +131,75 @@ mod tests {
         assert!(client_builder_with_sources(Some(empty.as_os_str()), None)
             .unwrap_err()
             .contains("no certificates"));
+    }
+
+    #[test]
+    fn tls_handshake_trusts_configured_ca_and_rejects_otherwise() {
+        use std::sync::Arc;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        // A self-signed leaf whose PEM doubles as the CA the client must trust.
+        let certified = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+        let server_cert = certified.cert.der().clone();
+        let server_key =
+            rustls::pki_types::PrivateKeyDer::try_from(certified.key_pair.serialize_der()).unwrap();
+        // Both ring and aws-lc-rs end up enabled via feature unification, so pick ring
+        // explicitly for the server instead of relying on a process-level default provider.
+        let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
+        let server_config = rustls::ServerConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_no_client_auth()
+            .with_single_cert(vec![server_cert], server_key)
+            .unwrap();
+        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server_config));
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+
+            let acceptor = acceptor.clone();
+            tokio::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut tls = acceptor.accept(stream).await.unwrap();
+                let mut request = [0u8; 4096];
+                let _ = tls.read(&mut request).await.unwrap();
+                let response = b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok";
+                tls.write_all(response).await.unwrap();
+                tls.shutdown().await.ok();
+            });
+
+            let url = format!("https://localhost:{port}/");
+
+            // Trusting the configured CA lets the handshake succeed end to end.
+            let temp = tempfile::tempdir().unwrap();
+            let ca = temp.path().join("ca.pem");
+            fs::write(&ca, certified.cert.pem()).unwrap();
+            let trusted = client_builder_with_sources(Some(ca.as_os_str()), None)
+                .unwrap()
+                .build()
+                .unwrap();
+            let response = trusted.get(&url).send().await.unwrap();
+            assert_eq!(response.text().await.unwrap(), "ok");
+
+            // Without the CA (and no system roots) the same server is rejected.
+            let untrusted = Client::builder()
+                .use_rustls_tls()
+                .tls_built_in_root_certs(false)
+                .build()
+                .unwrap();
+            let error = untrusted.get(&url).send().await.unwrap_err();
+            assert!(
+                error.is_connect()
+                    || error.is_timeout()
+                    || format!("{error:?}").contains("certificate"),
+                "expected a TLS trust failure, got: {error:?}"
+            );
+        });
     }
 }
