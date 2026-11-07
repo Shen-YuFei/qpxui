@@ -477,11 +477,10 @@ async fn portal_cache_views_impl(
     std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
 
     let result: Result<Vec<ViewInfo>, String> = (async {
-        let mut out = Vec::new();
+        // Resolve names and cache paths, then size everything still to fetch
+        // so a download that cannot fit is refused before it starts.
+        let mut plan = Vec::new();
         for url in urls {
-            if xfers::is_cancelled(&token) {
-                return Err("cancelled".to_string());
-            }
             let name = url
                 .rsplit('/')
                 .next()
@@ -490,12 +489,43 @@ async fn portal_cache_views_impl(
             if !safe_component(&name) {
                 return Err(format!("unsafe file name in {url}"));
             }
+            let dir = run_cache_dir(&root, &url);
+            let local = dir.join(&name);
+            plan.push((url, name, dir, local));
+        }
+        let mut sizes = Vec::with_capacity(plan.len());
+        let mut need = 0u64;
+        for (url, name, _, local) in &plan {
+            if xfers::is_cancelled(&token) {
+                return Err("cancelled".to_string());
+            }
+            let size = if local.exists() {
+                0
+            } else {
+                let head = client
+                    .head(url)
+                    .send()
+                    .await
+                    .map_err(|e| format!("size of {name}: {e}"))?;
+                if !head.status().is_success() {
+                    return Err(format!("size of {name}: HTTP {}", head.status()));
+                }
+                head.content_length().unwrap_or(0)
+            };
+            need += size;
+            sizes.push(size);
+        }
+        xfers::ensure_space(&root, need)?;
+
+        let mut out = Vec::new();
+        for ((url, name, dir, local), head_size) in plan.into_iter().zip(sizes) {
+            if xfers::is_cancelled(&token) {
+                return Err("cancelled".to_string());
+            }
             let (_, view, format) = crate::qpx::parse_filename(&name).unwrap_or_else(|| {
                 (String::new(), String::new(), "parquet".to_string())
             });
-            let dir = run_cache_dir(&root, &url);
             std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-            let local = dir.join(&name);
             let size = if local.exists() {
                 std::fs::metadata(&local).map(|m| m.len()).unwrap_or(0)
             } else {
@@ -507,28 +537,36 @@ async fn portal_cache_views_impl(
                 if !resp.status().is_success() {
                     return Err(format!("download {name}: HTTP {}", resp.status()));
                 }
-                let total = resp.content_length().unwrap_or(0);
+                let total = resp.content_length().unwrap_or(head_size);
+                if total > head_size {
+                    xfers::ensure_space(&dir, total)?;
+                }
 
-                // Stream chunk-by-chunk so we can report progress and cancel.
-                let mut buf: Vec<u8> = Vec::new();
+                // Stream chunk-by-chunk to `<name>.part`: constant memory,
+                // progress, and cancellation (also while the server stalls).
+                let mut part = xfers::PartFile::create(&local).await?;
                 let mut stream = resp.bytes_stream();
-                let mut done = 0u64;
                 use futures::StreamExt;
-                while let Some(chunk) = stream.next().await {
+                loop {
+                    let next = match tokio::time::timeout(xfers::POLL, stream.next()).await {
+                        Ok(n) => n,
+                        Err(_) if xfers::is_cancelled(&token) => return Err("cancelled".to_string()),
+                        Err(_) => continue,
+                    };
                     if xfers::is_cancelled(&token) {
                         return Err("cancelled".to_string());
                     }
+                    let Some(chunk) = next else { break };
                     let chunk = chunk.map_err(|e| format!("read {name}: {e}"))?;
-                    buf.extend_from_slice(&chunk);
-                    done += chunk.len() as u64;
+                    part.write(&chunk).await?;
                     if let Some(app) = app {
-                        progress::chunk(app, &name, done, total);
+                        progress::chunk(app, &name, part.written, total);
                     }
                 }
-                if xfers::is_cancelled(&token) {
-                    return Err("cancelled".to_string());
+                if total > 0 && part.written != total {
+                    return Err(format!("download {name}: got {} of {} bytes", part.written, total));
                 }
-                std::fs::write(&local, &buf).map_err(|e| e.to_string())?;
+                let done = part.finish().await?;
                 if let Some(app) = app {
                     progress::done(app, &name, done);
                 }
@@ -581,6 +619,68 @@ mod tests {
         assert_eq!(cached.len(), 1);
         assert!(cached[0].size_bytes > 0);
         assert!(std::path::Path::new(&cached[0].path).exists());
+    }
+
+    /// Tiny HTTP server: HEAD/GET advertise `len` bytes; GET streams 64 KB
+    /// chunks slowly so a test can cancel mid-file.
+    async fn slow_server(len: u64) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else { return };
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 2048];
+                    let n = sock.read(&mut buf).await.unwrap_or(0);
+                    let head = std::str::from_utf8(&buf[..n]).unwrap_or("").starts_with("HEAD");
+                    let hdr = format!("HTTP/1.1 200 OK\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n");
+                    if sock.write_all(hdr.as_bytes()).await.is_err() || head {
+                        return;
+                    }
+                    let chunk = vec![0u8; 64 * 1024];
+                    loop {
+                        if sock.write_all(&chunk).await.is_err() {
+                            return;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                    }
+                });
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn cancel_mid_file_leaves_no_partial_file() {
+        let base = slow_server(1 << 30).await;
+        let name = format!("cancel-test-{}.feature.parquet", std::process::id());
+        let local = cache_root().unwrap().join(&name);
+        let id = format!("test-cancel-{}", std::process::id());
+        let task = tokio::spawn(portal_cache_views_impl(None, id.clone(), vec![format!("{base}/{name}")]));
+        let part = local.with_file_name(format!("{name}.part"));
+        for _ in 0..100 {
+            if part.exists() && std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0) > 0 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(part.exists(), "download should have started");
+        assert!(xfers::cancel(&id));
+        let r = tokio::time::timeout(std::time::Duration::from_secs(5), task).await.expect("cancel is prompt").unwrap();
+        assert_eq!(r.unwrap_err(), "cancelled");
+        assert!(!part.exists() && !local.exists(), "partial download must be removed");
+    }
+
+    #[tokio::test]
+    async fn refuses_download_that_does_not_fit() {
+        let base = slow_server(1 << 50).await; // 1 PB
+        let name = format!("huge-test-{}.feature.parquet", std::process::id());
+        let r = portal_cache_views_impl(None, "test-huge".into(), vec![format!("{base}/{name}")]).await;
+        let e = r.unwrap_err();
+        assert!(e.starts_with("Not enough disk space"), "{e}");
+        let local = cache_root().unwrap().join(&name);
+        assert!(!local.exists() && !local.with_file_name(format!("{name}.part")).exists());
     }
 
     fn info(run: &str, at: i64, organism: &str, prefix: &str, psms: u64) -> RunInfo {

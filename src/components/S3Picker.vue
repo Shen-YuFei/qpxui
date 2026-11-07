@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { api, type DatasetInfo, type S3Listing, type ViewInfo } from "../lib/api";
 import { loadDatasets } from "../store";
 import { installProgress, overall, progress } from "../lib/progress";
+import { confirmDownload, totalBytes } from "../lib/downloads";
 
 const bucket = ref("");
 const prefix = ref("");
@@ -12,10 +13,12 @@ const showAdvanced = ref(false);
 const listing = ref<S3Listing | null>(null);
 const checked = ref<Record<string, boolean>>({});
 const downloadId = ref("");
+const cancelling = ref(false);
 
 const remoteDatasets = computed<DatasetInfo[]>(() => listing.value?.datasets ?? []);
 
 const selectedCount = computed(() => selection().length);
+const selectedBytes = computed(() => totalBytes(selection().map((s) => s.view)));
 
 function generateId(): string {
   return (crypto?.randomUUID?.() ?? `d${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -29,6 +32,7 @@ function clearProgressFor(files: string[]) {
 
 async function cancel() {
   if (!downloadId.value) return;
+  cancelling.value = true;
   try {
     await api.cancelDownload(downloadId.value);
   } catch {
@@ -105,10 +109,12 @@ async function loadSelection() {
   try {
     const sel = selection();
     if (!sel.length) throw new Error("Select at least one view to load.");
+    if (!(await confirmDownload(sel.map((s) => s.view), "s3"))) return;
 
     // Download to cache (offline) with progress bars.
     const paths = sel.map((s) => s.view.path);
     const files = sel.map((s) => s.view.name);
+    cancelling.value = false;
     downloadId.value = generateId();
     try {
       const locals = await api.cacheS3Views(listing.value!.bucket, paths, downloadId.value);
@@ -116,13 +122,15 @@ async function loadSelection() {
       loadDatasets(groupLocal(entries), "s3");
     } catch (e: any) {
       if (isCancelledErr(e)) {
-        error.value = "Transfer cancelled.";
+        error.value = "Download cancelled; partial files were removed.";
         clearProgressFor(files);
       } else {
+        clearProgressFor(files);
         throw e;
       }
     } finally {
       downloadId.value = "";
+      cancelling.value = false;
     }
   } catch (e: any) {
     error.value = String(e);
@@ -195,7 +203,7 @@ const streamHint =
 
     <template v-if="listing">
       <div class="toolbar">
-        <span class="muted">{{ remoteDatasets.length }} dataset(s) found</span>
+        <span class="muted">{{ remoteDatasets.length }} dataset(s) found<template v-if="selectedCount"> · {{ selectedCount }} selected · {{ fmt(selectedBytes) }}</template></span>
         <div class="actions">
           <button @click="streamSelection" :disabled="busy || !selectedCount" :title="streamHint">
             ⚡ Stream (lazy, no download)
@@ -208,12 +216,12 @@ const streamHint =
       <div v-if="selectedCount" class="mode-hint muted">{{ streamHint }}</div>
 
       <!-- progress bars for downloads -->
-      <div v-if="activeBars.length" class="progress-box">
+      <div v-if="downloadId" class="progress-box">
         <div class="overall">
-          <span class="muted">Downloading…</span>
+          <span class="muted">{{ cancelling ? "Cancelling…" : activeBars.length ? "Downloading…" : "Checking sizes and disk space…" }}</span>
           <span class="right">
             <span class="muted">{{ overallPct !== null ? pct(overallPct) : "" }}</span>
-            <button class="cancel" @click="cancel" :disabled="!downloadId">Cancel</button>
+            <button class="cancel" @click="cancel" :disabled="!downloadId || cancelling">Cancel download</button>
           </span>
         </div>
         <div class="bar"><div class="fill" :style="{ width: pct(overallPct ?? 0) }"></div></div>
