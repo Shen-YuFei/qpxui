@@ -12,6 +12,8 @@ import {
 import { CanvasRenderer } from "echarts/renderers";
 import { ensureViewReady, describeTable, countRows, runSql, type ColumnInfo } from "../lib/duck";
 import type { ViewInfo } from "../lib/api";
+import { scanBytes, viewScale, type ViewScale } from "../lib/report";
+import { fmtBytes } from "../lib/format";
 
 use([BarChart, LineChart, GridComponent, TooltipComponent, LegendComponent, DataZoomComponent, CanvasRenderer]);
 
@@ -21,6 +23,12 @@ const cols = ref<ColumnInfo[]>([]);
 const total = ref(0);
 const error = ref("");
 const busy = ref(true);
+// Large streamed views: charts read whole columns, so wait for a click.
+const scale = ref<ViewScale | null>(null);
+const held = ref(false);
+const heldBytes = computed(() =>
+  scale.value ? scanBytes(scale.value, ["charge", "anchor_protein", "pg_accessions", "run_file_name", "peptide_qvalue", "posterior_error_probability", "missed_cleavages", numericCol.value]) : 0
+);
 
 const cards = ref<any[]>([]);
 const numericCol = ref("");
@@ -125,24 +133,52 @@ onMounted(async () => {
   try {
     table.value = await ensureViewReady(props.view);
     cols.value = await describeTable(table.value);
-    total.value = await countRows(table.value);
     numericCol.value = numericCols.value[0]?.name ?? "";
-    await buildSummaries();
-    if (numericCol.value) {
+    if (/^(s3|https?):\/\//.test(props.view.path)) {
       try {
-        await buildHistogram();
-      } catch (e) {
-        // A numeric-ish column can still fail to histogram (e.g. extreme
-        // values); don't let it take down the whole summary.
-        console.warn("histogram skipped:", e);
+        scale.value = await viewScale({ view: props.view, table: table.value });
+      } catch {
+        scale.value = null;
       }
     }
+    if (scale.value?.large) {
+      total.value = scale.value.rows;
+      held.value = true;
+      return;
+    }
+    total.value = await countRows(table.value);
+    await buildAll();
   } catch (e: any) {
     error.value = String(e);
   } finally {
     busy.value = false;
   }
 });
+
+async function computeHeld() {
+  held.value = false;
+  busy.value = true;
+  try {
+    await buildAll();
+  } catch (e: any) {
+    error.value = String(e);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function buildAll() {
+  await buildSummaries();
+  if (numericCol.value) {
+    try {
+      await buildHistogram();
+    } catch (e) {
+      // A numeric-ish column can still fail to histogram (e.g. extreme
+      // values); don't let it take down the whole summary.
+      console.warn("histogram skipped:", e);
+    }
+  }
+}
 </script>
 
 <template>
@@ -154,15 +190,22 @@ onMounted(async () => {
       </div>
       <div v-if="numericCols.length" class="pick">
         <label>Histogram column</label>
-        <select v-model="numericCol" @change="buildHistogram">
+        <select v-model="numericCol" :disabled="held" @change="buildHistogram">
           <option v-for="c in numericCols" :key="c.name" :value="c.name">{{ c.name }}</option>
         </select>
       </div>
-      <button @click="buildSummaries" :disabled="busy">Refresh</button>
+      <button v-if="!held" @click="buildSummaries" :disabled="busy">Refresh</button>
     </div>
 
     <div v-if="error" class="error pad">⚠ {{ error }}</div>
     <div v-else-if="busy" class="pad muted">Summarising… <span class="spinner"></span></div>
+    <div v-else-if="held" class="pad held">
+      <p>
+        This view is streamed and large ({{ fmtBytes(scale!.bytes) }}). The summary charts read whole columns,
+        at least <b>{{ fmtBytes(heldBytes) }}</b> over the network, so they are not built automatically.
+      </p>
+      <button class="primary" @click="computeHeld">Build charts (≥ {{ fmtBytes(heldBytes) }})</button>
+    </div>
 
     <div class="cards" v-else>
       <div v-if="histOpt && chart.option" class="card wide">
@@ -189,6 +232,14 @@ onMounted(async () => {
   gap: 12px;
   flex-wrap: wrap;
   margin-bottom: 14px;
+}
+.held {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.held p {
+  margin: 0 0 10px;
 }
 .pick {
   display: flex;

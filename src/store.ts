@@ -1,6 +1,7 @@
 import { reactive } from "vue";
 import type { DatasetInfo, ViewInfo } from "./lib/api";
 import { clearReportCache } from "./lib/report";
+import { abandonQueries } from "./lib/duck";
 
 // Simple reactive store (no Pinia needed for this scale).
 export const state = reactive({
@@ -46,7 +47,17 @@ export function openProtein(acc: string) {
   openReport("proteins");
 }
 
+/** Leaving a dataset: stop its running queries so the next one starts at
+ * once. A restarted engine has no tables, so forget what was registered. */
+export function stopQueries() {
+  if (!abandonQueries()) return;
+  clearReportCache();
+  state.registered = new Set();
+  state.tableName = {};
+}
+
 export function reset() {
+  stopQueries();
   clearReportCache();
   state.datasets = [];
   state.sourceKind = "none";
@@ -64,6 +75,7 @@ export function reset() {
 }
 
 export function loadDatasets(datasets: DatasetInfo[], kind: string) {
+  stopQueries();
   clearReportCache();
   state.datasets = datasets;
   state.sourceKind = kind;

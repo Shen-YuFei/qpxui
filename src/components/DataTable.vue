@@ -4,7 +4,7 @@ import { describeTable, ensureViewReady, runSql, type QueryResult } from "../lib
 import { isStructured, formatCompact, scalarText } from "../lib/format";
 import type { ViewInfo } from "../lib/api";
 import type { TableRef } from "../lib/report";
-import { lit, ident } from "../lib/report";
+import { lit, ident, viewScale } from "../lib/report";
 import { state } from "../store";
 import PTMTip from "./PTMTip.vue";
 import StructuredView from "./StructuredView.vue";
@@ -44,6 +44,9 @@ const ptmOn = ref(true);
 // are shown as a short "N peaks" summary and moved after the other columns.
 const PEAK_COLS = new Set(["mz_array", "intensity_array", "charge_array", "ion_type_array", "ion_mobility_array"]);
 const showPeaks = ref(true);
+// Large streamed views start with peaks hidden: a page with peaks reads a
+// whole row group of peak arrays (often 100+ MB).
+const largeRemote = ref(false);
 const colTypes = ref<Record<string, string>>({});
 const colNames = ref<string[]>([]);
 const hasPeakCols = computed(() => colNames.value.some((c) => PEAK_COLS.has(c.toLowerCase())));
@@ -67,6 +70,17 @@ async function load() {
       const desc = await describeTable(table.value);
       colNames.value = desc.map((d) => d.name);
       colTypes.value = Object.fromEntries(desc.map((d) => [d.name.toLowerCase(), d.type]));
+      if (hasPeakCols.value && /^(s3|https?):\/\//.test(props.view.path)) {
+        try {
+          largeRemote.value = (await viewScale({ view: props.view, table: table.value })).large;
+        } catch {
+          /* keep peaks on */
+        }
+        if (largeRemote.value) {
+          showPeaks.value = false;
+          return; // the showPeaks watcher reloads without the peak columns
+        }
+      }
     }
     const c = await runSql(`SELECT COUNT(*) AS n FROM "${table.value}"`);
     if (id !== loadSeq) return;
@@ -382,7 +396,9 @@ function isModsCell(j: number): boolean {
       <label
         v-if="hasPeakCols"
         class="ptm-toggle"
-        title="Peak arrays (mz_array, intensity_array, …) are shown last as 'N peaks'. Untick to hide them and skip reading them."
+        :title="largeRemote
+          ? 'Large streamed view: peak arrays are hidden because a page with them reads a whole row group of peaks (often 100+ MB). Right-click a PSM to open its spectrum.'
+          : 'Peak arrays (mz_array, intensity_array, …) are shown last as \'N peaks\'. Untick to hide them and skip reading them.'"
       >
         <input type="checkbox" v-model="showPeaks" />
         <span>Peak arrays</span>

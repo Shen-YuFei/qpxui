@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { hasReport, openReport, searchFor, state } from "../store";
+import { hasReport, openReport, searchFor, state, stopQueries } from "../store";
 import { api, type StreamStat, type ViewInfo } from "../lib/api";
 
 const datasets = computed(() => state.datasets);
@@ -45,7 +45,10 @@ function selectView(v: ViewInfo) {
 }
 
 function selectDataset(d: (typeof state.datasets)[number]) {
-  if (state.selectedDataset !== d) state.proteinFocus = null;
+  if (state.selectedDataset !== d) {
+    state.proteinFocus = null;
+    stopQueries();
+  }
   state.selectedDataset = d;
   if (d.views.length) state.selectedView = d.views[0];
   state.page = hasReport(d) ? "report" : "view";
