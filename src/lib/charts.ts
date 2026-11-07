@@ -1,4 +1,5 @@
-// Shared, theme-aware ECharts option builders for the report views.
+// Shared, theme-aware ECharts option builders for the report views. Importing
+// this module registers the ECharts parts that every chart in the app uses.
 
 import { use } from "echarts/core";
 import { BarChart, BoxplotChart, CustomChart, HeatmapChart, LineChart, ScatterChart } from "echarts/charts";
@@ -8,6 +9,7 @@ import {
   GridComponent,
   LegendComponent,
   MarkLineComponent,
+  TitleComponent,
   TooltipComponent,
   VisualMapComponent,
 } from "echarts/components";
@@ -15,7 +17,8 @@ import { CanvasRenderer } from "echarts/renderers";
 
 use([
   BarChart, LineChart, BoxplotChart, ScatterChart, CustomChart, HeatmapChart, VisualMapComponent,
-  GraphicComponent, GridComponent, TooltipComponent, LegendComponent, DataZoomComponent, MarkLineComponent, CanvasRenderer,
+  GraphicComponent, GridComponent, TooltipComponent, LegendComponent, DataZoomComponent, MarkLineComponent, TitleComponent,
+  CanvasRenderer,
 ]);
 
 export interface ChartSeries {

@@ -1,23 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import VChart from "vue-echarts";
-import { use } from "echarts/core";
-import { BarChart, LineChart } from "echarts/charts";
-import {
-  GridComponent,
-  TooltipComponent,
-  LegendComponent,
-  DataZoomComponent,
-  TitleComponent,
-} from "echarts/components";
-import { CanvasRenderer } from "echarts/renderers";
 import { ensureViewReady, describeTable, countRows, runSql, type ColumnInfo } from "../lib/duck";
 import type { ViewInfo } from "../lib/api";
 import { ident, scanBytes, viewScale, type ViewScale } from "../lib/report";
 import { chartTheme } from "../lib/charts";
 import { fmtBytes } from "../lib/format";
-
-use([BarChart, LineChart, GridComponent, TooltipComponent, LegendComponent, DataZoomComponent, TitleComponent, CanvasRenderer]);
 
 const props = defineProps<{ view: ViewInfo }>();
 const table = ref("");
