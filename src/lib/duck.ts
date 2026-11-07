@@ -264,15 +264,8 @@ export async function runSql(
 }
 
 export async function countRows(table: string): Promise<number> {
-  await init();
-  let res: QueryResultType;
-  try {
-    const c = conn!;
-    res = await tracked(() => c.query(`SELECT COUNT(*) AS n FROM "${table}"`));
-  } catch (e) {
-    throw new Error(engineErrorText(e));
-  }
-  return Number(res.toArray()[0].n);
+  const r = await runSql(`SELECT COUNT(*) AS n FROM "${table}"`, 1);
+  return Number(r.rows[0][0]);
 }
 
 export interface ColumnInfo {
@@ -282,13 +275,7 @@ export interface ColumnInfo {
 
 /** Read column names + DuckDB types via DESCRIBE. */
 export async function describeTable(table: string): Promise<ColumnInfo[]> {
-  await init();
-  let res: QueryResultType;
-  try {
-    const c = conn!;
-    res = await tracked(() => c.query(`DESCRIBE "${table}"`));
-  } catch (e) {
-    throw new Error(engineErrorText(e));
-  }
-  return res.toArray().map((o) => ({ name: String(o.column_name), type: String(o.column_type) }));
+  const r = await runSql(`DESCRIBE "${table}"`);
+  // DESCRIBE's first two columns: column_name, column_type.
+  return r.rows.map(([name, type]) => ({ name: String(name), type: String(type) }));
 }
