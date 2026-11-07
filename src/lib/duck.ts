@@ -5,22 +5,16 @@ import { CANCELLED, engineErrorText } from "./errors";
 
 // Bundle the DuckDB WASM + worker assets locally (no CDN), so the desktop
 // app keeps working offline. Vite turns these imports into static asset URLs.
+// No `coi` (threads) bundle: it needs a cross-origin isolated page, which the
+// app never is, so selectBundle would never pick it.
 import duckdb_wasm_mvp from "@duckdb/duckdb-wasm/dist/duckdb-mvp.wasm?url";
 import mvp_worker from "@duckdb/duckdb-wasm/dist/duckdb-browser-mvp.worker.js?url";
 import duckdb_wasm_eh from "@duckdb/duckdb-wasm/dist/duckdb-eh.wasm?url";
 import eh_worker from "@duckdb/duckdb-wasm/dist/duckdb-browser-eh.worker.js?url";
-import duckdb_wasm_coi from "@duckdb/duckdb-wasm/dist/duckdb-coi.wasm?url";
-import coi_worker from "@duckdb/duckdb-wasm/dist/duckdb-browser-coi.worker.js?url";
-import coi_pthread_worker from "@duckdb/duckdb-wasm/dist/duckdb-browser-coi.pthread.worker.js?url";
 
 const MANUAL_BUNDLES: duckdb.DuckDBBundles = {
   mvp: { mainModule: duckdb_wasm_mvp, mainWorker: mvp_worker },
   eh: { mainModule: duckdb_wasm_eh, mainWorker: eh_worker },
-  coi: {
-    mainModule: duckdb_wasm_coi,
-    mainWorker: coi_worker,
-    pthreadWorker: coi_pthread_worker,
-  },
 };
 
 let db: duckdb.AsyncDuckDB | null = null;
