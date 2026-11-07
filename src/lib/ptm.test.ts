@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { modMass, modUnimodId } from "./fragments";
-import { hasInlineMods, inlineToSegments, modBadges, PTM_META, ptmMeta, seqWithModsToSegments, shortCode } from "./ptm";
+import { hasInlineMods, inlineToSegments, modBadges, peptideCells, PTM_META, ptmMeta, seqWithModsToSegments, shortCode } from "./ptm";
 import { PTM_PALETTE } from "./settings";
 
 describe("inlineToSegments", () => {
@@ -32,6 +32,17 @@ describe("seqWithModsToSegments", () => {
     expect(segs[0]).toMatchObject({ terminal: "N", modName: "Acetyl" });
     expect(segs[3]).toMatchObject({ text: "M", modified: true, modPos: 3 });
     expect(seqWithModsToSegments("PEMK", [])).toBeNull();
+  });
+});
+
+describe("peptideCells", () => {
+  it("renders inline peptidoforms and sequences with structured modifications", () => {
+    const mods = [{ name: "Oxidation", accession: "UNIMOD:35", positions: [{ position: 3 }] }];
+    const [row] = peptideCells(["peptidoform", "sequence", "charge", "modifications"], [["PEM[Oxidation]K", "PEMK", 2, mods]]);
+    expect([...row.keys()]).toEqual([0, 1]);
+    expect(row.get(1)![2]).toMatchObject({ text: "M", modified: true, accession: "UNIMOD:35" });
+    // Without a modifications column a plain sequence stays a plain cell.
+    expect(peptideCells(["sequence"], [["PEMK"]])[0].size).toBe(0);
   });
 });
 

@@ -293,6 +293,23 @@ export function seqWithModsToSegments(sequence: string, mods: unknown): PTMSeg[]
   return segs;
 }
 
+/** Per row, the PTM segments of each peptide cell keyed by column index: from
+ * the inline peptidoform, or from the sequence plus the row's structured
+ * `modifications` column. */
+export function peptideCells(columns: string[], rows: unknown[][]): Map<number, PTMSeg[]>[] {
+  const modsIdx = columns.findIndex((c) => isModificationsCol(c));
+  return rows.map((row) => {
+    const m = new Map<number, PTMSeg[]>();
+    columns.forEach((c, j) => {
+      const v = row[j];
+      if (typeof v !== "string" || !isPeptideCol(c)) return;
+      const segs = hasInlineMods(v) ? inlineToSegments(v) : modsIdx >= 0 ? seqWithModsToSegments(v, row[modsIdx]) : null;
+      if (segs?.length) m.set(j, segs);
+    });
+    return m;
+  });
+}
+
 /** Extract structured modifications as {name, position, aa, accession}[] for badge rendering. */
 export interface PTMBadge {
   name: string;
