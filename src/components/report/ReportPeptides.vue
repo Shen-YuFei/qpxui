@@ -6,28 +6,13 @@ import ReportTable from "../ReportTable.vue";
 import SpectrumViewer, { type PsmKey } from "../SpectrumViewer.vue";
 import type { Column } from "../../lib/report";
 import type { DatasetInfo } from "../../lib/api";
-import {
-  cachedSql,
-  evidence,
-  hasSpectra,
-  ident,
-  intensitySumExpr,
-  likePattern,
-  lit,
-  objects,
-  proteinExpr,
-  targetWhere,
-  viewScale,
-  type DatasetTables,
-  type ViewScale,
-} from "../../lib/report";
-import { runSql } from "../../lib/duck";
+import { evidence, hasSpectra, proteinExpr, viewScale, type DatasetTables, type ViewScale } from "../../lib/report";
+import { PEPTIDOFORM_LIMIT as LIMIT, modificationNames, peptidoformEvidence, searchPeptidoforms } from "../../lib/queries/peptides";
 import { fmtBytes, listText } from "../../lib/format";
 import { openProtein, state } from "../../store";
 
 const props = defineProps<{ ds: DatasetInfo; t: DatasetTables; fileBase: string; accession?: string }>();
 
-const LIMIT = 500;
 const ev = evidence(props.t);
 const prot = ev ? proteinExpr(ev) : null;
 const evName = props.t.feature ? "features" : "PSMs";
@@ -93,28 +78,6 @@ const evCols = computed<Column[]>(() =>
   ].filter((c) => evRows.value.length === 0 || c.key in evRows.value[0])
 );
 
-function whereClause(): string {
-  const E = ev!;
-  const parts = [targetWhere(E)];
-  // Strip anything that is not an amino-acid letter, so "pep tide" / lower case work.
-  const s = q.value.trim().toUpperCase();
-  if (s) {
-    const aa = s.replace(/[^A-Z]/g, "");
-    const seqCond =
-      mode.value === "exact" ? `${E.seq} = ${lit(aa)}`
-      : mode.value === "prefix" ? `starts_with(${E.seq}, ${lit(aa)})`
-      : `contains(${E.seq}, ${lit(aa)})`;
-    // Also match peptidoform text (e.g. "M[Oxidation]" or "UNIMOD:21").
-    const pfCond = E.cols.has("peptidoform") && /[[\]:+]/.test(q.value) ? ` OR peptidoform ILIKE ${likePattern(q.value.trim())}` : "";
-    parts.push(`(${aa ? seqCond : "FALSE"}${pfCond})`);
-  }
-  if (mod.value && E.cols.has("modifications")) {
-    parts.push(`list_contains(list_transform(modifications, x -> x.name), ${lit(mod.value)})`);
-  }
-  if (minCharge.value && E.cols.has("charge")) parts.push(`charge >= ${Number(minCharge.value)}`);
-  return parts.join(" AND ");
-}
-
 async function search() {
   if (!ev) return;
   waiting.value = false;
@@ -123,30 +86,9 @@ async function search() {
   focus.value = null;
   const t0 = performance.now();
   try {
-    const E = ev;
-    const has = (c: string) => E.cols.has(c);
-    const isum = intensitySumExpr(E);
-    const pf = has("peptidoform") ? "peptidoform" : E.seq;
-    const sel = [
-      `${pf} AS peptidoform`,
-      `any_value(${E.seq}) AS sequence`,
-      has("modifications") ? "any_value(modifications) AS modifications" : null,
-      prot ? `any_value(${prot}) AS protein` : null,
-      has("gg_names") ? "any_value(gg_names) AS genes" : null,
-      has("charge") ? "list_sort(list_distinct(list(charge))) AS charges" : null,
-      "count(*)::BIGINT AS n_ev",
-      has("run_file_name") ? "count(DISTINCT run_file_name)::BIGINT AS runs" : null,
-      has("posterior_error_probability") ? "min(posterior_error_probability) AS best_pep" : null,
-      isum ? `avg(CASE WHEN ${isum} > 0 THEN log10(${isum}) END) AS log_int` : null,
-    ].filter(Boolean);
-    const r = await runSql(
-      `SELECT ${sel.join(", ")} FROM ${ident(E.table)} WHERE ${whereClause()}
-       GROUP BY 1 ORDER BY n_ev DESC, peptidoform LIMIT ${LIMIT + 1}`,
-      LIMIT + 1
-    );
-    const out = objects(r);
-    truncated.value = out.length > LIMIT;
-    rows.value = out.slice(0, LIMIT);
+    const r = await searchPeptidoforms(ev, prot, { q: q.value, mode: mode.value, mod: mod.value, minCharge: minCharge.value });
+    truncated.value = r.truncated;
+    rows.value = r.rows;
     elapsed.value = performance.now() - t0;
   } catch (e: any) {
     error.value = String(e?.message ?? e);
@@ -163,27 +105,9 @@ async function openPeptide(row: Record<string, any>) {
   evBusy.value = true;
   evRows.value = [];
   try {
-    const E = evSrc.value!;
-    const has = (c: string) => E.cols.has(c);
-    const isum = intensitySumExpr(E);
-    const pfCol = has("peptidoform") ? "peptidoform" : E.seq;
-    const scanList = /\[\]|list/i.test(E.types.scan ?? "");
-    const sel = [
-      has("run_file_name") ? "run_file_name" : null,
-      has("scan") ? (scanList ? "scan[1] AS scan_no" : "scan AS scan_no") : null,
-      has("charge") ? "charge" : null,
-      has("rt") ? "rt / 60.0 AS rt_min" : null,
-      has("observed_mz") ? "observed_mz" : null,
-      has("mass_error_ppm") ? "mass_error_ppm" : null,
-      has("posterior_error_probability") ? "posterior_error_probability" : null,
-      isum ? `CASE WHEN ${isum} > 0 THEN log10(${isum}) END AS log_int` : null,
-    ].filter(Boolean);
-    const r = await runSql(
-      `SELECT ${sel.join(", ")} FROM ${ident(E.table)} WHERE ${targetWhere(E)} AND ${pfCol} = ${lit(String(row.peptidoform))}
-       ORDER BY ${has("run_file_name") ? "run_file_name" : "1"}${has("posterior_error_probability") ? ", posterior_error_probability" : ""} LIMIT 5000`
-    );
+    const r = await peptidoformEvidence(evSrc.value!, String(row.peptidoform));
     if (id !== evSeq) return;
-    evRows.value = objects(r).map((x, i) => ({ ...x, _k: i }));
+    evRows.value = r.map((x, i) => ({ ...x, _k: i }));
   } finally {
     if (id === evSeq) evBusy.value = false;
   }
@@ -212,16 +136,7 @@ async function loadMods() {
   if (!ev || modsLoaded.value || modsBusy.value || !ev.cols.has("modifications")) return;
   modsBusy.value = true;
   try {
-    const r = await cachedSql(
-      props.ds,
-      "ptm.mods",
-      `SELECT m.name AS name, any_value(m.accession) AS accession,
-              count(DISTINCT pf)::BIGINT AS n_pf, count(DISTINCT seq)::BIGINT AS n_pep, count(*)::BIGINT AS n_ev
-       FROM (SELECT unnest(modifications) AS m, ${ev.cols.has("peptidoform") ? "peptidoform" : ev.seq} AS pf, ${ev.seq} AS seq
-             FROM ${ident(ev.table)} WHERE ${targetWhere(ev)})
-       GROUP BY 1 ORDER BY n_ev DESC`
-    );
-    modNames.value = r.rows.map((x) => String(x[0])).filter((x) => x && x !== "null");
+    modNames.value = await modificationNames(props.ds, ev);
     modsLoaded.value = true;
   } catch {
     /* optional filter */
