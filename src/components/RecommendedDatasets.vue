@@ -9,6 +9,8 @@ const datasets = ref<PortalDataset[]>([]);
 const busy = ref(false);
 const loadingMsg = ref("Loading recommended datasets…");
 const error = ref("");
+/** Listing, streaming or downloading the open dataset's views failed. */
+const viewError = ref("");
 
 const selected = ref<PortalDataset | null>(null);
 const views = ref<ViewInfo[]>([]);
@@ -73,13 +75,13 @@ async function toggleDataset(ds: PortalDataset) {
   views.value = [];
   checked.value = {};
   viewBusy.value = true;
-  error.value = "";
+  viewError.value = "";
   try {
     const ref = ds.datasetRef ?? ds.accession;
     const v = await api.portalListViews(ref, ds.organism, ds.psmCount);
     if (selected.value === ds) views.value = v;
   } catch (e: any) {
-    if (selected.value === ds) error.value = String(e);
+    if (selected.value === ds) viewError.value = String(e);
   } finally {
     if (selected.value === ds) viewBusy.value = false;
   }
@@ -100,10 +102,10 @@ function toggleAll() {
 }
 
 function openStream(ds: PortalDataset) {
-  error.value = "";
+  viewError.value = "";
   const sel = selectedViews();
   if (!views.value.length) {
-    error.value = "This dataset has no listed QPX views to open.";
+    viewError.value = "This dataset has no listed QPX views to open.";
     return;
   }
   const list = sel.length ? sel : views.value;
@@ -118,7 +120,7 @@ function openStream(ds: PortalDataset) {
 async function openDownload(ds: PortalDataset) {
   busy.value = true;
   downloading.value = true;
-  error.value = "";
+  viewError.value = "";
   const target = ds;
   try {
     const sel = selectedViews();
@@ -130,7 +132,7 @@ async function openDownload(ds: PortalDataset) {
     // Left meanwhile (which also cancels): say nothing there.
     if (unmounted() || selected.value !== target) return;
     if (!local) {
-      error.value = "Download cancelled; partial files were removed.";
+      viewError.value = "Download cancelled; partial files were removed.";
       return;
     }
     const nxt: DatasetInfo = {
@@ -140,7 +142,7 @@ async function openDownload(ds: PortalDataset) {
     };
     loadDatasets([nxt], "portal | " + target.accession);
   } catch (e: any) {
-    error.value = String(e);
+    viewError.value = String(e);
   } finally {
     busy.value = false;
     downloading.value = false;
@@ -222,7 +224,7 @@ onMounted(() => {
             </div>
           </div>
 
-          <div v-if="error" class="error">{{ error }}</div>
+          <div v-if="viewError" class="error">{{ viewError }}</div>
 
           <DownloadProgress
             v-if="downloadId"

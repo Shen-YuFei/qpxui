@@ -25,6 +25,8 @@ const sort = ref("peptides");
 const page = ref(1);
 const busy = ref(false);
 const error = ref("");
+/** Listing, streaming or downloading the open dataset's views failed. */
+const viewError = ref("");
 
 const selected = ref<PortalDataset | null>(null);
 const views = ref<ViewInfo[]>([]);
@@ -122,13 +124,13 @@ async function selectDataset(ds: PortalDataset) {
   views.value = [];
   checked.value = {};
   busy.value = true;
-  error.value = "";
+  viewError.value = "";
   try {
     const ref = ds.datasetRef ?? ds.accession;
     const v = await api.portalListViews(ref, ds.organism, ds.psmCount);
     if (selected.value === ds) views.value = v;
   } catch (e: any) {
-    if (selected.value === ds) error.value = String(e);
+    if (selected.value === ds) viewError.value = String(e);
   } finally {
     if (selected.value === ds) busy.value = false;
   }
@@ -149,7 +151,7 @@ async function loadSelection() {
   if (!selected.value) return;
   busy.value = true;
   downloading.value = true;
-  error.value = "";
+  viewError.value = "";
   const target = selected.value;
   try {
     const sel = views.value.filter((v) => checked.value[v.path]);
@@ -160,7 +162,7 @@ async function loadSelection() {
     // Left meanwhile (which also cancels): say nothing there.
     if (unmounted() || selected.value !== target) return;
     if (!local) {
-      error.value = "Download cancelled; partial files were removed.";
+      viewError.value = "Download cancelled; partial files were removed.";
       return;
     }
     const ds: DatasetInfo = {
@@ -170,7 +172,7 @@ async function loadSelection() {
     };
     loadDatasets([ds], "portal | " + target.accession);
   } catch (e: any) {
-    error.value = String(e);
+    viewError.value = String(e);
   } finally {
     if (selected.value === target) busy.value = false;
     downloading.value = false;
@@ -179,10 +181,10 @@ async function loadSelection() {
 
 function streamSelection() {
   if (!selected.value) return;
-  error.value = "";
+  viewError.value = "";
   const sel = views.value.filter((v) => checked.value[v.path]);
   if (!sel.length) {
-    error.value = "Select at least one view to stream.";
+    viewError.value = "Select at least one view to stream.";
     return;
   }
   const ds: DatasetInfo = {
@@ -280,7 +282,7 @@ const hasNext = computed(() => page.value < results.value.totalPages);
       <button class="ghost" @click="clearFilters">Reset</button>
     </div>
 
-    <div v-if="error && !results.datasets.length" class="error">{{ error }}</div>
+    <div v-if="error" class="error">{{ error }}</div>
     <div v-if="busy && !results.datasets.length" class="muted">
       Searching… <span class="spinner"></span>
     </div>
@@ -347,7 +349,7 @@ const hasNext = computed(() => page.value < results.value.totalPages);
             </div>
           </div>
 
-          <div v-if="error" class="error">{{ error }}</div>
+          <div v-if="viewError" class="error">{{ viewError }}</div>
 
           <DownloadProgress
             v-if="downloadId"
