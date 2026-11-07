@@ -1,5 +1,4 @@
-use crate::commands::progress;
-use crate::commands::transfers as xfers;
+use crate::commands::transfers::{self as xfers, CacheKind};
 use crate::qpx::{self, DatasetInfo, ViewInfo};
 use aws_config::meta::region::RegionProviderChain;
 use aws_config::BehaviorVersion;
@@ -154,14 +153,6 @@ pub async fn list_s3(bucket: String, prefix: Option<String>) -> Result<S3Listing
     })
 }
 
-/// The local cache directory for S3 downloads.
-fn cache_root() -> Result<std::path::PathBuf, String> {
-    let base = dirs::cache_dir()
-        .or_else(dirs::data_local_dir)
-        .ok_or_else(|| "no cache directory available".to_string())?;
-    Ok(base.join("qpxui").join("s3-cache"))
-}
-
 /// Cache file for `s3://bucket/key`: a folder named by a hash of the bucket
 /// and key, holding the object under its file name with unsafe characters
 /// replaced. Keys that differ only in `/` versus `_` or in letter case get
@@ -235,64 +226,75 @@ pub async fn cache_s3_views(
     paths: Vec<String>,
 ) -> Result<Vec<ViewInfo>, String> {
     let client = client_for_bucket(&bucket).await?;
-    let root = cache_root()?;
-    std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    let root = CacheKind::S3.root()?;
+    cache_s3_views_impl(Some(&app), &client, &root, cancel_id, bucket, paths).await
+}
 
-    // Register the cancel token after the setup that can fail (credentials,
-    // region config), so a failed setup never leaks a registry entry.
-    let token = xfers::begin(&cancel_id);
+/// Testable core of [`cache_s3_views`]: `app` may be `None`, and `client`
+/// and `root` point at a test server and folder in tests.
+async fn cache_s3_views_impl(
+    app: Option<&AppHandle>,
+    client: &Client,
+    root: &std::path::Path,
+    cancel_id: String,
+    bucket: String,
+    paths: Vec<String>,
+) -> Result<Vec<ViewInfo>, String> {
+    std::fs::create_dir_all(root).map_err(|e| e.to_string())?;
+    let batch = xfers::begin(&cancel_id);
+    let token = &batch.token;
 
-    let result: Result<Vec<ViewInfo>, String> = (async {
-        // Size everything still to fetch first, so a download that cannot
-        // fit on the cache disk is refused before any byte is written.
-        let mut plan = Vec::new();
-        let mut need = 0u64;
-        for p in &paths {
-            if xfers::is_cancelled(&token) {
-                return Err("cancelled".to_string());
-            }
-            let key = p.trim_start_matches(&format!("s3://{bucket}/")).to_string();
-            let local = cache_path(&root, &bucket, &key);
-            let size = if local.exists() {
-                0
-            } else {
-                let s3size = xfers::cancellable(&token, async {
-                    client
-                        .head_object()
-                        .bucket(&bucket)
-                        .key(&key)
-                        .send()
-                        .await
-                        .map_err(|e| format!("S3 head {key}: {e}"))
-                })
-                .await?
-                .content_length()
-                .unwrap_or(0)
-                .max(0) as u64;
-                s3size
-            };
-            need = need.saturating_add(size);
-            plan.push((key, local, size));
+    // Size everything still to fetch first, so a download that cannot fit
+    // on the cache disk is refused before any byte is written. `None` marks
+    // a file that is already cached.
+    let mut plan = Vec::new();
+    for p in &paths {
+        if xfers::is_cancelled(token) {
+            return Err("cancelled".to_string());
         }
-        xfers::ensure_space(&root, need)?;
+        let key = p.trim_start_matches(&format!("s3://{bucket}/")).to_string();
+        let name = key.rsplit_once('/').map_or(key.as_str(), |(_, n)| n);
+        let (_, view, format) =
+            qpx::parse_filename(name).ok_or_else(|| format!("not a QPX view file: {p}"))?;
+        let name = name.to_string();
+        let local = cache_path(root, &bucket, &key);
+        let size = if local.exists() {
+            None
+        } else {
+            let head = xfers::cancellable(token, async {
+                client
+                    .head_object()
+                    .bucket(&bucket)
+                    .key(&key)
+                    .send()
+                    .await
+                    .map_err(|e| format!("S3 head {key}: {e}"))
+            })
+            .await?;
+            Some(head.content_length().unwrap_or(0).max(0) as u64)
+        };
+        plan.push((key, name, view, format, local, size));
+    }
+    let need = plan
+        .iter()
+        .filter_map(|item| item.5)
+        .fold(0u64, u64::saturating_add);
+    xfers::ensure_space(root, need)?;
 
-        let mut out = Vec::new();
-        for (key, local, head) in plan {
-            if xfers::is_cancelled(&token) {
-                return Err("cancelled".to_string());
-            }
-            let base = key.rsplit('/').next().unwrap_or(&key).to_string();
-            let (_, view, format) = qpx::parse_filename(&base)
-                .unwrap_or_else(|| (String::new(), String::new(), "parquet".to_string()));
-            if let Some(parent) = local.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-            }
-
-            let size = if local.exists() {
-                // Already cached — no transfer needed.
-                std::fs::metadata(&local).map(|m| m.len()).unwrap_or(0)
-            } else {
-                let mut resp = xfers::cancellable(&token, async {
+    let mut out = Vec::new();
+    for (key, name, view, format, local, size) in plan {
+        if xfers::is_cancelled(token) {
+            return Err("cancelled".to_string());
+        }
+        let size_bytes = match size {
+            None => std::fs::metadata(&local)
+                .map_err(|e| format!("{}: {e}", local.display()))?
+                .len(),
+            Some(head) => {
+                if let Some(parent) = local.parent() {
+                    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                }
+                let resp = xfers::cancellable(token, async {
                     client
                         .get_object()
                         .bucket(&bucket)
@@ -302,55 +304,122 @@ pub async fn cache_s3_views(
                         .map_err(|e| format!("S3 get {key}: {e}"))
                 })
                 .await?;
-
-                // Stream to `<file>.part` (constant memory); the partial file
-                // is removed if we bail out on cancel or error.
-                let mut part = xfers::PartFile::create(&local).await?;
-                loop {
-                    let next = match tokio::time::timeout(xfers::POLL, resp.body.try_next()).await {
-                        Ok(n) => n.map_err(|e| e.to_string())?,
-                        Err(_) if xfers::is_cancelled(&token) => {
-                            return Err("cancelled".to_string())
-                        }
-                        Err(_) => continue,
-                    };
-                    if xfers::is_cancelled(&token) {
-                        return Err("cancelled".to_string());
-                    }
-                    let Some(chunk) = next else { break };
-                    part.write(&chunk).await?;
-                    progress::chunk(&app, &base, part.written, head);
-                }
-                if head > 0 && part.written != head {
-                    return Err(format!(
-                        "S3 get {key}: got {} of {} bytes",
-                        part.written, head
-                    ));
-                }
-                let done = part.finish().await?;
-                progress::done(&app, &base, done);
-                done
-            };
-            out.push(ViewInfo {
-                name: base,
-                view,
-                format,
-                path: local.to_string_lossy().to_string(),
-                size_bytes: size,
-            });
-        }
-        Ok(out)
-    })
-    .await;
-
-    xfers::end(&cancel_id);
-    result
+                let key = &key;
+                let body = futures::stream::try_unfold(resp.body, move |mut body| async move {
+                    let chunk = body
+                        .try_next()
+                        .await
+                        .map_err(|e| format!("S3 get {key}: {e}"))?;
+                    Ok(chunk.map(|c| (c, body)))
+                });
+                xfers::save(app, token, &name, &local, head, body).await?
+            }
+        };
+        out.push(ViewInfo {
+            name,
+            view,
+            format,
+            path: local.to_string_lossy().to_string(),
+            size_bytes,
+        });
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
     use std::path::{Component, Path};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    /// Bare S3 stand-in for path-style requests: HEAD and GET of
+    /// `/<bucket>/<key>` answer with the object; GETs are counted.
+    async fn fake_s3(objects: HashMap<&'static str, Vec<u8>>) -> (Client, Arc<AtomicUsize>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let gets = Arc::new(AtomicUsize::new(0));
+        let (objects, counter) = (Arc::new(objects), gets.clone());
+        tokio::spawn(async move {
+            loop {
+                let (mut sock, _) = listener.accept().await.unwrap();
+                let (objects, gets) = (objects.clone(), counter.clone());
+                tokio::spawn(async move {
+                    let mut buf = vec![0u8; 16 * 1024];
+                    let n = sock.read(&mut buf).await.unwrap();
+                    let head = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let mut line = head.split_whitespace();
+                    let (method, target) = (line.next().unwrap(), line.next().unwrap());
+                    let path = target.split('?').next().unwrap();
+                    let resp = match objects.get(path) {
+                        Some(body) => {
+                            let mut r = format!(
+                                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                                body.len()
+                            )
+                            .into_bytes();
+                            if method == "GET" {
+                                gets.fetch_add(1, Ordering::SeqCst);
+                                r.extend_from_slice(body);
+                            }
+                            r
+                        }
+                        None => b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                            .to_vec(),
+                    };
+                    sock.write_all(&resp).await.unwrap();
+                });
+            }
+        });
+        let conf = aws_sdk_s3::config::Builder::new()
+            .behavior_version(BehaviorVersion::latest())
+            .endpoint_url(format!("http://{addr}"))
+            .force_path_style(true)
+            .region(aws_config::Region::new("us-east-1"))
+            .credentials_provider(aws_sdk_s3::config::Credentials::new(
+                "test", "test", None, None, "test",
+            ))
+            .build();
+        (Client::from_conf(conf), gets)
+    }
+
+    #[tokio::test]
+    async fn downloads_each_object_once_into_its_own_file() {
+        let (a, b) = (vec![1u8; 300_000], vec![2u8; 1_000]);
+        let (client, gets) = fake_s3(HashMap::from([
+            ("/bkt/x/y_z.psm.parquet", a.clone()),
+            ("/bkt/x_y/z.psm.parquet", b.clone()),
+        ]))
+        .await;
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = vec![
+            "s3://bkt/x/y_z.psm.parquet".to_string(),
+            "s3://bkt/x_y/z.psm.parquet".to_string(),
+        ];
+        let open = |id: &str| {
+            cache_s3_views_impl(
+                None,
+                &client,
+                tmp.path(),
+                id.to_string(),
+                "bkt".to_string(),
+                paths.clone(),
+            )
+        };
+        let views = open("s3-first").await.unwrap();
+        assert_eq!(std::fs::read(&views[0].path).unwrap(), a);
+        assert_eq!(std::fs::read(&views[1].path).unwrap(), b);
+        assert_eq!(
+            (views[0].view.as_str(), views[0].name.as_str()),
+            ("psm", "y_z.psm.parquet")
+        );
+        // Opening the same views again is served from the cache.
+        let again = open("s3-second").await.unwrap();
+        assert_eq!(gets.load(Ordering::SeqCst), 2);
+        assert_eq!(again[1].size_bytes, b.len() as u64);
+    }
 
     #[test]
     fn every_key_gets_its_own_cache_file() {

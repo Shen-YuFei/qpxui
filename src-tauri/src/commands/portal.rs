@@ -12,9 +12,9 @@
 //! so this module provides the app with a ready-made example source to open.
 
 use crate::commands::portal_http;
-use crate::commands::progress;
-use crate::commands::transfers as xfers;
+use crate::commands::transfers::{self as xfers, CacheKind};
 use crate::qpx::ViewInfo;
+use futures::StreamExt;
 use reqwest::Client;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -96,13 +96,6 @@ async fn remote_size(client: &Client, url: &str, token: &AtomicBool) -> Result<u
     })
     .await?;
     Ok(total)
-}
-
-fn cache_root() -> Result<PathBuf, String> {
-    let base = dirs::cache_dir()
-        .or_else(dirs::data_local_dir)
-        .ok_or_else(|| "no cache directory available".to_string())?;
-    Ok(base.join("qpxui").join("portal"))
 }
 
 async fn get_html(url: &str) -> Result<String, String> {
@@ -770,7 +763,7 @@ pub async fn portal_cache_views(
     cancel_id: String,
     urls: Vec<String>,
 ) -> Result<Vec<ViewInfo>, String> {
-    portal_cache_views_impl(Some(&app), &cache_root()?, cancel_id, urls).await
+    portal_cache_views_impl(Some(&app), &CacheKind::Portal.root()?, cancel_id, urls).await
 }
 
 /// Testable core of [`portal_cache_views`]: `app` may be `None` and `root`
@@ -785,59 +778,57 @@ async fn portal_cache_views_impl(
         .build()
         .map_err(|e| format!("portal HTTP client: {e:?}"))?;
     std::fs::create_dir_all(root).map_err(|e| e.to_string())?;
+    let batch = xfers::begin(&cancel_id);
+    let token = &batch.token;
 
-    // Register the cancel token only after the setup that can fail, so a
-    // failed setup never leaks a registry entry (it is cleaned up by `end`
-    // below once registered).
-    let token = xfers::begin(&cancel_id);
-
-    let result: Result<Vec<ViewInfo>, String> = (async {
-        // Resolve names and cache paths, then size everything still to fetch
-        // so a download that cannot fit is refused before it starts.
-        let mut plan = Vec::new();
-        for url in urls {
-            let name = url
-                .rsplit('/')
-                .next()
-                .ok_or_else(|| format!("bad url {url}"))?
-                .to_string();
-            if !safe_component(&name) {
-                return Err(format!("unsafe file name in {url}"));
-            }
-            let dir = run_cache_dir(root, &url);
-            let local = dir.join(&name);
-            plan.push((url, name, dir, local));
+    // Resolve names and cache paths, then size everything still to fetch
+    // so a download that cannot fit is refused before it starts.
+    let mut plan = Vec::new();
+    for url in urls {
+        let name = url.rsplit_once('/').map_or(url.as_str(), |(_, n)| n);
+        if !safe_component(name) {
+            return Err(format!("unsafe file name in {url}"));
         }
-        let mut sizes = Vec::with_capacity(plan.len());
-        let mut need = 0u64;
-        for (url, name, _, local) in &plan {
-            if xfers::is_cancelled(&token) {
-                return Err("cancelled".to_string());
-            }
-            let size = if local.exists() {
-                0
-            } else {
-                remote_size(&client, url, &token)
-                    .await
-                    .map_err(|e| format!("size of {name}: {e}"))?
-            };
-            need = need.saturating_add(size);
-            sizes.push(size);
+        let (_, view, format) = crate::qpx::parse_filename(name)
+            .ok_or_else(|| format!("not a QPX view file: {url}"))?;
+        let name = name.to_string();
+        let dir = run_cache_dir(root, &url);
+        let local = dir.join(&name);
+        plan.push((url, name, view, format, dir, local));
+    }
+    // `None` marks a file that is already cached.
+    let mut sizes = Vec::with_capacity(plan.len());
+    for (url, name, .., local) in &plan {
+        if xfers::is_cancelled(token) {
+            return Err("cancelled".to_string());
         }
-        xfers::ensure_space(root, need)?;
+        sizes.push(if local.exists() {
+            None
+        } else {
+            let size = remote_size(&client, url, token)
+                .await
+                .map_err(|e| format!("size of {name}: {e}"))?;
+            Some(size)
+        });
+    }
+    let need = sizes
+        .iter()
+        .flatten()
+        .fold(0u64, |a, b| a.saturating_add(*b));
+    xfers::ensure_space(root, need)?;
 
-        let mut out = Vec::new();
-        for ((url, name, dir, local), head_size) in plan.into_iter().zip(sizes) {
-            if xfers::is_cancelled(&token) {
-                return Err("cancelled".to_string());
-            }
-            let (_, view, format) = crate::qpx::parse_filename(&name)
-                .unwrap_or_else(|| (String::new(), String::new(), "parquet".to_string()));
-            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-            let size = if local.exists() {
-                std::fs::metadata(&local).map(|m| m.len()).unwrap_or(0)
-            } else {
-                let resp = xfers::cancellable(&token, async {
+    let mut out = Vec::new();
+    for ((url, name, view, format, dir, local), size) in plan.into_iter().zip(sizes) {
+        if xfers::is_cancelled(token) {
+            return Err("cancelled".to_string());
+        }
+        let size_bytes = match size {
+            None => std::fs::metadata(&local)
+                .map_err(|e| format!("{}: {e}", local.display()))?
+                .len(),
+            Some(head_size) => {
+                std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+                let resp = xfers::cancellable(token, async {
                     let resp = client
                         .get(&url)
                         .send()
@@ -853,57 +844,21 @@ async fn portal_cache_views_impl(
                 if total > head_size {
                     xfers::ensure_space(&dir, total)?;
                 }
-
-                // Stream chunk-by-chunk to `<name>.part`: constant memory,
-                // progress, and cancellation (also while the server stalls).
-                let mut part = xfers::PartFile::create(&local).await?;
-                let mut stream = resp.bytes_stream();
-                use futures::StreamExt;
-                loop {
-                    let next = match tokio::time::timeout(xfers::POLL, stream.next()).await {
-                        Ok(n) => n,
-                        Err(_) if xfers::is_cancelled(&token) => {
-                            return Err("cancelled".to_string())
-                        }
-                        Err(_) => continue,
-                    };
-                    if xfers::is_cancelled(&token) {
-                        return Err("cancelled".to_string());
-                    }
-                    let Some(chunk) = next else { break };
-                    let chunk = chunk.map_err(|e| format!("read {name}: {e}"))?;
-                    part.write(&chunk).await?;
-                    if let Some(app) = app {
-                        progress::chunk(app, &name, part.written, total);
-                    }
-                }
-                if total > 0 && part.written != total {
-                    return Err(format!(
-                        "download {name}: got {} of {} bytes",
-                        part.written, total
-                    ));
-                }
-                let done = part.finish().await?;
-                if let Some(app) = app {
-                    progress::done(app, &name, done);
-                }
-                done
-            };
-            out.push(ViewInfo {
-                name,
-                view,
-                format,
-                path: local.to_string_lossy().to_string(),
-                size_bytes: size,
-            });
-        }
-        Ok(out)
-    })
-    .await;
-
-    // Clean up the token whether we succeeded, failed, or were cancelled.
-    xfers::end(&cancel_id);
-    result
+                let body = resp
+                    .bytes_stream()
+                    .map(|chunk| chunk.map_err(|e| format!("read {name}: {e}")));
+                xfers::save(app, token, &name, &local, total, body).await?
+            }
+        };
+        out.push(ViewInfo {
+            name,
+            view,
+            format,
+            path: local.to_string_lossy().to_string(),
+            size_bytes,
+        });
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

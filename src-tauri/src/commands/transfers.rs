@@ -4,10 +4,14 @@
 //! between every chunk. `cancel_download(id)` flips the token; the loop then
 //! aborts promptly instead of streaming the whole file.
 
+use crate::commands::progress;
+use bytes::Bytes;
+use futures::{Stream, StreamExt};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use tauri::AppHandle;
 use tokio::io::AsyncWriteExt;
 
 static ACTIVE: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
@@ -16,23 +20,33 @@ fn registry() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
     ACTIVE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Register a download batch and return its token. Call [`end`] when the
-/// command returns, so the registry doesn't grow unboundedly.
-pub fn begin(id: &str) -> Arc<AtomicBool> {
+/// A registered download batch. Dropping it, however the command ends,
+/// removes its id from the registry.
+pub struct Batch {
+    id: String,
+    pub token: Arc<AtomicBool>,
+}
+
+/// Register a download batch under the frontend's `cancelId`.
+pub fn begin(id: &str) -> Batch {
     let token = Arc::new(AtomicBool::new(false));
     registry()
         .lock()
         .expect("transfers registry poisoned")
         .insert(id.to_string(), token.clone());
-    token
+    Batch {
+        id: id.to_string(),
+        token,
+    }
 }
 
-/// Remove a finished (or failed) download from the registry.
-pub fn end(id: &str) {
-    registry()
-        .lock()
-        .expect("transfers registry poisoned")
-        .remove(id);
+impl Drop for Batch {
+    fn drop(&mut self) {
+        registry()
+            .lock()
+            .expect("transfers registry poisoned")
+            .remove(&self.id);
+    }
 }
 
 /// Request cancellation for a batch. Returns whether a matching download
@@ -94,6 +108,26 @@ pub fn cancel_download(id: String) -> Result<(), String> {
 
 /// How often a stalled download re-checks its cancel token.
 pub const POLL: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Download cache of one source, under the user's cache folder.
+#[derive(Clone, Copy, Debug, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CacheKind {
+    Portal,
+    S3,
+}
+
+impl CacheKind {
+    /// `<cache dir>/qpxui/portal` or `<cache dir>/qpxui/s3-cache`.
+    pub fn root(self) -> Result<PathBuf, String> {
+        let base = dirs::cache_dir().ok_or_else(|| "no cache directory available".to_string())?;
+        let sub = match self {
+            CacheKind::Portal => "portal",
+            CacheKind::S3 => "s3-cache",
+        };
+        Ok(base.join("qpxui").join(sub))
+    }
+}
 
 /// Space left free on the cache volume after a download, so a big transfer
 /// never fills the disk to the last byte.
@@ -206,6 +240,44 @@ impl Drop for PartFile {
     }
 }
 
+/// Stream one response body to `dest` through its `.part` file, reporting
+/// progress for `name` and stopping once `token` is set, also while the
+/// server stalls between chunks. `total` is the expected size, 0 if unknown.
+pub async fn save(
+    app: Option<&AppHandle>,
+    token: &AtomicBool,
+    name: &str,
+    dest: &Path,
+    total: u64,
+    body: impl Stream<Item = Result<Bytes, String>>,
+) -> Result<u64, String> {
+    let mut body = std::pin::pin!(body);
+    let mut part = PartFile::create(dest).await?;
+    loop {
+        let next = match tokio::time::timeout(POLL, body.next()).await {
+            Ok(next) => next,
+            Err(_) if is_cancelled(token) => return Err("cancelled".to_string()),
+            Err(_) => continue,
+        };
+        if is_cancelled(token) {
+            return Err("cancelled".to_string());
+        }
+        let Some(chunk) = next else { break };
+        part.write(&chunk?).await?;
+        if let Some(app) = app {
+            progress::chunk(app, name, part.written, total);
+        }
+    }
+    if total > 0 && part.written != total {
+        return Err(format!("{name}: got {} of {total} bytes", part.written));
+    }
+    let done = part.finish().await?;
+    if let Some(app) = app {
+        progress::done(app, name, done);
+    }
+    Ok(done)
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiskSpace {
@@ -214,16 +286,11 @@ pub struct DiskSpace {
     pub dir: String,
 }
 
-/// Tauri command: free space on the download cache volume (`kind` is
-/// `portal` or `s3`), so the UI can warn before starting a download.
+/// Tauri command: free space on the download cache volume, so the UI can
+/// warn before starting a download.
 #[tauri::command]
-pub fn cache_free_space(kind: String) -> Result<DiskSpace, String> {
-    let base = dirs::cache_dir()
-        .or_else(dirs::data_local_dir)
-        .ok_or_else(|| "no cache directory available".to_string())?;
-    let dir = base
-        .join("qpxui")
-        .join(if kind == "s3" { "s3-cache" } else { "portal" });
+pub fn cache_free_space(kind: CacheKind) -> Result<DiskSpace, String> {
+    let dir = kind.root()?;
     Ok(DiskSpace {
         free: free_space(&dir)?,
         reserve: RESERVE_BYTES,
