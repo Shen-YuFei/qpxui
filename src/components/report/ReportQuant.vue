@@ -6,7 +6,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import ChartCard from "../ChartCard.vue";
 import ReportTable from "../ReportTable.vue";
 import type { DatasetInfo } from "../../lib/api";
-import { SERIES_COLORS, chartTheme, commonPrefix, toCsv, type ChartSpec } from "../../lib/charts";
+import { chartTheme, commonPrefix, seriesColor, toCsv, type ChartSpec } from "../../lib/charts";
 import { correlationChart, pcaChart, profileChart, type SampleStyle } from "../../lib/quantCharts";
 import { settings } from "../../lib/settings";
 import { saveText } from "../../lib/export";
@@ -35,6 +35,7 @@ import {
   pca,
   presence,
   quantile,
+  sampleGroup,
   type QuantMatrix,
 } from "../../lib/quant";
 
@@ -176,18 +177,14 @@ const groupOptions = computed(() =>
   raw.value && isSampleCols.value ? groupingColumns(raw.value.samples, meta.value) : ([] as string[])
 );
 
-function groupOf(sample: string): string {
-  if (!groupBy.value) return "";
-  const v = meta.value.get(sample)?.[groupBy.value];
-  return v == null || v === "" ? "not available" : String(v);
-}
+const groupOf = (sample: string) => sampleGroup(meta.value, groupBy.value, sample);
 
 const groups = computed(() => {
   const m = matrix.value;
   if (!m || !groupBy.value) return [] as string[];
   return [...new Set(m.samples.map(groupOf))].sort(natural);
 });
-const groupColor = (g: string) => (g ? SERIES_COLORS[Math.max(0, groups.value.indexOf(g)) % SERIES_COLORS.length] : chartTheme().accent);
+const groupColor = (g: string) => (g ? seriesColor(groups.value, g) : chartTheme().accent);
 
 /** Samples ordered by group, then name. */
 const order = computed(() => {

@@ -199,3 +199,11 @@ export function groupingColumns(samples: string[], meta: Map<string, Record<stri
   const pref = ["disease", "histologic_subtype", "organism_part", "cell_type", "cell_line", "sex", "developmental_stage"];
   return out.sort((a, b) => ((pref.indexOf(a) + 1 || 99) - (pref.indexOf(b) + 1 || 99)) || a.localeCompare(b));
 }
+
+/** A sample's value of the attribute `by` in `meta` ("not available" when it
+ * has none), or "" when not grouping. */
+export function sampleGroup(meta: Map<string, Record<string, any>>, by: string, sample: string): string {
+  if (!by) return "";
+  const v = meta.get(sample)?.[by];
+  return v == null || v === "" ? "not available" : String(v);
+}

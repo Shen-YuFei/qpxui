@@ -80,6 +80,12 @@ export function chartTheme(): ChartTheme {
 
 export const SERIES_COLORS = ["#22d3ee", "#818cf8", "#f472b6", "#fbbf24", "#34d399", "#f87171", "#a3e635", "#fb923c"];
 
+/** The colour of `key` by its place in `keys`, cycling through the series
+ * colours (a key not in `keys` takes the first). */
+export function seriesColor<T>(keys: T[], key: T): string {
+  return SERIES_COLORS[Math.max(0, keys.indexOf(key)) % SERIES_COLORS.length];
+}
+
 export function buildOption(spec: ChartSpec, t: ChartTheme): any {
   const horizontal = spec.kind === "hbar";
   const many = spec.labels.length > 40;

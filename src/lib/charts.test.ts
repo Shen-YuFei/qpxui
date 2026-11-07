@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { commonPrefix, escapeHtml, specToCsv, toCsv } from "./charts";
+import { SERIES_COLORS, commonPrefix, escapeHtml, seriesColor, specToCsv, toCsv } from "./charts";
 
 describe("commonPrefix", () => {
   it("cuts a shared run-name prefix at a separator", () => {
@@ -26,5 +26,14 @@ describe("CSV export", () => {
 describe("escapeHtml", () => {
   it("escapes markup in tooltips", () => {
     expect(escapeHtml('<b>"x" & y</b>')).toBe("&lt;b&gt;&quot;x&quot; &amp; y&lt;/b&gt;");
+  });
+});
+
+describe("seriesColor", () => {
+  it("colours keys by their place, cycling past the last colour", () => {
+    const keys = Array.from({ length: SERIES_COLORS.length + 1 }, (_, i) => i);
+    expect(seriesColor(keys, 1)).toBe(SERIES_COLORS[1]);
+    expect(seriesColor(keys, SERIES_COLORS.length)).toBe(SERIES_COLORS[0]);
+    expect(seriesColor([2, 3], null as number | null)).toBe(SERIES_COLORS[0]);
   });
 });

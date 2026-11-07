@@ -6,10 +6,10 @@
 import { computed, ref, watch } from "vue";
 import ChartCard from "../ChartCard.vue";
 import type { DatasetInfo } from "../../lib/api";
-import { SERIES_COLORS, chartTheme, toCsv } from "../../lib/charts";
+import { chartTheme, seriesColor, toCsv } from "../../lib/charts";
 import { distributionChart, retentionChart, sampleChart, type Feature, type ProfileStyle } from "../../lib/peptidoformCharts";
 import { runSql } from "../../lib/duck";
-import { groupingColumns, natural, quantile } from "../../lib/quant";
+import { groupingColumns, natural, quantile, sampleGroup } from "../../lib/quant";
 import {
   cachedSql,
   ident,
@@ -161,11 +161,7 @@ watch(() => props.peptidoform, load, { immediate: true });
 
 const isSamples = computed(() => channels.value.some((c) => meta.value.has(c.sample)));
 const groupOptions = computed(() => (isSamples.value ? groupingColumns([...meta.value.keys()], meta.value) : []));
-function groupOf(sample: string): string {
-  if (!groupBy.value) return "";
-  const v = meta.value.get(sample)?.[groupBy.value];
-  return v == null || v === "" ? "not available" : String(v);
-}
+const groupOf = (sample: string) => sampleGroup(meta.value, groupBy.value, sample);
 
 /** Every sample the peptidoform could be in (all mapped samples), else those seen. */
 const sampleAxis = computed(() => {
@@ -174,7 +170,7 @@ const sampleAxis = computed(() => {
   return [...all].sort((a, b) => natural(groupOf(a), groupOf(b)) || natural(a, b));
 });
 const groups = computed(() => (groupBy.value ? [...new Set(sampleAxis.value.map(groupOf))].sort(natural) : []));
-const groupColor = (g: string) => (g ? SERIES_COLORS[Math.max(0, groups.value.indexOf(g)) % SERIES_COLORS.length] : chartTheme().accent);
+const groupColor = (g: string) => (g ? seriesColor(groups.value, g) : chartTheme().accent);
 
 /** log2 intensity per sample, summed over the peptidoform's features (charges, fractions). */
 const perSample = computed(() => {

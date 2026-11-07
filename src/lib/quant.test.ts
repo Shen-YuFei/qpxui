@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { averageLinkageOrder, correlation, groupingColumns, medianNormalize, pca, presence, quantile, type QuantMatrix } from "./quant";
+import { averageLinkageOrder, correlation, groupingColumns, medianNormalize, pca, presence, quantile, sampleGroup, type QuantMatrix } from "./quant";
 
 const rows = (xs: number[][]) => xs.map((r) => Float64Array.from(r));
 
@@ -78,5 +78,16 @@ describe("groupingColumns", () => {
       ["s3", { sample_accession: "s3", sex: "F", disease: "x", batch: "2", donor: "d3" }],
     ]);
     expect(groupingColumns(["s1", "s2", "s3"], meta)).toEqual(["disease", "sex", "batch"]);
+  });
+});
+
+describe("sampleGroup", () => {
+  it("reads the sample's attribute, naming a missing value", () => {
+    const meta = new Map<string, Record<string, any>>([["s1", { condition: "tumour", batch: 2 }], ["s2", { condition: "" }]]);
+    expect(sampleGroup(meta, "condition", "s1")).toBe("tumour");
+    expect(sampleGroup(meta, "batch", "s1")).toBe("2");
+    expect(sampleGroup(meta, "condition", "s2")).toBe("not available");
+    expect(sampleGroup(meta, "condition", "s3")).toBe("not available");
+    expect(sampleGroup(meta, "", "s1")).toBe("");
   });
 });

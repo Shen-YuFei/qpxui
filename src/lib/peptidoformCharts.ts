@@ -1,7 +1,7 @@
 // ECharts options for a peptidoform's profile on the Peptidoforms tab: its
 // intensity per sample, the intensity distribution per sample group and its
 // retention time in each run.
-import { SERIES_COLORS, commonPrefix, escapeHtml, type ChartTheme, type GroupStyle } from "./charts";
+import { commonPrefix, escapeHtml, seriesColor, type ChartTheme, type GroupStyle } from "./charts";
 import { quantile } from "./quant";
 
 /** One feature (or PSM) of the peptidoform. */
@@ -153,7 +153,6 @@ export function retentionChart(features: Feature[], runs: string[], charges: (nu
   const labels = runs;
   const idx = new Map(labels.map((r, i) => [r, i]));
   const ranges = withRt.filter((f) => f.rtLo != null && f.rtHi != null);
-  const chargeColor = (z: number | null) => SERIES_COLORS[Math.max(0, charges.indexOf(z)) % SERIES_COLORS.length];
   return {
     animation: false,
     backgroundColor: "transparent",
@@ -190,7 +189,7 @@ export function retentionChart(features: Feature[], runs: string[], charges: (nu
         name: z == null ? "z ?" : `z ${z}`,
         type: "scatter",
         symbolSize: 8,
-        itemStyle: { color: chargeColor(z), borderColor: t.bg, borderWidth: 1 },
+        itemStyle: { color: seriesColor(charges, z), borderColor: t.bg, borderWidth: 1 },
         data: withRt.filter((f) => f.charge === z).map((f) => ({ value: [idx.get(f.run), +f.rt!.toFixed(3)], f })),
         markLine:
           k === 0 && med != null
