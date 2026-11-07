@@ -314,7 +314,6 @@ fn backoff_delay(attempt: usize) -> std::time::Duration {
 ///   * a transient failure (network/send error, or 408/425/429/5xx such as a
 ///     remote gateway 502) -> retry with a short backoff, up to a couple of
 ///     attempts, before giving up.
-#[allow(clippy::too_many_arguments)]
 async fn http_range(
     client: &reqwest::Client,
     url: &str,
@@ -322,8 +321,8 @@ async fn http_range(
     range: &str,
 ) -> Result<reqwest::Response, String> {
     const MAX_ATTEMPTS: usize = 3; // initial + 2 retries
-    let mut last_err: Option<String> = None;
-    for attempt in 0..MAX_ATTEMPTS {
+    let mut attempt = 0;
+    loop {
         // Use the cached signed URL on the first try, otherwise resolve fresh.
         let cached = resolved.lock().unwrap().clone();
         let target = match cached {
@@ -334,6 +333,7 @@ async fn http_range(
                 u
             }
         };
+        let retry = attempt + 1 < MAX_ATTEMPTS;
 
         let send = client
             .get(&target)
@@ -341,40 +341,33 @@ async fn http_range(
             .send()
             .await;
 
-        let resp = match send {
-            Ok(r) => r,
+        match send {
+            // Transport-level failure (timeout / connection reset): transient.
+            Err(_) if retry => tokio::time::sleep(backoff_delay(attempt)).await,
             Err(e) => {
-                // Transport-level failure (timeout / connection reset): transient.
-                if attempt + 1 < MAX_ATTEMPTS {
-                    last_err = Some(format!("range get {url}: {e}"));
-                    tokio::time::sleep(backoff_delay(attempt)).await;
-                    continue;
-                }
                 return Err(format!(
                     "range get {url}: {e} after {MAX_ATTEMPTS} attempts"
-                ));
+                ))
             }
-        };
-
-        let st = resp.status().as_u16();
-        // Expired / rejected signed URL: drop the cached URL and resolve fresh.
-        if (st == 403 || st == 400 || st == 401) && attempt == 0 {
-            *resolved.lock().unwrap() = None;
-            continue;
+            Ok(resp) => {
+                let st = resp.status().as_u16();
+                if (st == 403 || st == 400 || st == 401) && attempt == 0 {
+                    // Expired / rejected signed URL: drop the cached URL and
+                    // resolve fresh.
+                    *resolved.lock().unwrap() = None;
+                } else if resp.status().is_success() {
+                    return Ok(resp);
+                } else if is_transient_status(st) && retry {
+                    // Retry transient statuses, but fail fast on permanent
+                    // client errors (e.g. 404) that retrying will never fix.
+                    tokio::time::sleep(backoff_delay(attempt)).await;
+                } else {
+                    return Err(format!("range get {url}: HTTP {st}"));
+                }
+            }
         }
-        if resp.status().is_success() {
-            return Ok(resp);
-        }
-        // Not successful: retry transient statuses, but fail fast on permanent
-        // client errors (e.g. 404) that retrying will never fix.
-        if is_transient_status(st) && attempt + 1 < MAX_ATTEMPTS {
-            last_err = Some(format!("range get {url}: HTTP {st}"));
-            tokio::time::sleep(backoff_delay(attempt)).await;
-            continue;
-        }
-        return Err(format!("range get {url}: HTTP {st}"));
+        attempt += 1;
     }
-    Err(last_err.unwrap_or_else(|| format!("range get {url}: signed URL rejected")))
 }
 
 /// Fetch one inclusive byte range from the object's source.
@@ -803,5 +796,84 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.contains("only .parquet"));
+    }
+
+    /// HTTP server whose range requests answer the given statuses in turn;
+    /// resolving requests (`bytes=0-0`) always succeed. Returns its URL and
+    /// the number of range requests served.
+    async fn scripted_server(statuses: Vec<u16>) -> (String, Arc<AtomicU64>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let served = Arc::new(AtomicU64::new(0));
+        let count = served.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else {
+                    return;
+                };
+                let mut buf = [0u8; 2048];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_lowercase();
+                let st = if req.contains("range: bytes=0-0") {
+                    206
+                } else {
+                    let i = count.fetch_add(1, Ordering::SeqCst) as usize;
+                    statuses[i.min(statuses.len() - 1)]
+                };
+                let resp =
+                    format!("HTTP/1.1 {st} X\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        (format!("http://{addr}/x.parquet"), served)
+    }
+
+    async fn range_with(statuses: Vec<u16>) -> (Result<u16, String>, u64) {
+        let (url, served) = scripted_server(statuses).await;
+        let resolved = Mutex::new(Some(url.clone()));
+        let out = http_range(&reqwest::Client::new(), &url, &resolved, "bytes=0-9")
+            .await
+            .map(|r| r.status().as_u16());
+        (out, served.load(Ordering::SeqCst))
+    }
+
+    #[tokio::test]
+    async fn range_retries_transient_statuses() {
+        assert_eq!(range_with(vec![503, 502, 206]).await, (Ok(206), 3));
+        let (out, served) = range_with(vec![503]).await;
+        assert_eq!(served, 3);
+        assert!(out.unwrap_err().ends_with("HTTP 503"));
+    }
+
+    #[tokio::test]
+    async fn range_retries_a_failed_send_with_a_fresh_url() {
+        let (url, served) = scripted_server(vec![206]).await;
+        // The cached signed URL points at a port nothing listens on.
+        let closed = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let dead = format!("http://{}/x.parquet", closed.local_addr().unwrap());
+        drop(closed);
+        let resolved = Mutex::new(Some(dead));
+        let resp = http_range(&reqwest::Client::new(), &url, &resolved, "bytes=0-9")
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 206);
+        assert_eq!(served.load(Ordering::SeqCst), 1);
+        assert_eq!(resolved.lock().unwrap().as_deref(), Some(url.as_str()));
+    }
+
+    #[tokio::test]
+    async fn range_fails_fast_on_a_permanent_status() {
+        let (out, served) = range_with(vec![404]).await;
+        assert_eq!(served, 1);
+        assert!(out.unwrap_err().ends_with("HTTP 404"));
+    }
+
+    #[tokio::test]
+    async fn range_resolves_a_rejected_signed_url_again_once() {
+        assert_eq!(range_with(vec![403, 206]).await, (Ok(206), 2));
+        let (out, served) = range_with(vec![403]).await;
+        assert_eq!(served, 2);
+        assert!(out.unwrap_err().ends_with("HTTP 403"));
     }
 }
