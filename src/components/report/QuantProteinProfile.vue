@@ -67,17 +67,17 @@ const protCols: Column[] = [
 </template>
 
 <style scoped>
-@media (max-width: 1100px) {
-  .profile {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
 .profile {
   display: grid;
   grid-template-columns: minmax(380px, 2fr) 3fr;
   gap: 14px;
   margin-top: 4px;
   align-items: start;
+}
+@media (max-width: 1100px) {
+  .profile {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 .sec-head {
   display: flex;
