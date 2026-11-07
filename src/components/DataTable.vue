@@ -11,7 +11,7 @@ import ResultCell from "./table/ResultCell.vue";
 import CellMenu from "./table/CellMenu.vue";
 import HScroll from "./table/HScroll.vue";
 import SpectrumViewer from "./SpectrumViewer.vue";
-import type { PsmKey } from "../lib/queries/spectrum";
+import { psmKeyOf, whyNoSpectrum, type PsmKey } from "../lib/queries/spectrum";
 import { isModificationsCol, peptideCells, type PTMSeg } from "../lib/ptm";
 
 const props = defineProps<{ view: ViewInfo }>();
@@ -100,21 +100,10 @@ const psmRef = computed<TableRef | null>(() => {
   return { view: props.view, table: table.value, cols, types: colTypes.value, seq: "sequence" };
 });
 
-function rowValue(i: number, col: string): unknown {
-  const j = result.value.columns.findIndex((c) => c.toLowerCase() === col);
-  return j >= 0 ? result.value.rows[i]?.[j] : undefined;
-}
-
 /** Why the selected row cannot open the spectrum viewer, or "" when it can. */
 const spectrumBlock = computed<string>(() => {
   if (!menu.value || !psmRef.value) return "Spectra need a psm view with peptidoform and peak arrays";
-  const pf = rowValue(menu.value.i, "peptidoform");
-  if (typeof pf !== "string" || !pf) return "This PSM has no peptidoform";
-  if (showPeaks.value) {
-    const mz = rowValue(menu.value.i, "mz_array");
-    if (!Array.isArray(mz) || !mz.length) return "This PSM has no stored peaks";
-  }
-  return "";
+  return whyNoSpectrum(result.value.columns, result.value.rows[menu.value.i], showPeaks.value);
 });
 
 function openMenu(ev: MouseEvent, i: number, j: number) {
@@ -136,15 +125,7 @@ function viewSpectrum() {
   const blocked = spectrumBlock.value;
   closeMenu();
   if (!m || blocked) return;
-  const scan = rowValue(m.i, "scan");
-  const charge = rowValue(m.i, "charge");
-  const run = rowValue(m.i, "run_file_name");
-  spectrum.value = {
-    peptidoform: String(rowValue(m.i, "peptidoform")),
-    run_file_name: run == null ? null : String(run),
-    scan: Array.isArray(scan) ? (scan[0] as number) ?? null : ((scan as number) ?? null),
-    charge: (charge as number) ?? null,
-  };
+  spectrum.value = psmKeyOf(result.value.columns, result.value.rows[m.i]);
 }
 
 function cellText(v: unknown): string {

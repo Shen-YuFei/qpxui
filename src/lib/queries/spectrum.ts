@@ -15,6 +15,37 @@ export interface PsmKey {
 const SPECTRUM_COLUMNS = ["peptidoform", "charge", "run_file_name", "scan", "calculated_mz", "observed_mz", "posterior_error_probability",
   "rt", "cv_params", "mz_array", "intensity_array", "charge_array", "ion_type_array"];
 
+// A result row's value of a column, matched case-insensitively.
+function rowValue(columns: string[], row: unknown[] | undefined, col: string): unknown {
+  const j = columns.findIndex((c) => c.toLowerCase() === col);
+  return j >= 0 ? row?.[j] : undefined;
+}
+
+/** Why a psm-view result row cannot open the spectrum viewer, or "" when it
+ * can; `peaksRead` when the row's peak arrays were read. */
+export function whyNoSpectrum(columns: string[], row: unknown[] | undefined, peaksRead: boolean): string {
+  const pf = rowValue(columns, row, "peptidoform");
+  if (typeof pf !== "string" || !pf) return "This PSM has no peptidoform";
+  if (peaksRead) {
+    const mz = rowValue(columns, row, "mz_array");
+    if (!Array.isArray(mz) || !mz.length) return "This PSM has no stored peaks";
+  }
+  return "";
+}
+
+/** The PsmKey of a psm-view result row. */
+export function psmKeyOf(columns: string[], row: unknown[] | undefined): PsmKey {
+  const scan = rowValue(columns, row, "scan");
+  const charge = rowValue(columns, row, "charge");
+  const run = rowValue(columns, row, "run_file_name");
+  return {
+    peptidoform: String(rowValue(columns, row, "peptidoform")),
+    run_file_name: run == null ? null : String(run),
+    scan: Array.isArray(scan) ? (scan[0] as number) ?? null : ((scan as number) ?? null),
+    charge: (charge as number) ?? null,
+  };
+}
+
 // scan is a list of scan numbers in some files.
 const scanWhere = (P: TableRef, scan: unknown) =>
   /\[\]|list/i.test(P.types.scan ?? "") ? `list_contains(scan, ${Number(scan)})` : `scan = ${Number(scan)}`;
