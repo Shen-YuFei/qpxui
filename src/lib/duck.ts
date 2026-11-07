@@ -246,6 +246,15 @@ function logQuery(sql: string, ms: number, rows: number) {
 
 type QueryResultType = Awaited<ReturnType<duckdb.AsyncDuckDBConnection["query"]>>;
 
+/**
+ * A result's rows as arrays of display values, read column by column: Arrow's
+ * row objects key values by column name and keep only one of a shared name.
+ */
+export function readRows(table: QueryResultType): QueryResult["rows"] {
+  const columns = table.schema.fields.map((_, j) => table.getChildAt(j)!);
+  return Array.from({ length: table.numRows }, (_, i) => columns.map((c) => normalize(c.get(i)) as never));
+}
+
 export async function runSql(
   sql: string,
   maxRows = 5000
@@ -269,7 +278,7 @@ export async function runSql(
   // Columns come from the schema, so an empty result keeps them, and values
   // are read by position, so duplicate column names keep their own values.
   const columns = table.schema.fields.map((f) => f.name);
-  const rows = table.toArray().map((row) => (row.toArray() as unknown[]).map((v) => normalize(v) as never));
+  const rows = readRows(table);
   return { columns, rows, rowCount: rows.length, truncated };
 }
 
