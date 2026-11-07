@@ -286,27 +286,28 @@ pub async fn portal_registry(page_size: Option<usize>) -> Result<Vec<PortalDatas
     registry(&portal_http::client()?, page_size).await
 }
 
+/// GET a JSON document from the portal's API, trying up to three times.
+async fn get_json<T: serde::de::DeserializeOwned>(client: &Client, url: &str) -> Result<T, String> {
+    let mut last = "no attempt".to_string();
+    for _ in 0..3 {
+        match client.get(url).send().await {
+            Ok(resp) => match resp.error_for_status() {
+                Ok(resp) => match resp.json::<T>().await {
+                    Ok(v) => return Ok(v),
+                    Err(e) => last = format!("parse: {e}"),
+                },
+                Err(e) => last = format!("http: {e}"),
+            },
+            Err(e) => last = format!("request: {e:?}"),
+        }
+    }
+    Err(format!("{url}: {last}"))
+}
+
 async fn registry(client: &Client, page_size: Option<usize>) -> Result<Vec<PortalDataset>, String> {
     let page_size = page_size.unwrap_or(50).clamp(1, 100);
 
-    async fn get_page(client: &Client, url: &str) -> Result<DatasetSearchPage, String> {
-        let mut last = "no attempt".to_string();
-        for _ in 0..3 {
-            match client.get(url).send().await {
-                Ok(resp) => match resp.error_for_status() {
-                    Ok(resp) => match resp.json::<DatasetSearchPage>().await {
-                        Ok(page) => return Ok(page),
-                        Err(e) => last = format!("parse: {e}"),
-                    },
-                    Err(e) => last = format!("http: {e}"),
-                },
-                Err(e) => last = format!("request: {e:?}"),
-            }
-        }
-        Err(format!("{url}: {last}"))
-    }
-
-    let first = get_page(
+    let first: DatasetSearchPage = get_json(
         client,
         &format!("https://api.quantms.org/dataset-search/datasets?page_size={page_size}&page=1"),
     )
@@ -314,7 +315,7 @@ async fn registry(client: &Client, page_size: Option<usize>) -> Result<Vec<Porta
     let total_pages = first.total_pages.max(1);
     let mut all = first.datasets;
     for p in 2..=total_pages {
-        let page = get_page(
+        let page: DatasetSearchPage = get_json(
             client,
             &format!(
                 "https://api.quantms.org/dataset-search/datasets?page_size={page_size}&page={p}"
@@ -444,23 +445,6 @@ pub async fn portal_search(
 pub async fn portal_facets() -> Result<PortalFacets, String> {
     let client = portal_http::client()?;
 
-    async fn get_json(client: &Client, url: &str) -> Result<serde_json::Value, String> {
-        let mut last = "no attempt".to_string();
-        for _ in 0..3 {
-            match client.get(url).send().await {
-                Ok(resp) => match resp.error_for_status() {
-                    Ok(resp) => match resp.json::<serde_json::Value>().await {
-                        Ok(v) => return Ok(v),
-                        Err(e) => last = format!("parse: {e}"),
-                    },
-                    Err(e) => last = format!("http: {e}"),
-                },
-                Err(e) => last = format!("request: {e:?}"),
-            }
-        }
-        Err(format!("{url}: {last}"))
-    }
-
     let values = |raw: &serde_json::Value, bucket: &str| -> Vec<String> {
         raw.get(bucket)
             .and_then(|v| v.as_array())
@@ -473,7 +457,8 @@ pub async fn portal_facets() -> Result<PortalFacets, String> {
             .unwrap_or_default()
     };
 
-    let fac = get_json(&client, "https://api.quantms.org/dataset-search/facets").await?;
+    let fac: serde_json::Value =
+        get_json(&client, "https://api.quantms.org/dataset-search/facets").await?;
     let mut organisms = values(&fac, "organism");
     let mut instruments = values(&fac, "instrument");
     organisms.sort();
@@ -484,14 +469,11 @@ pub async fn portal_facets() -> Result<PortalFacets, String> {
         #[serde(default)]
         collections: Vec<CollectionOption>,
     }
-    let colls: CollectionsRaw = serde_json::from_value(
-        get_json(
-            &client,
-            "https://api.quantms.org/dataset-search/collections",
-        )
-        .await?,
+    let colls: CollectionsRaw = get_json(
+        &client,
+        "https://api.quantms.org/dataset-search/collections",
     )
-    .map_err(|e| format!("collections: {e}"))?;
+    .await?;
 
     Ok(PortalFacets {
         organisms,
