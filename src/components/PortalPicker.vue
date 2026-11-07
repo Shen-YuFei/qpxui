@@ -5,6 +5,7 @@ import { loadDatasets } from "../store";
 import { confirmDownload, totalBytes, useDownload } from "../lib/downloads";
 import { fmtCount, fmtSize } from "../lib/format";
 import DownloadProgress from "./DownloadProgress.vue";
+import { REGISTRY_SORTS as SORTS, filterRegistry, nextSort, type RegistrySort } from "../lib/registry";
 
 const rows = ref<PortalDataset[]>([]);
 const selected = ref<PortalDataset | null>(null);
@@ -16,48 +17,16 @@ const error = ref("");
 const downloading = ref(false);
 const { id: downloadId, cancelling, files: downloadFiles, cancel, run: runDownload, unmounted } = useDownload();
 
-type SortKey = "accession" | "totalSize" | "peptides" | "psmCount" | "proteins" | "samples";
-const SORTS: { key: SortKey; label: string }[] = [
-  { key: "accession", label: "Accession" },
-  { key: "totalSize", label: "Size" },
-  { key: "peptides", label: "Peptides" },
-  { key: "psmCount", label: "PSMs" },
-  { key: "proteins", label: "Proteins" },
-  { key: "samples", label: "Samples" },
-];
-const sortKey = ref<SortKey>("accession");
+const sortKey = ref<RegistrySort>("accession");
 const sortDesc = ref(false);
 
-function setSort(k: SortKey) {
-  if (sortKey.value === k) {
-    sortDesc.value = !sortDesc.value;
-    return;
-  }
-  // Numbers read best largest-first; accessions A→Z.
-  sortKey.value = k;
-  sortDesc.value = k !== "accession";
+function setSort(k: RegistrySort) {
+  const s = nextSort({ key: sortKey.value, desc: sortDesc.value }, k);
+  sortKey.value = s.key;
+  sortDesc.value = s.desc;
 }
 
-const filtered = computed(() => {
-  const q = query.value.trim().toLowerCase();
-  const list = q
-    ? rows.value.filter((r) =>
-        [r.accession, r.title, r.organism, r.instrument, r.collectionTitle]
-          .filter(Boolean)
-          .some((s) => (s as string).toLowerCase().includes(q))
-      )
-    : [...rows.value];
-  const k = sortKey.value;
-  const dir = sortDesc.value ? -1 : 1;
-  return list.sort((a, b) => {
-    if (k === "accession") return dir * portalRef(a).localeCompare(portalRef(b));
-    // Missing values always sink to the bottom.
-    const x = a[k] ?? null;
-    const y = b[k] ?? null;
-    if (x === null || y === null) return x === y ? 0 : x === null ? 1 : -1;
-    return dir * (x - y) || portalRef(a).localeCompare(portalRef(b));
-  });
-});
+const filtered = computed(() => filterRegistry(rows.value, query.value, sortKey.value, sortDesc.value));
 
 const selectedCount = computed(
   () => views.value.filter((v) => checked.value[v.path]).length
