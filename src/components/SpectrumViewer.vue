@@ -6,7 +6,8 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import VChart from "vue-echarts";
 import PeptideSeq from "./PeptideSeq.vue";
 import { runSql } from "../lib/duck";
-import { chartTheme, escapeHtml, toCsv } from "../lib/charts";
+import { chartTheme, toCsv } from "../lib/charts";
+import { spectrumOption } from "../lib/spectrumChart";
 import { savePng, saveText } from "../lib/export";
 import { settings } from "../lib/settings";
 import { ident, lit, objects, type TableRef } from "../lib/report";
@@ -41,9 +42,6 @@ export interface PsmKey {
 
 const props = defineProps<{ psm: TableRef; target: PsmKey; accession?: string; fileBase?: string }>();
 const emit = defineEmits<{ (e: "close"): void }>();
-
-const B_COLOR = "#3b82f6";
-const Y_COLOR = "#ef4444";
 
 const loading = ref(true);
 const error = ref("");
@@ -94,8 +92,6 @@ const peaks = computed<Peak[]>(() => {
   }
   return annotatePeaks(mz, inten, ions.value, tol.value);
 });
-
-const maxInt = computed(() => peaks.value.reduce((m, p) => Math.max(m, p.intensity), 0) || 1);
 
 const matchedKeys = computed(() => {
   const s = new Set<string>();
@@ -276,159 +272,18 @@ const ionTable = computed(() => {
   });
 });
 
-function colorOf(p: Peak): string {
-  if (!p.ion) return "";
-  const c = p.ion.type === "b" ? B_COLOR : Y_COLOR;
-  return p.ion.loss ? `${c}99` : c;
-}
-
 const option = computed(() => {
   void settings.theme;
   const { dim, border } = chartTheme();
-  const grey = settings.theme === "light" ? "#94a3b8" : "#64748b";
-  const mi = maxInt.value;
-  const pts = peaks.value.map((p, i) => ({ p, i, rel: (p.intensity / mi) * 100 }));
-  const mir = mirror.value?.peaks ?? [];
-  const mmi = mir.reduce((m, p) => Math.max(m, p.intensity), 0) || 1;
-  const mpts = mir.map((p, i) => ({ p, i, rel: -(p.intensity / mmi) * 100 }));
-  const hasMirror = mpts.length > 0;
-  const xMax = [...peaks.value, ...mir].reduce((m, p) => Math.max(m, p.mz), theoMz.value) * 1.04;
-
-  const stick = (name: string, color: string, sel: typeof pts) => ({
-    name,
-    type: "custom",
-    clip: true,
-    xAxisIndex: 0,
-    yAxisIndex: 0,
-    silent: true,
-    data: sel.map((x) => [x.p.mz, x.rel]),
-    renderItem: (_: any, api: any) => {
-      const a = api.coord([api.value(0), 0]);
-      const b = api.coord([api.value(0), api.value(1)]);
-      return { type: "line", shape: { x1: a[0], y1: a[1], x2: b[0], y2: b[1] }, style: { stroke: color, lineWidth: 1.3 } };
-    },
+  return spectrumOption({
+    peaks: peaks.value,
+    mirror: mirror.value,
+    precursorMz: theoMz.value,
+    showLabels: showLabels.value,
+    unit: tolUnit.value,
+    tolerance: source.value === "file" ? (tolUnit.value === "Da" ? 0.02 : 20) : tol.value.value,
+    colors: { dim, border, grey: settings.theme === "light" ? "#94a3b8" : "#64748b" },
   });
-  const un = pts.filter((x) => !x.p.ion);
-  const bb = pts.filter((x) => x.p.ion?.type === "b");
-  const yy = pts.filter((x) => x.p.ion?.type === "y");
-  const mun = mpts.filter((x) => !x.p.ion);
-  const mbb = mpts.filter((x) => x.p.ion?.type === "b");
-  const myy = mpts.filter((x) => x.p.ion?.type === "y");
-  const mtips = [...mpts].sort((a, b) => a.rel - b.rel).map((x) => ({
-    value: [x.p.mz, x.rel],
-    idx: x.i,
-    mirror: true,
-    label: x.p.ion && showLabels.value ? { show: true, formatter: x.p.ion.label, color: colorOf(x.p), position: "bottom" } : { show: false },
-  }));
-  // Invisible hover targets + labels at the stick tips, most intense first so
-  // they win when labels overlap.
-  const tips = [...pts].sort((a, b) => b.rel - a.rel).map((x) => ({
-    value: [x.p.mz, x.rel],
-    idx: x.i,
-    label: x.p.ion && showLabels.value ? { show: true, formatter: x.p.ion.label, color: colorOf(x.p) } : { show: false },
-  }));
-  const errs = pts.filter((x) => x.p.ion && Number.isFinite(x.p.error)).map((x) => ({
-    value: [x.p.mz, x.p.error],
-    idx: x.i,
-    itemStyle: { color: colorOf(x.p) },
-  }));
-  const tolShown = source.value === "file" ? (tolUnit.value === "Da" ? 0.02 : 20) : tol.value.value;
-  const errMax = errs.reduce((m, e) => Math.max(m, Math.abs(Number(e.value[1]))), tolShown) * 1.1;
-
-  return {
-    animation: false,
-    backgroundColor: "transparent",
-    tooltip: {
-      trigger: "item",
-      confine: true,
-      formatter: (prm: any) => {
-        const isM = !!prm.data?.mirror;
-        const pk = isM ? mir[prm.data?.idx] : peaks.value[prm.data?.idx];
-        if (!pk) return "";
-        const lines = [`m/z <b>${pk.mz.toFixed(4)}</b>`, `intensity ${pk.intensity.toExponential(3)} (${((pk.intensity / (isM ? mmi : mi)) * 100).toFixed(1)}%)`];
-        if (isM) lines.unshift(`<span style="opacity:.7">${escapeHtml(mirror.value?.label ?? "mirror")}</span>`);
-        if (pk.ion) {
-          lines.unshift(`<b style="color:${colorOf(pk)}">${escapeHtml(pk.ion.label)}</b>`);
-          if (Number.isFinite(pk.ion.mz)) lines.push(`theoretical ${pk.ion.mz.toFixed(4)}`);
-          if (Number.isFinite(pk.error)) lines.push(`error ${pk.error!.toFixed(tolUnit.value === "ppm" ? 2 : 4)} ${tolUnit.value}`);
-        }
-        return lines.join("<br/>");
-      },
-    },
-    graphic: hasMirror
-      ? [
-          { type: "text", right: 24, top: 24, style: { text: "PSM", fill: dim, fontSize: 11 } },
-          { type: "text", right: 24, top: "57%", style: { text: mirror.value?.label ?? "", fill: dim, fontSize: 11, align: "right" } },
-        ]
-      : [],
-    grid: [
-      { left: 56, right: 18, top: 22, height: "62%" },
-      { left: 56, right: 18, top: "76%", bottom: 58 },
-    ],
-    xAxis: [
-      { type: "value", min: 0, max: Math.ceil(xMax), gridIndex: 0, axisLabel: { show: false }, axisLine: { lineStyle: { color: border } }, splitLine: { show: false } },
-      { type: "value", min: 0, max: Math.ceil(xMax), gridIndex: 1, name: "m/z", nameLocation: "middle", nameGap: 22, nameTextStyle: { color: dim }, axisLabel: { color: dim, showMaxLabel: false }, axisLine: { lineStyle: { color: border } }, splitLine: { show: false } },
-    ],
-    yAxis: [
-      {
-        type: "value", min: hasMirror ? -125 : 0, max: hasMirror ? 125 : 112, interval: hasMirror ? 25 : undefined, gridIndex: 0,
-        name: "Relative intensity (%)", nameLocation: "middle", nameGap: 38, nameTextStyle: { color: dim },
-        axisLabel: { color: dim, formatter: (v: number) => (Math.abs(v) > 100 || (hasMirror && v % 50 !== 0) ? "" : String(Math.abs(v))) },
-        splitLine: { lineStyle: { color: border, opacity: 0.4 } },
-      },
-      { type: "value", gridIndex: 1, min: -errMax, max: errMax, name: tolUnit.value, nameLocation: "middle", nameGap: 38, nameTextStyle: { color: dim }, axisLabel: { color: dim, formatter: (v: number) => (Math.abs(v) < 1e-9 ? "0" : v.toPrecision(2)) }, splitNumber: 2, splitLine: { lineStyle: { color: border, opacity: 0.4 } } },
-    ],
-    dataZoom: [
-      { type: "inside", xAxisIndex: [0, 1], filterMode: "none" },
-      { type: "slider", xAxisIndex: [0, 1], height: 12, bottom: 2, filterMode: "none", showDetail: false },
-    ],
-    series: [
-      stick("unmatched", grey, un),
-      stick("b", B_COLOR, bb),
-      stick("y", Y_COLOR, yy),
-      ...(hasMirror
-        ? [
-            stick("mirror unmatched", grey, mun),
-            stick("mirror b", B_COLOR, mbb),
-            stick("mirror y", Y_COLOR, myy),
-            {
-              name: "mirror peaks",
-              type: "scatter",
-              xAxisIndex: 0,
-              yAxisIndex: 0,
-              symbolSize: 7,
-              itemStyle: { color: "rgba(0,0,0,0)" },
-              emphasis: { scale: false, itemStyle: { color: dim } },
-              label: { position: "bottom", fontSize: 10, distance: 2 },
-              labelLayout: { hideOverlap: true },
-              data: mtips,
-              markLine: { silent: true, symbol: "none", lineStyle: { color: border, width: 1 }, label: { show: false }, data: [{ yAxis: 0 }] },
-            },
-          ]
-        : []),
-      {
-        name: "peaks",
-        type: "scatter",
-        xAxisIndex: 0,
-        yAxisIndex: 0,
-        symbolSize: 7,
-        itemStyle: { color: "rgba(0,0,0,0)" },
-        emphasis: { scale: false, itemStyle: { color: dim } },
-        label: { position: "top", fontSize: 10, distance: 2 },
-        labelLayout: { hideOverlap: true },
-        data: tips,
-      },
-      {
-        name: "error",
-        type: "scatter",
-        xAxisIndex: 1,
-        yAxisIndex: 1,
-        symbolSize: 5,
-        data: errs,
-        markLine: { silent: true, symbol: "none", lineStyle: { color: dim, type: "dashed", width: 1 }, label: { show: false }, data: [{ yAxis: 0 }] },
-      },
-    ],
-  };
 });
 
 function where(): string {
