@@ -28,13 +28,7 @@ pub struct PsHit {
     )]
     pub organism_part: Option<String>,
     #[serde(default)]
-    pub disease: Option<String>,
-    #[serde(default)]
     pub instrument: Option<String>,
-    #[serde(rename(deserialize = "dataset_url", serialize = "datasetUrl"))]
-    pub dataset_url: String,
-    #[serde(default, rename(deserialize = "px_url", serialize = "pxUrl"))]
-    pub px_url: Option<String>,
     #[serde(
         default,
         rename(deserialize = "n_peptidoforms", serialize = "nPeptidoforms")
@@ -51,16 +45,7 @@ pub struct PsHit {
     pub sample_peptidoforms: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PsFacetValue {
-    pub value: String,
-    #[serde(default)]
-    pub datasets: usize,
-}
-
-/// Result of a peptide/protein/gene search: the datasets that matched, plus the
-/// query-specific organism facet breakdown.
+/// Result of a peptide/protein/gene search: the datasets that matched.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PsSearchResult {
@@ -69,8 +54,6 @@ pub struct PsSearchResult {
     pub datasets: Vec<PsHit>,
     #[serde(default)]
     pub unmapped: bool,
-    #[serde(default, rename(serialize = "organismFacet"))]
-    pub organism_facet: Vec<PsFacetValue>,
 }
 
 /// An available post-translational modification on the portal (for the
@@ -79,8 +62,6 @@ pub struct PsSearchResult {
 #[serde(rename_all = "camelCase")]
 pub struct PsModification {
     pub name: String,
-    #[serde(default)]
-    pub residues: Vec<String>,
     #[serde(default, rename(deserialize = "n_datasets", serialize = "nDatasets"))]
     pub n_datasets: usize,
 }
@@ -103,7 +84,6 @@ fn non_empty(v: Option<&str>) -> Option<&str> {
 ///
 /// `dtype` is `"auto"` (default), `"peptide"`, `"protein"` or `"gene"`.
 /// `match_mode` applies to peptide search: `"exact"` (default) or `"contains"`.
-#[allow(clippy::too_many_arguments)] // one argument per search filter/option, surfaced to the pane
 #[tauri::command]
 pub async fn ps_search(
     query: String,
@@ -111,10 +91,7 @@ pub async fn ps_search(
     match_mode: Option<String>,
     organism: Option<String>,
     modification: Option<String>,
-    min_length: Option<usize>,
-    max_length: Option<usize>,
     limit: Option<usize>,
-    offset: Option<usize>,
 ) -> Result<PsSearchResult, String> {
     let kind = dtype.unwrap_or_else(|| "auto".to_string()).to_lowercase();
     let path = match kind.as_str() {
@@ -151,14 +128,7 @@ pub async fn ps_search(
         if let Some(m) = non_empty(modification.as_deref()) {
             qp.append_pair("modification", m);
         }
-        if let Some(n) = min_length {
-            qp.append_pair("min_length", &n.to_string());
-        }
-        if let Some(n) = max_length {
-            qp.append_pair("max_length", &n.to_string());
-        }
         qp.append_pair("limit", &limit.unwrap_or(50).min(200).to_string());
-        qp.append_pair("offset", &offset.unwrap_or(0).to_string());
     }
 
     let client = portal_http::client_builder()?
@@ -173,8 +143,6 @@ pub async fn ps_search(
         datasets: Vec<PsHit>,
         #[serde(default)]
         unmapped: bool,
-        #[serde(default, rename = "organism_facet")]
-        organism_facet: Vec<PsFacetValue>,
     }
     let raw: Raw = client
         .get(url)
@@ -190,7 +158,6 @@ pub async fn ps_search(
         total_datasets: raw.total_datasets,
         datasets: raw.datasets,
         unmapped: raw.unmapped,
-        organism_facet: raw.organism_facet,
     })
 }
 

@@ -255,21 +255,13 @@ pub struct PortalDataset {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
-    pub summary: Option<String>,
-    #[serde(default)]
     pub keywords: Option<Vec<String>>,
-    #[serde(default)]
-    pub diseases: Option<Vec<String>>,
     #[serde(default)]
     pub tissues: Option<Vec<String>>,
     #[serde(default)]
     pub publication: Option<Publication>,
     #[serde(default)]
     pub source: Option<String>,
-    #[serde(default)]
-    pub count: Option<u64>,
-    #[serde(default)]
-    pub collection: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -373,7 +365,7 @@ struct SearchPageRaw {
 }
 
 /// Facet options shown in the discover UI. Organisms and instruments come from
-/// `/facets`, collections from `/collections` (name + title + dataset count).
+/// `/facets`, collections from `/collections` (name + title).
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PortalFacets {
@@ -388,11 +380,6 @@ pub struct CollectionOption {
     pub name: String,
     #[serde(default)]
     pub title: Option<String>,
-    #[serde(
-        default,
-        rename(deserialize = "dataset_count", serialize = "datasetCount")
-    )]
-    pub dataset_count: usize,
 }
 
 /// Server-side search over the quantms portal dataset catalogue. Only the

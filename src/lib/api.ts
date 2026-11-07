@@ -42,14 +42,10 @@ export interface PortalDataset {
   pxUrl?: string | null;
   collectionTitle?: string | null;
   description?: string | null;
-  summary?: string | null;
   keywords?: string[] | null;
-  diseases?: string[] | null;
   tissues?: string[] | null;
   publication?: { doi?: string | null } | null;
   source?: string | null;
-  count?: number | null;
-  collection?: string | null;
 }
 
 /** The key of a portal dataset: some accessions hold several runs (one per
@@ -70,7 +66,6 @@ export interface PortalSearchResult {
 export interface CollectionOption {
   name: string;
   title?: string | null;
-  datasetCount?: number | null;
 }
 
 export interface PortalFacets {
@@ -85,31 +80,21 @@ export interface PsHit {
   collection?: string | null;
   organism?: string | null;
   organismPart?: string | null;
-  disease?: string | null;
   instrument?: string | null;
-  datasetUrl: string;
-  pxUrl?: string | null;
   nPeptidoforms: number;
   nPeptides: number;
   totalObs: number;
   samplePeptidoforms: string[];
 }
 
-export interface PsFacetValue {
-  value: string;
-  datasets: number;
-}
-
 export interface PsSearchResult {
   totalDatasets: number;
   datasets: PsHit[];
   unmapped: boolean;
-  organismFacet: PsFacetValue[];
 }
 
 export interface PsModification {
   name: string;
-  residues: string[];
   nDatasets: number;
 }
 
@@ -187,52 +172,29 @@ export const api = {
     invoke<PortalDataset[]>("portal_registry", { pageSize }),
   /** Server-side search over the quantms portal catalogue (q text + facets + sort). */
   portalSearch: (
-    query?: string | null,
-    opts?: {
+    query: string | null,
+    opts: {
       collection?: string | null;
       organism?: string | null;
       instrument?: string | null;
       sort?: string | null;
-      page?: number | null;
-      pageSize?: number | null;
+      page?: number;
+      pageSize?: number;
     }
-  ) =>
-    invoke<PortalSearchResult>("portal_search", {
-      query: query ?? null,
-      collection: opts?.collection ?? null,
-      organism: opts?.organism ?? null,
-      instrument: opts?.instrument ?? null,
-      sort: opts?.sort ?? null,
-      page: opts?.page ?? null,
-      pageSize: opts?.pageSize ?? null,
-    }),
+  ) => invoke<PortalSearchResult>("portal_search", { query, ...opts }),
   /** Organism / instrument / collection facet options for the discover UI. */
   portalFacets: () => invoke<PortalFacets>("portal_facets"),
   /** Cross-dataset peptide / protein / gene search over the quantms portal. */
   psSearch: (
     query: string,
-    opts?: {
-      dtype?: string | null;
-      matchMode?: string | null;
-      organism?: string | null;
-      modification?: string | null;
-      minLength?: number | null;
-      maxLength?: number | null;
-      limit?: number | null;
-      offset?: number | null;
+    opts: {
+      dtype: string | null;
+      matchMode: string | null;
+      organism: string | null;
+      modification: string | null;
+      limit: number;
     }
-  ) =>
-    invoke<PsSearchResult>("ps_search", {
-      query,
-      dtype: opts?.dtype ?? null,
-      matchMode: opts?.matchMode ?? null,
-      organism: opts?.organism ?? null,
-      modification: opts?.modification ?? null,
-      minLength: opts?.minLength ?? null,
-      maxLength: opts?.maxLength ?? null,
-      limit: opts?.limit ?? null,
-      offset: opts?.offset ?? null,
-    }),
+  ) => invoke<PsSearchResult>("ps_search", { query, ...opts }),
   psModifications: () => invoke<PsModification[]>("ps_modifications"),
   portalListViews: (dataset: string, organism?: string | null, psmCount?: number | null) =>
     invoke<ViewInfo[]>("portal_list_views", { dataset, organism, psmCount }),
