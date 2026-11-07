@@ -8,14 +8,16 @@ import {
   TooltipComponent,
   LegendComponent,
   DataZoomComponent,
+  TitleComponent,
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 import { ensureViewReady, describeTable, countRows, runSql, type ColumnInfo } from "../lib/duck";
 import type { ViewInfo } from "../lib/api";
-import { scanBytes, viewScale, type ViewScale } from "../lib/report";
+import { ident, scanBytes, viewScale, type ViewScale } from "../lib/report";
+import { chartTheme } from "../lib/charts";
 import { fmtBytes } from "../lib/format";
 
-use([BarChart, LineChart, GridComponent, TooltipComponent, LegendComponent, DataZoomComponent, CanvasRenderer]);
+use([BarChart, LineChart, GridComponent, TooltipComponent, LegendComponent, DataZoomComponent, TitleComponent, CanvasRenderer]);
 
 const props = defineProps<{ view: ViewInfo }>();
 const table = ref("");
@@ -56,7 +58,7 @@ function isNumericScalar(type: string): boolean {
 
 function barOption(labels: string[], values: number[], title: string) {
   return {
-    title: { text: title, textStyle: { color: "#e2e8f0", fontSize: 13 } },
+    title: { text: title, textStyle: { color: chartTheme().text, fontSize: 13 } },
     tooltip: { trigger: "axis" },
     grid: { left: 50, right: 16, top: 44, bottom: 30 },
     xAxis: {
@@ -114,14 +116,16 @@ async function buildHistogram() {
   if (!numericCol.value) return;
   const col = numericCol.value;
   const t = table.value;
+  // In DOUBLE: max - min of 64-bit ids overflows BIGINT.
+  const x = `${ident(col)}::DOUBLE`;
   const q = `
     WITH stats AS (
-      SELECT min(${col}) AS mn, max(${col}) AS mx, abs(max(${col}) - min(${col}))/30.0 AS w
-      FROM "${t}" WHERE ${col} IS NOT NULL
+      SELECT min(${x}) AS mn, (max(${x}) - min(${x}))/30.0 AS w
+      FROM "${t}" WHERE ${ident(col)} IS NOT NULL
     )
-    SELECT (floor((${col} - (SELECT mn FROM stats)) / NULLIF((SELECT w FROM stats),0)))::INT AS bin,
+    SELECT (floor((${x} - (SELECT mn FROM stats)) / NULLIF((SELECT w FROM stats),0)))::INT AS bin,
            COUNT(*) AS n
-    FROM "${t}" WHERE ${col} IS NOT NULL
+    FROM "${t}" WHERE ${ident(col)} IS NOT NULL
     GROUP BY 1 ORDER BY 1`;
   const r = await runSql(q);
   const labels = r.rows.map((row) => String(row[0] ?? ""));
