@@ -58,6 +58,9 @@ async fn get_html(url: &str) -> Result<String, String> {
         .send()
         .await
         .map_err(|e| format!("request {url}: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("request {url}: HTTP {}", resp.status()));
+    }
     let body = resp
         .text()
         .await
@@ -148,21 +151,6 @@ fn parquet_entries(html: &str) -> Vec<(String, u64)> {
         rest = &between[close + 4..];
     }
     out
-}
-
-fn first_subdir(html: &str) -> Option<String> {
-    extract_links(html)
-        .into_iter()
-        .map(|(href, _)| href.trim_end_matches('/').to_string())
-        .filter(|h| h.len() >= 4) // skip "../" etc.
-        .map(|h| {
-            // Return only the last path component (the run-hash), not the full
-            // href path — the caller already prepends the dataset base URL.
-            h.rsplit('/').next().unwrap_or("").to_string()
-        })
-        .find(|last| {
-            last.chars().all(|c| c.is_ascii_hexdigit()) && last.len() >= 8
-        })
 }
 
 /// List all dataset codes at the portal root (PXD…, IPX…, MSV…, PDC…, PMID…).
@@ -295,21 +283,41 @@ pub async fn portal_registry(page_size: Option<usize>) -> Result<Vec<PortalDatas
 /// the run sub-folders) or a full run ref returned by the registry API
 /// (e.g. `PXD014414/9688c6886714`), which is used verbatim.
 #[tauri::command]
-pub async fn portal_list_views(dataset: String) -> Result<Vec<ViewInfo>, String> {
-    let (run_url, run_html) = if dataset.contains('/') {
-        // Already a full "accession/run-hash" ref.
-        let run_url = format!("{}{dataset}/", view_base());
-        let run_html = get_html(&run_url).await?;
-        (run_url, run_html)
-    } else {
-        let ds_url = format!("{}{dataset}/", view_base());
-        let ds_html = get_html(&ds_url).await?;
-        let run = first_subdir(&ds_html).ok_or_else(|| {
-            format!("no run sub-folder found for dataset {dataset}")
-        })?;
-        let run_url = format!("{ds_url}{run}/");
-        let run_html = get_html(&run_url).await?;
-        (run_url, run_html)
+pub async fn portal_list_views(
+    dataset: String,
+    organism: Option<String>,
+    psm_count: Option<u64>,
+) -> Result<Vec<ViewInfo>, String> {
+    let (accession, wanted) = match dataset.split_once('/') {
+        Some((acc, run)) => (acc.to_string(), Some(run.to_string())),
+        None => (dataset.clone(), None),
+    };
+    let ds_url = format!("{}{accession}/", view_base());
+    let direct = match &wanted {
+        Some(run) => {
+            let run_url = format!("{ds_url}{run}/");
+            get_html(&run_url).await.ok().map(|html| (run_url, html))
+        }
+        None => None,
+    };
+    let (run_url, run_html) = match direct {
+        Some(found) => found,
+        None => {
+            // The registry can name a run folder that was since replaced, so
+            // pick one of the runs the server holds now.
+            let ds_html = get_html(&ds_url)
+                .await
+                .map_err(|e| format!("dataset {accession} not found on the portal ({e})"))?;
+            let run = pick_run(&ds_url, &ds_html, organism.as_deref(), psm_count)
+                .await
+                .map_err(|e| match &wanted {
+                    Some(run) => format!("the registry's run {accession}/{run} is gone from the portal; {e}"),
+                    None => e,
+                })?;
+            let run_url = format!("{ds_url}{run}/");
+            let run_html = get_html(&run_url).await?;
+            (run_url, run_html)
+        }
     };
 
     // Prefer the `qpx/` sub-folder, else fall back to the run folder directly.
@@ -332,8 +340,117 @@ pub async fn portal_list_views(dataset: String) -> Result<Vec<ViewInfo>, String>
             });
         }
     }
+    if views.is_empty() {
+        return Err(format!("no QPX parquet files in {qpx_url}"));
+    }
     views.sort_by(|a, b| a.view.cmp(&b.view));
     Ok(views)
+}
+
+/// Run folders (`<run-hash>`) listed on an accession page.
+fn run_subdirs(html: &str) -> Vec<String> {
+    let mut runs: Vec<String> = extract_links(html)
+        .into_iter()
+        .filter_map(|(href, _)| href.trim_end_matches('/').rsplit('/').next().map(str::to_string))
+        .filter(|last| last.len() >= 8 && last.chars().all(|c| c.is_ascii_hexdigit()))
+        .collect();
+    runs.dedup();
+    runs
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct RunProvenance {
+    #[serde(default)]
+    committed_at: i64,
+    #[serde(default)]
+    files: Vec<serde_json::Value>,
+    #[serde(default)]
+    stats: serde_json::Value,
+}
+
+struct RunInfo {
+    run: String,
+    committed_at: i64,
+    organism: String,
+    prefix: String,
+    psms: Option<u64>,
+}
+
+fn run_info(run: String, p: RunProvenance) -> RunInfo {
+    let prefix = p
+        .files
+        .iter()
+        .filter_map(|f| f.get("path").and_then(|v| v.as_str()))
+        .filter_map(crate::qpx::parse_filename)
+        .map(|(prefix, _, _)| prefix)
+        .next()
+        .unwrap_or_default();
+    let organism = p.stats.get("organism").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let psms = p.stats.get("psms").and_then(|v| v.as_u64());
+    RunInfo { run, committed_at: p.committed_at, organism, prefix, psms }
+}
+
+fn norm(s: &str) -> String {
+    s.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_lowercase()
+}
+
+/// Choose the run of an accession to open. Runs without QPX parquet files are
+/// skipped. One accession can hold separate datasets (one per organism in
+/// PXD014877, one per enzyme in PXD009737), so the registry's PSM count, then
+/// its organism, narrow the runs to one prefix; runs sharing a prefix are
+/// versions of it, and the newest wins.
+fn choose_run(runs: Vec<RunInfo>, organism: Option<&str>, psm_count: Option<u64>) -> Result<String, String> {
+    let mut runs: Vec<RunInfo> = runs.into_iter().filter(|r| !r.prefix.is_empty()).collect();
+    if runs.is_empty() {
+        return Err("it has no run with QPX parquet files".to_string());
+    }
+    runs.sort_by(|a, b| b.committed_at.cmp(&a.committed_at));
+    let narrow = |runs: &mut Vec<RunInfo>, keep: &dyn Fn(&RunInfo) -> bool| {
+        if runs.iter().any(keep) {
+            runs.retain(|r| keep(r));
+        }
+    };
+    if let Some(n) = psm_count.filter(|n| *n > 0) {
+        narrow(&mut runs, &|r| r.psms == Some(n));
+    }
+    if let Some(want) = organism.map(norm).filter(|w| !w.is_empty()) {
+        narrow(&mut runs, &|r| norm(&r.organism) == want);
+    }
+    let prefix = &runs[0].prefix;
+    if runs.iter().all(|r| &r.prefix == prefix) {
+        return Ok(runs[0].run.clone());
+    }
+    let mut names: Vec<&str> = runs.iter().map(|r| r.prefix.as_str()).collect();
+    names.sort();
+    names.dedup();
+    Err(format!("it holds separate runs ({}) and none matches this entry", names.join(", ")))
+}
+
+async fn pick_run(
+    ds_url: &str,
+    ds_html: &str,
+    organism: Option<&str>,
+    psm_count: Option<u64>,
+) -> Result<String, String> {
+    let runs = run_subdirs(ds_html);
+    if runs.is_empty() {
+        return Err("it has no run folders".to_string());
+    }
+    if runs.len() == 1 {
+        return Ok(runs[0].clone());
+    }
+    let client = Client::builder().build().map_err(|e| e.to_string())?;
+    let fetches = runs.into_iter().map(|run| {
+        let client = client.clone();
+        let url = format!("{ds_url}{run}/provenance.json");
+        async move {
+            let p = client.get(&url).send().await.ok()?.error_for_status().ok()?;
+            let p: RunProvenance = p.json().await.ok()?;
+            Some(run_info(run, p))
+        }
+    });
+    let infos: Vec<RunInfo> = futures::future::join_all(fetches).await.into_iter().flatten().collect();
+    choose_run(infos, organism, psm_count)
 }
 
 /// Download the given public parquet URLs into the local cache and return
@@ -449,7 +566,7 @@ mod tests {
     #[tokio::test]
     async fn portal_lists_and_downloads_pxd014414() {
         let ds = "PXD014414".to_string();
-        let views = portal_list_views(ds.clone()).await.expect("list views");
+        let views = portal_list_views(ds.clone(), None, None).await.expect("list views");
         assert!(!views.is_empty(), "expected views for {ds}");
         assert!(views.iter().any(|v| v.size_bytes > 0), "sizes should be > 0");
 
@@ -466,6 +583,46 @@ mod tests {
         assert!(std::path::Path::new(&cached[0].path).exists());
     }
 
+    fn info(run: &str, at: i64, organism: &str, prefix: &str, psms: u64) -> RunInfo {
+        RunInfo { run: run.into(), committed_at: at, organism: organism.into(), prefix: prefix.into(), psms: Some(psms) }
+    }
+
+    #[test]
+    fn choose_run_takes_newest_version_of_the_matching_entry() {
+        let versions = vec![
+            info("old", 1, "homo sapiens", "IPX1", 5),
+            info("new", 2, "homo sapiens", "IPX1", 5),
+            info("expr", 3, "homo sapiens", "", 0),
+        ];
+        assert_eq!(choose_run(versions, None, Some(5)).unwrap(), "new");
+        let enzymes = || {
+            vec![
+                info("trypsin", 3, "Homo sapiens", "PXD009737-Trypsin", 573439),
+                info("lysc-old", 1, "Homo sapiens", "PXD009737-LysC", 428263),
+                info("lysc", 2, "Homo sapiens", "PXD009737-LysC", 428263),
+            ]
+        };
+        assert_eq!(choose_run(enzymes(), Some("homo sapiens"), Some(428263)).unwrap(), "lysc");
+        assert!(choose_run(enzymes(), Some("homo sapiens"), None).is_err());
+        let organisms = || {
+            vec![
+                info("vp", 1, "Veillonella parvula", "PXD014877-Veillonella-parvula", 10),
+                info("dr", 1, "Danio rerio", "PXD014877-Danio-rerio", 20),
+            ]
+        };
+        assert_eq!(choose_run(organisms(), Some("danio rerio"), Some(99)).unwrap(), "dr");
+        assert!(choose_run(organisms(), Some("gallus gallus"), None).is_err());
+    }
+
+    #[tokio::test]
+    async fn stale_registry_ref_falls_back_to_a_live_run() {
+        let views = portal_list_views("IPX0001804002/0e8d80a52200".into(), None, None)
+            .await
+            .expect("fallback run");
+        assert!(views.iter().any(|v| v.view == "psm"));
+        assert!(!views[0].path.contains("0e8d80a52200"));
+    }
+
     #[tokio::test]
     async fn registry_lists_and_ref_resolves() {
         let rows = portal_registry(Some(100)).await.expect("registry");
@@ -474,7 +631,7 @@ mod tests {
             .iter()
             .find(|r| r.dataset_ref.is_some())
             .expect("some dataset has a run ref");
-        let views = portal_list_views(with_ref.dataset_ref.clone().unwrap())
+        let views = portal_list_views(with_ref.dataset_ref.clone().unwrap(), None, None)
             .await
             .expect("list views from ref");
         assert!(!views.is_empty());

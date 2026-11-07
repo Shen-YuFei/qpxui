@@ -108,7 +108,8 @@ export const api = {
   portalDatasets: (limit?: number) => invoke<string[]>("portal_datasets", { limit }),
   portalRegistry: (pageSize?: number) =>
     invoke<PortalDataset[]>("portal_registry", { pageSize }),
-  portalListViews: (dataset: string) => invoke<ViewInfo[]>("portal_list_views", { dataset }),
+  portalListViews: (dataset: string, organism?: string | null, psmCount?: number | null) =>
+    invoke<ViewInfo[]>("portal_list_views", { dataset, organism: organism ?? null, psmCount: psmCount ?? null }),
   portalCacheViews: (urls: string[], cancelId?: string) =>
     invoke<ViewInfo[]>("portal_cache_views", { urls, cancelId }),
 };

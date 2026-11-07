@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import PeptideSeq from "../PeptideSeq.vue";
+import PeptidoformProfile from "./PeptidoformProfile.vue";
 import ReportTable from "../ReportTable.vue";
 import SpectrumViewer, { type PsmKey } from "../SpectrumViewer.vue";
 import type { Column } from "../../lib/report";
@@ -45,6 +46,7 @@ const table = ref<InstanceType<typeof ReportTable> | null>(null);
 const focus = ref<string | null>(null);
 const evRows = ref<Record<string, any>[]>([]);
 const evBusy = ref(false);
+const pane = ref<"profile" | "list">("profile");
 
 // PSM spectra: when the psm view stores peaks, the evidence pane lists PSMs
 // (even if a feature view exists) and a row opens the spectrum viewer.
@@ -240,11 +242,11 @@ onMounted(async () => {
       <span v-else>
         {{ rows.length.toLocaleString() }}{{ truncated ? "+" : "" }} peptidoforms
         <template v-if="truncated"> (top {{ LIMIT }} by {{ evName }} — refine the search)</template>
-        · {{ (elapsed / 1000).toFixed(2) }} s · target {{ evName }} · click a peptidoform for its {{ spectra ? "PSMs and spectra" : evDetail }}, a protein to open it
+        · {{ (elapsed / 1000).toFixed(2) }} s · target {{ evName }} · click a peptidoform for its intensity and RT profile across samples and runs, and its {{ spectra ? "PSMs and spectra" : evDetail }}, a protein to open it
       </span>
     </div>
     <div v-if="error" class="error">⚠ {{ error }}</div>
-    <div v-else class="split" :class="{ open: !!focus }">
+    <div v-else class="split" :class="{ open: !!focus, wide: !!focus && pane === 'profile' }">
       <ReportTable
         ref="table"
         :columns="cols"
@@ -269,12 +271,17 @@ onMounted(async () => {
           <PeptideSeq :peptidoform="focus" :sequence="rows.find((r) => r.peptidoform === focus)?.sequence" :modifications="rows.find((r) => r.peptidoform === focus)?.modifications" />
           <button class="xs" @click="focus = null">✕</button>
         </div>
-        <div v-if="evBusy" class="muted"><span class="spinner"></span></div>
-        <div v-if="!evBusy" class="muted hint">
+        <div class="tabs">
+          <button class="xs" :class="{ on: pane === 'profile' }" @click="pane = 'profile'">Profile</button>
+          <button class="xs" :class="{ on: pane === 'list' }" @click="pane = 'list'">{{ evDetail }}</button>
+        </div>
+        <PeptidoformProfile v-if="pane === 'profile'" :key="focus" :ds="ds" :t="t" :peptidoform="focus" :file-base="fileBase" />
+        <div v-if="pane === 'list' && evBusy" class="muted"><span class="spinner"></span></div>
+        <div v-if="pane === 'list' && !evBusy" class="muted hint">
           {{ evRows.length.toLocaleString() }}{{ evRows.length >= 5000 ? "+" : "" }} {{ evLabel }}<template v-if="spectra"> · click a PSM to view its annotated spectrum</template>
         </div>
         <ReportTable
-          v-if="!evBusy"
+          v-if="pane === 'list' && !evBusy"
           :columns="evCols"
           :rows="evRows"
           row-key="_k"
@@ -321,6 +328,23 @@ onMounted(async () => {
 }
 .split.open {
   grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+}
+.split.wide {
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+}
+@media (max-width: 1100px) {
+  .split.open {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.tabs {
+  display: flex;
+  gap: 4px;
+}
+.tabs button.on {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
 }
 .detail {
   border: 1px solid var(--border);

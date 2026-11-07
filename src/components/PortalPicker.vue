@@ -116,7 +116,7 @@ async function selectDataset(ds: PortalDataset | null) {
     // Prefer the resolved run ref; fall back to the bare code (which the
     // backend resolves by scanning the run sub-folders).
     const ref = ds.datasetRef ?? ds.accession;
-    const v = await api.portalListViews(ref);
+    const v = await api.portalListViews(ref, ds.organism, ds.psmCount);
     // A slower reply for an earlier click must not replace the current list.
     if (selected.value === ds) views.value = v;
   } catch (e: any) {
@@ -386,15 +386,15 @@ a {
 }
 .layout {
   display: grid;
-  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
   gap: 18px;
   margin-top: 16px;
 }
 .registry {
   display: flex;
   flex-direction: column;
-  min-height: 320px;
-  max-height: 560px;
+  min-height: 360px;
+  height: max(360px, calc(100vh - 430px));
 }
 .search {
   width: 100%;
@@ -517,8 +517,8 @@ a {
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 12px;
-  min-height: 320px;
-  max-height: 560px;
+  min-height: 360px;
+  height: max(360px, calc(100vh - 430px));
   overflow-y: auto;
 }
 .detail-head {
