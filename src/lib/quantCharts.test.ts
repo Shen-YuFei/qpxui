@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
 import type { ChartTheme } from "./charts";
-import { correlationChart, pcaChart, profileChart, type SampleStyle } from "./quantCharts";
+import type { QuantMatrix } from "./quant";
+import {
+  correlationChart,
+  correlationCsv,
+  distributionSpec,
+  matrixCsv,
+  pcaChart,
+  pcaCsv,
+  profileChart,
+  profileCsv,
+  proteinCountSpec,
+  type SampleStyle,
+} from "./quantCharts";
 
 const theme: ChartTheme = { text: "#text", dim: "#dim", border: "#border", accent: "#accent", accent2: "#accent2", bg: "#bg" };
 const samples = ["run_B1", "run_A1", "run_A2"];
@@ -80,5 +92,51 @@ describe("profileChart", () => {
     ]);
     expect(o.legend.data.map((d: any) => d.name)).toEqual(["A", "B"]);
     expect(o.series.slice(1).map((s: any) => s.name)).toEqual(["A", "B"]);
+  });
+});
+
+describe("distribution and count charts", () => {
+  const m: QuantMatrix = {
+    samples: ["a", "b"],
+    proteins: ["P1", "P2", "P3"],
+    genes: [null, null, null],
+    values: [Float64Array.from([1, NaN]), Float64Array.from([2, 5]), Float64Array.from([3, NaN])],
+  };
+
+  it("draws the quantiles of each column in order", () => {
+    const spec = distributionSpec(m, [1, 0]);
+    expect(spec.labels).toEqual(["b", "a"]);
+    expect(spec.series[0].values).toEqual([[5, 5, 5, 5, 5], [1.1, 1.5, 2, 2.5, 2.9]]);
+    expect(spec.hideLabels).toBe(false);
+  });
+
+  it("counts quantified proteins per column, coloured by group", () => {
+    const plain = proteinCountSpec(m, [0, 1], "", () => "", () => "#x");
+    expect(plain.series[0].values).toEqual([3, 1]);
+    expect(plain.colors).toBeUndefined();
+    const grouped = proteinCountSpec(m, [0, 1], "disease", (s) => (s === "a" ? "x" : "y"), (g) => `#${g}`);
+    expect(grouped.colors).toEqual(["#x", "#y"]);
+    expect(grouped.notes).toEqual(["disease: x", "disease: y"]);
+  });
+});
+
+describe("quantification CSV", () => {
+  it("writes the correlation matrix in the clustered order", () => {
+    expect(correlationCsv(["a", "b"], { r: [[1, 0.5], [0.5, 1]], ord: [1, 0] })).toBe("sample,b,a\nb,1,0.5\na,0.5,1\n");
+  });
+
+  it("writes PCA scores with the group column when grouping", () => {
+    const p = { scores: [[1, 2], [3, 4]], explained: [0.6, 0.3], used: 10 };
+    expect(pcaCsv(["a", "b"], p, "", () => "")).toBe("sample,PC1,PC2\na,1,2\nb,3,4\n");
+    expect(pcaCsv(["a", "b"], p, "sex", (s) => (s === "a" ? "F" : "M"))).toBe("sample,sex,PC1,PC2\na,F,1,2\nb,M,3,4\n");
+  });
+
+  it("writes one protein's profile with missing values empty", () => {
+    expect(profileCsv(["a", "b"], [1, 0], Float64Array.from([1.5, NaN]), "", () => "")).toBe("sample,log2_abundance\nb,\na,1.5\n");
+  });
+
+  it("writes the matrix rounded to five decimals", () => {
+    const m: QuantMatrix = { samples: ["a", "b"], proteins: ["P1"], genes: ["G"], values: [Float64Array.from([1.123456789, NaN])] };
+    expect(matrixCsv(m)).toBe("anchor_protein,gene,a,b\nP1,G,1.12346,\n");
   });
 });

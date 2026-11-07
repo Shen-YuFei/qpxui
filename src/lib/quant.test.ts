@@ -1,5 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { averageLinkageOrder, correlation, groupingColumns, medianNormalize, pca, presence, quantile, sampleGroup, type QuantMatrix } from "./quant";
+import {
+  averageLinkageOrder,
+  correlation,
+  findProteins,
+  groupedOrder,
+  groupingColumns,
+  medianNormalize,
+  pca,
+  presence,
+  proteinSummaries,
+  quantile,
+  sampleGroup,
+  withoutFlagged,
+  type QuantMatrix,
+} from "./quant";
 
 const rows = (xs: number[][]) => xs.map((r) => Float64Array.from(r));
 
@@ -89,5 +103,41 @@ describe("sampleGroup", () => {
     expect(sampleGroup(meta, "condition", "s2")).toBe("not available");
     expect(sampleGroup(meta, "condition", "s3")).toBe("not available");
     expect(sampleGroup(meta, "", "s1")).toBe("");
+  });
+});
+
+describe("protein list", () => {
+  const m: QuantMatrix = {
+    samples: ["s1", "s2", "s3"],
+    proteins: ["P1", "CON__P2", "P3"],
+    genes: ["ALB", null, "GAPDH"],
+    values: rows([[20, 22, NaN], [25, 25, 25], [10, NaN, NaN]]),
+  };
+
+  it("drops flagged proteins", () => {
+    const out = withoutFlagged(m, Uint8Array.from([0, 1, 0]));
+    expect(out.proteins).toEqual(["P1", "P3"]);
+    expect(out.genes).toEqual(["ALB", "GAPDH"]);
+    expect(out.values.map((r) => r[0])).toEqual([20, 10]);
+    expect(out.samples).toBe(m.samples);
+  });
+
+  it("summarises each protein's quantified values", () => {
+    const [p1, p2, p3] = proteinSummaries(m);
+    expect(p1).toEqual({ protein: "P1", gene: "ALB", n: 2, mean: 21, sd: Math.SQRT2 });
+    expect(p2.sd).toBe(0);
+    expect(p3).toEqual({ protein: "P3", gene: "GAPDH", n: 1, mean: 10, sd: null });
+  });
+
+  it("finds proteins by accession or gene, most quantified first", () => {
+    const all = proteinSummaries(m);
+    expect(findProteins(all, "").map((r) => r.protein)).toEqual(["CON__P2", "P1", "P3"]);
+    expect(findProteins(all, " gapdh ").map((r) => r.protein)).toEqual(["P3"]);
+    expect(findProteins(all, "p").map((r) => r.protein)).toEqual(["CON__P2", "P1", "P3"]);
+  });
+
+  it("orders columns by group, then name", () => {
+    const group: Record<string, string> = { "S-10": "a", "S-2": "a", "S-1": "b" };
+    expect(groupedOrder(["S-1", "S-10", "S-2"], (s) => group[s])).toEqual([2, 1, 0]);
   });
 });

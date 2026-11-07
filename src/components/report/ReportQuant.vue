@@ -6,8 +6,19 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import ChartCard from "../ChartCard.vue";
 import ReportTable from "../ReportTable.vue";
 import type { DatasetInfo } from "../../lib/api";
-import { chartTheme, commonPrefix, seriesColor, toCsv, type ChartSpec } from "../../lib/charts";
-import { correlationChart, pcaChart, profileChart, type SampleStyle } from "../../lib/quantCharts";
+import { chartTheme, commonPrefix, seriesColor, type ChartSpec } from "../../lib/charts";
+import {
+  correlationChart,
+  correlationCsv,
+  distributionSpec,
+  matrixCsv,
+  pcaChart,
+  pcaCsv as pcaScoresCsv,
+  profileChart,
+  profileCsv as proteinProfileCsv,
+  proteinCountSpec,
+  type SampleStyle,
+} from "../../lib/quantCharts";
 import { settings } from "../../lib/settings";
 import { saveText } from "../../lib/export";
 import { state } from "../../store";
@@ -17,16 +28,20 @@ import type { Column, DatasetTables } from "../../lib/report";
 import { QUANT_COLUMNS, quantMatrix, quantSource, sampleMeta } from "../../lib/queries/quant";
 import { listText } from "../../lib/format";
 import {
+  PROTEIN_LIST_MAX,
   averageLinkageOrder,
-  column,
   correlation,
+  findProteins,
+  groupedOrder,
   groupingColumns,
   medianNormalize,
   natural,
   pca,
   presence,
-  quantile,
+  proteinSummaries,
   sampleGroup,
+  withoutFlagged,
+  type ProteinSummary,
   type QuantMatrix,
 } from "../../lib/quant";
 
@@ -91,16 +106,7 @@ async function build() {
 const matrix = computed<QuantMatrix | null>(() => {
   const m = raw.value;
   if (!m) return null;
-  let out = m;
-  if (!withCont.value) {
-    const keep = m.proteins.map((_, i) => !contaminant.value[i]);
-    out = {
-      samples: m.samples,
-      proteins: m.proteins.filter((_, i) => keep[i]),
-      genes: m.genes.filter((_, i) => keep[i]),
-      values: m.values.filter((_, i) => keep[i]),
-    };
-  }
+  const out = withCont.value ? m : withoutFlagged(m, contaminant.value);
   return normalise.value ? medianNormalize(out) : out;
 });
 
@@ -124,7 +130,7 @@ const groupColor = (g: string) => (g ? seriesColor(groups.value, g) : chartTheme
 const order = computed(() => {
   const m = matrix.value;
   if (!m) return [] as number[];
-  return m.samples.map((_, j) => j).sort((a, b) => natural(groupOf(m.samples[a]), groupOf(m.samples[b])) || natural(m.samples[a], m.samples[b]));
+  return groupedOrder(m.samples, groupOf);
 });
 
 const prefix = computed(() => commonPrefix(raw.value?.samples ?? []));
@@ -155,35 +161,11 @@ const style = computed<SampleStyle>(() => ({
   groupColor,
 }));
 
-const distSpec = computed<ChartSpec | null>(() => {
-  const m = matrix.value;
-  if (!m) return null;
-  const vals = order.value.map((j) => {
-    const c = column(m, j).sort((a, b) => a - b);
-    return c.length ? [0.05, 0.25, 0.5, 0.75, 0.95].map((p) => quantile(c, p)) : null;
-  });
-  return {
-    kind: "box",
-    labels: order.value.map((j) => m.samples[j]),
-    series: [{ name: "log2 abundance", values: vals }],
-    xName: "sample",
-    hideLabels: m.samples.length > 24,
-  };
-});
+const distSpec = computed<ChartSpec | null>(() => (matrix.value ? distributionSpec(matrix.value, order.value) : null));
 
-const countSpec = computed<ChartSpec | null>(() => {
-  const m = matrix.value;
-  if (!m) return null;
-  return {
-    kind: "bar",
-    labels: order.value.map((j) => m.samples[j]),
-    series: [{ name: "proteins", values: order.value.map((j) => column(m, j).length) }],
-    colors: groupBy.value ? order.value.map((j) => groupColor(groupOf(m.samples[j]))) : undefined,
-    notes: groupBy.value ? order.value.map((j) => `${groupBy.value}: ${groupOf(m.samples[j])}`) : undefined,
-    xName: "sample",
-    hideLabels: m.samples.length > 24,
-  };
-});
+const countSpec = computed<ChartSpec | null>(() =>
+  matrix.value ? proteinCountSpec(matrix.value, order.value, groupBy.value, groupOf, groupColor) : null
+);
 
 const corr = computed(() => {
   const m = matrix.value;
@@ -203,7 +185,7 @@ function corrCsv(): string {
   const m = matrix.value;
   const c = corr.value;
   if (!m || !c) return "";
-  return toCsv(["sample", ...c.ord.map((j) => m.samples[j])], c.ord.map((a) => [m.samples[a], ...c.ord.map((b) => c.r[a][b])]));
+  return correlationCsv(m.samples, c);
 }
 
 const pcaRes = computed(() => {
@@ -225,36 +207,14 @@ function pcaCsv(): string {
   const m = matrix.value;
   const p = pcaRes.value;
   if (!m || !p) return "";
-  const head = ["sample", ...(groupBy.value ? [groupBy.value] : []), ...p.explained.map((_, c) => `PC${c + 1}`)];
-  return toCsv(head, m.samples.map((s, j) => [s, ...(groupBy.value ? [groupOf(s)] : []), ...p.scores[j]]));
+  return pcaScoresCsv(m.samples, p, groupBy.value, groupOf);
 }
 
 // ---- per-protein profile ----
 
-interface ProtRow {
-  protein: string;
-  gene: string | null;
-  n: number;
-  mean: number | null;
-  sd: number | null;
-}
+const protRows = computed<ProteinSummary[]>(() => (matrix.value ? proteinSummaries(matrix.value) : []));
 
-const protRows = computed<ProtRow[]>(() => {
-  const m = matrix.value;
-  if (!m) return [];
-  return m.proteins.map((p, i) => {
-    const xs = [...m.values[i]].filter(Number.isFinite);
-    const mean = xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
-    const sd = xs.length > 1 && mean != null ? Math.sqrt(xs.reduce((a, b) => a + (b - mean) ** 2, 0) / (xs.length - 1)) : null;
-    return { protein: p, gene: m.genes[i], n: xs.length, mean, sd };
-  });
-});
-
-const shownProts = computed(() => {
-  const s = q.value.trim().toLowerCase();
-  const rows = s ? protRows.value.filter((r) => r.protein.toLowerCase().includes(s) || (r.gene ?? "").toLowerCase().includes(s)) : protRows.value;
-  return [...rows].sort((a, b) => b.n - a.n || (b.mean ?? 0) - (a.mean ?? 0)).slice(0, 500);
-});
+const shownProts = computed(() => findProteins(protRows.value, q.value));
 
 watch(shownProts, (rows) => {
   if (!focus.value && rows.length) focus.value = rows[0].protein;
@@ -281,8 +241,7 @@ function profileCsv(): string {
   const m = matrix.value;
   if (!m || !focus.value) return "";
   const i = m.proteins.indexOf(focus.value);
-  const head = ["sample", ...(groupBy.value ? [groupBy.value] : []), "log2_abundance"];
-  return toCsv(head, order.value.map((j) => [m.samples[j], ...(groupBy.value ? [groupOf(m.samples[j])] : []), Number.isFinite(m.values[i][j]) ? m.values[i][j] : null]));
+  return proteinProfileCsv(m.samples, order.value, m.values[i], groupBy.value, groupOf);
 }
 
 const saved = ref("");
@@ -300,11 +259,7 @@ async function exportMatrixFile() {
 
 function exportMatrix(): string {
   const m = matrix.value;
-  if (!m) return "";
-  return toCsv(
-    ["anchor_protein", "gene", ...m.samples],
-    m.proteins.map((p, i) => [p, m.genes[i], ...[...m.values[i]].map((v) => (Number.isFinite(v) ? +v.toFixed(5) : null))])
-  );
+  return m ? matrixCsv(m) : "";
 }
 
 const colUnit = computed(() => (isSampleCols.value ? "samples" : "runs"));
@@ -396,7 +351,7 @@ const sourceText = computed(() => {
       <div class="profile">
         <div class="left">
           <div class="sec-head">
-            <h3>Proteins <span class="muted">({{ shownProts.length.toLocaleString() }}{{ shownProts.length === 500 ? "+" : "" }})</span></h3>
+            <h3>Proteins <span class="muted">({{ shownProts.length.toLocaleString() }}{{ shownProts.length === PROTEIN_LIST_MAX ? "+" : "" }})</span></h3>
             <input v-model="q" class="filter" placeholder="Filter accession or gene…" />
           </div>
           <ReportTable

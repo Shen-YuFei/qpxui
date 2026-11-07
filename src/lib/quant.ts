@@ -207,3 +207,48 @@ export function sampleGroup(meta: Map<string, Record<string, any>>, by: string, 
   const v = meta.get(sample)?.[by];
   return v == null || v === "" ? "not available" : String(v);
 }
+
+/** The matrix without the proteins `flagged` marks (1 = drop). */
+export function withoutFlagged(m: QuantMatrix, flagged: Uint8Array): QuantMatrix {
+  const keep = m.proteins.map((_, i) => !flagged[i]);
+  return {
+    samples: m.samples,
+    proteins: m.proteins.filter((_, i) => keep[i]),
+    genes: m.genes.filter((_, i) => keep[i]),
+    values: m.values.filter((_, i) => keep[i]),
+  };
+}
+
+/** Column indices ordered by group, then name. */
+export function groupedOrder(samples: string[], groupOf: (sample: string) => string): number[] {
+  return samples.map((_, j) => j).sort((a, b) => natural(groupOf(samples[a]), groupOf(samples[b])) || natural(samples[a], samples[b]));
+}
+
+/** A protein of the matrix: columns quantified, mean and SD of log2 abundance. */
+export interface ProteinSummary {
+  protein: string;
+  gene: string | null;
+  n: number;
+  mean: number | null;
+  sd: number | null;
+}
+
+export function proteinSummaries(m: QuantMatrix): ProteinSummary[] {
+  return m.proteins.map((p, i) => {
+    const xs = [...m.values[i]].filter(Number.isFinite);
+    const mean = xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
+    const sd = xs.length > 1 && mean != null ? Math.sqrt(xs.reduce((a, b) => a + (b - mean) ** 2, 0) / (xs.length - 1)) : null;
+    return { protein: p, gene: m.genes[i], n: xs.length, mean, sd };
+  });
+}
+
+/** Proteins the protein list shows at most. */
+export const PROTEIN_LIST_MAX = 500;
+
+/** Proteins whose accession or gene contains `text` (any case), most
+ * quantified first, then most abundant; at most PROTEIN_LIST_MAX. */
+export function findProteins(all: ProteinSummary[], text: string): ProteinSummary[] {
+  const s = text.trim().toLowerCase();
+  const rows = s ? all.filter((r) => r.protein.toLowerCase().includes(s) || (r.gene ?? "").toLowerCase().includes(s)) : all;
+  return [...rows].sort((a, b) => b.n - a.n || (b.mean ?? 0) - (a.mean ?? 0)).slice(0, PROTEIN_LIST_MAX);
+}

@@ -1,7 +1,8 @@
-// ECharts options for the Quantification tab: the sample correlation
-// heatmap, the PCA scores and one protein's abundance across samples.
-import { escapeHtml, type ChartTheme, type GroupStyle } from "./charts";
-import type { Pca } from "./quant";
+// Charts of the Quantification tab: abundance distributions and protein
+// counts per sample, the sample correlation heatmap, the PCA scores and one
+// protein's abundance across samples, and their CSV exports.
+import { escapeHtml, toCsv, type ChartSpec, type ChartTheme, type GroupStyle } from "./charts";
+import { column, quantile, type Pca, type QuantMatrix } from "./quant";
 
 /** How the charts name and colour samples. */
 export interface SampleStyle extends GroupStyle {
@@ -179,4 +180,64 @@ export function profileChart(samples: string[], order: number[], row: Float64Arr
       ...st.groups.map((g) => ({ name: g, type: "line", data: [], itemStyle: { color: st.groupColor(g) } })),
     ],
   };
+}
+
+/** Box plot of each column's log2 abundances (5, 25, 50, 75, 95%), columns in `order`. */
+export function distributionSpec(m: QuantMatrix, order: number[]): ChartSpec {
+  const vals = order.map((j) => {
+    const c = column(m, j).sort((a, b) => a - b);
+    return c.length ? [0.05, 0.25, 0.5, 0.75, 0.95].map((p) => quantile(c, p)) : null;
+  });
+  return {
+    kind: "box",
+    labels: order.map((j) => m.samples[j]),
+    series: [{ name: "log2 abundance", values: vals }],
+    xName: "sample",
+    hideLabels: m.samples.length > 24,
+  };
+}
+
+/** Proteins quantified in each column, columns in `order`, bars coloured by
+ * group when grouping by `groupBy`. */
+export function proteinCountSpec(
+  m: QuantMatrix,
+  order: number[],
+  groupBy: string,
+  groupOf: (sample: string) => string,
+  groupColor: (group: string) => string
+): ChartSpec {
+  return {
+    kind: "bar",
+    labels: order.map((j) => m.samples[j]),
+    series: [{ name: "proteins", values: order.map((j) => column(m, j).length) }],
+    colors: groupBy ? order.map((j) => groupColor(groupOf(m.samples[j]))) : undefined,
+    notes: groupBy ? order.map((j) => `${groupBy}: ${groupOf(m.samples[j])}`) : undefined,
+    xName: "sample",
+    hideLabels: m.samples.length > 24,
+  };
+}
+
+/** The correlation matrix as CSV, in the clustered order. */
+export function correlationCsv(samples: string[], c: { r: number[][]; ord: number[] }): string {
+  return toCsv(["sample", ...c.ord.map((j) => samples[j])], c.ord.map((a) => [samples[a], ...c.ord.map((b) => c.r[a][b])]));
+}
+
+/** The PCA scores as CSV, with each sample's group when grouping by `groupBy`. */
+export function pcaCsv(samples: string[], p: Pca, groupBy: string, groupOf: (sample: string) => string): string {
+  const head = ["sample", ...(groupBy ? [groupBy] : []), ...p.explained.map((_, c) => `PC${c + 1}`)];
+  return toCsv(head, samples.map((s, j) => [s, ...(groupBy ? [groupOf(s)] : []), ...p.scores[j]]));
+}
+
+/** One protein's log2 abundance per sample (`row`) as CSV, samples in `order`. */
+export function profileCsv(samples: string[], order: number[], row: Float64Array, groupBy: string, groupOf: (sample: string) => string): string {
+  const head = ["sample", ...(groupBy ? [groupBy] : []), "log2_abundance"];
+  return toCsv(head, order.map((j) => [samples[j], ...(groupBy ? [groupOf(samples[j])] : []), Number.isFinite(row[j]) ? row[j] : null]));
+}
+
+/** The protein × sample matrix as CSV (log2, 5 decimals, empty = missing). */
+export function matrixCsv(m: QuantMatrix): string {
+  return toCsv(
+    ["anchor_protein", "gene", ...m.samples],
+    m.proteins.map((p, i) => [p, m.genes[i], ...[...m.values[i]].map((v) => (Number.isFinite(v) ? +v.toFixed(5) : null))])
+  );
 }
