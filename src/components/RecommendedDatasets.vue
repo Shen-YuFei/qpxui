@@ -54,9 +54,27 @@ async function loadRecommended() {
   busy.value = true;
   error.value = "";
   try {
-    // The most-analyzed datasets (by sample count) make good "featured" picks.
-    const res = await api.portalSearch(null, { sort: "samples", pageSize: 6 });
-    datasets.value = res.datasets;
+    // Feature the biological collections (e.g. human cancer cell lines) and
+    // skip the huge MS-Net reanalysis collection, which otherwise dominates a
+    // by-sample-count ranking. Take the most-analyzed datasets per collection.
+    const preferred: { name: string; take: number }[] = [
+      { name: "celllines", take: 5 },
+      { name: "immunopeptidomics", take: 1 },
+    ];
+    const picked: PortalDataset[] = [];
+    const seen = new Set<string>();
+    for (const { name, take } of preferred) {
+      if (picked.length >= 6) break;
+      const res = await api.portalSearch(null, { collection: name, sort: "samples", pageSize: take });
+      for (const d of res.datasets) {
+        const key = d.datasetRef ?? d.accession;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        picked.push(d);
+        if (picked.length >= 6) break;
+      }
+    }
+    datasets.value = picked;
     if (!datasets.value.length) loadingMsg.value = "No featured datasets available.";
   } catch (e: any) {
     error.value = String(e);
@@ -207,8 +225,9 @@ function fmtPx(n: number): string {
     <div class="rec-head">
       <h3>✨ Recommended datasets</h3>
       <p class="muted">
-        The most-analyzed datasets on the quantms portal. Expand one to pick its QPX views, then
-        <b>Stream</b> lazily or <b>download to cache</b>.
+        Featured biological datasets from the quantms portal — human cancer cell lines and
+        immunopeptidomics. Expand one to pick its QPX views, then <b>Stream</b> lazily or
+        <b>download to cache</b>.
       </p>
     </div>
 
