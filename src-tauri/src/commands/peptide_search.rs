@@ -77,6 +77,47 @@ fn non_empty(v: Option<&str>) -> Option<&str> {
     v.filter(|v| !v.trim().is_empty())
 }
 
+/// The portal API URL for one search. With `dtype` "auto" (or none), a
+/// peptide-like query goes to the peptide endpoint and anything else to the
+/// protein one.
+fn search_url(
+    query: &str,
+    dtype: Option<&str>,
+    match_mode: Option<&str>,
+    organism: Option<&str>,
+    modification: Option<&str>,
+    limit: Option<usize>,
+) -> Result<reqwest::Url, String> {
+    let path = match dtype.unwrap_or("auto").to_lowercase().as_str() {
+        "peptide" => "search/peptide",
+        "gene" => "search/gene",
+        "protein" => "search/protein",
+        _ if looks_like_peptide(query) => "search/peptide",
+        _ => "search/protein",
+    };
+    let mut url =
+        reqwest::Url::parse(&format!("{BASE}/{path}")).map_err(|e| format!("bad URL: {e}"))?;
+    {
+        let mut qp = url.query_pairs_mut();
+        if path == "search/peptide" {
+            qp.append_pair("sequence", query.trim());
+            if let Some(m) = non_empty(match_mode) {
+                qp.append_pair("match", m);
+            }
+        } else {
+            qp.append_pair("query", query.trim());
+        }
+        if let Some(o) = non_empty(organism) {
+            qp.append_pair("organism", o);
+        }
+        if let Some(m) = non_empty(modification) {
+            qp.append_pair("modification", m);
+        }
+        qp.append_pair("limit", &limit.unwrap_or(50).min(200).to_string());
+    }
+    Ok(url)
+}
+
 /// Search the quantms portal for a peptide sequence, protein identifier/name,
 /// or gene symbol across all published QPX datasets.
 ///
@@ -91,44 +132,14 @@ pub async fn ps_search(
     modification: Option<String>,
     limit: Option<usize>,
 ) -> Result<PsSearchResult, String> {
-    let kind = dtype.unwrap_or_else(|| "auto".to_string()).to_lowercase();
-    let path = match kind.as_str() {
-        "peptide" => "search/peptide",
-        "gene" => "search/gene",
-        "protein" => "search/protein",
-        _ => {
-            if looks_like_peptide(&query) {
-                "search/peptide"
-            } else {
-                "search/protein"
-            }
-        }
-    };
-
-    let mut url =
-        reqwest::Url::parse(&format!("{BASE}/{path}")).map_err(|e| format!("bad URL: {e}"))?;
-    {
-        let mut qp = url.query_pairs_mut();
-        match kind.as_str() {
-            "peptide" | "auto" if path == "search/peptide" => {
-                qp.append_pair("sequence", query.trim());
-                if let Some(m) = non_empty(match_mode.as_deref()) {
-                    qp.append_pair("match", m);
-                }
-            }
-            _ => {
-                qp.append_pair("query", query.trim());
-            }
-        }
-        if let Some(o) = non_empty(organism.as_deref()) {
-            qp.append_pair("organism", o);
-        }
-        if let Some(m) = non_empty(modification.as_deref()) {
-            qp.append_pair("modification", m);
-        }
-        qp.append_pair("limit", &limit.unwrap_or(50).min(200).to_string());
-    }
-
+    let url = search_url(
+        &query,
+        dtype.as_deref(),
+        match_mode.as_deref(),
+        organism.as_deref(),
+        modification.as_deref(),
+        limit,
+    )?;
     let client = portal_http::client()?;
 
     #[derive(serde::Deserialize)]
@@ -183,6 +194,48 @@ pub async fn ps_modifications() -> Result<Vec<PsModification>, String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn auto_search_picks_the_endpoint_by_the_query() {
+        let url = |q: &str, dtype: Option<&str>| {
+            search_url(q, dtype, Some("exact"), None, None, None)
+                .unwrap()
+                .to_string()
+        };
+        assert_eq!(
+            url("AVGKVLPELNGK", None),
+            format!("{BASE}/search/peptide?sequence=AVGKVLPELNGK&match=exact&limit=50")
+        );
+        assert_eq!(
+            url("P04406", Some("auto")),
+            format!("{BASE}/search/protein?query=P04406&limit=50")
+        );
+        assert_eq!(
+            url("GAPDH", Some("gene")),
+            format!("{BASE}/search/gene?query=GAPDH&limit=50")
+        );
+        assert_eq!(
+            url("ACTB", Some("peptide")),
+            format!("{BASE}/search/peptide?sequence=ACTB&match=exact&limit=50")
+        );
+    }
+
+    #[test]
+    fn search_skips_empty_filters_and_caps_the_limit() {
+        let url = search_url(
+            " PEPTIDEK ",
+            Some("peptide"),
+            Some(""),
+            Some("Homo sapiens"),
+            Some(" "),
+            Some(500),
+        )
+        .unwrap();
+        assert_eq!(
+            url.to_string(),
+            format!("{BASE}/search/peptide?sequence=PEPTIDEK&organism=Homo+sapiens&limit=200")
+        );
+    }
 
     #[test]
     fn results_read_snake_case_and_send_camel_case() {
