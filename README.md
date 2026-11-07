@@ -300,7 +300,7 @@ npm run tauri build    # installers for this platform → src-tauri/target/relea
 ```bash
 npm run lint                   # ESLint
 npm run typecheck              # vue-tsc
-npm test                       # Vitest unit tests (src/lib/*.test.ts)
+npm test                       # Vitest unit tests (src/lib/**/*.test.ts)
 npm run build                  # vite build; the backend embeds dist/
 cd src-tauri
 cargo fmt --check
@@ -352,12 +352,20 @@ Many reanalysed datasets (e.g. `PXD014414`) can be opened directly with the **Qu
 └───────────────────────────────────────────────────────────────────┘
 ```
 
-Report queries are built in `src/lib/report.ts`:
+The front end has three layers, kept apart by ESLint import rules (`eslint.config.js`):
 
-- They select only the columns they need and adapt to each dataset's schema: `anchor_protein`
-  vs `protein_accessions`, a struct- or list-typed `pg_accessions`, and LFQ or TMT `intensities`.
-- If the `sequence` column contains modification names, the plain sequence is derived from the
-  peptidoform instead.
+- `src/lib/` calls the backend (`api.ts`, `progress.ts`, `downloads.ts`), runs DuckDB
+  (`duck.ts`), builds every SQL query (`queries/`, one module per tab or view, on the shared
+  helpers in `report.ts`) and holds the charts and pure helpers. It imports neither the store
+  nor components.
+- `src/store.ts` holds the app state and imports only `lib`.
+- Components render and handle input; they reach the backend and run SQL only through `lib`.
+
+QPX names live in `src/lib/qpx.ts`: the views the viewer reads and `COL`, every view column it
+reads, checked against the QPX schemas. Queries select only the columns they need and adapt to
+each dataset's schema: `anchor_protein` vs `protein_accessions`, a struct- or list-typed
+`pg_accessions`, and LFQ or TMT `intensities`. If the `sequence` column contains modification
+names, the plain sequence is derived from the peptidoform instead.
 
 <details>
 <summary>Project layout</summary>
@@ -371,14 +379,20 @@ qpxui/
 │   │   ├── api.ts                 # Tauri IPC wrappers + types
 │   │   ├── duck.ts                # DuckDB init, view registration, queries
 │   │   ├── errors.ts              # cancellation and engine error texts
-│   │   ├── qpx.ts                 # QPX view names, footer key, sample facets
-│   │   ├── report.ts              # report SQL helpers, dataset table registry, search
+│   │   ├── qpx.ts                 # QPX view and column names (COL), footer key, sample facets
+│   │   ├── queries/               # SQL per tab or view: overview, qc, ptms, samples, proteins,
+│   │   │                          #   peptides, quant, profile, header, summary, sqlConsole,
+│   │   │                          #   spectrum, table
+│   │   ├── report.ts              # shared SQL helpers, dataset tables, query cache, search
+│   │   ├── registry.ts            # portal registry search and sort
 │   │   ├── charts.ts              # ECharts setup and option builders, CSV export
 │   │   ├── quantCharts.ts         # Quantification tab charts: correlation, PCA, profile
 │   │   ├── peptidoformCharts.ts   # peptidoform profile charts: samples, distribution, RT
 │   │   ├── spectrumChart.ts       # annotated spectrum chart (PRIDE USI viewer style)
 │   │   ├── quant.ts               # normalisation, correlation, clustering, PCA, grouping
 │   │   ├── fragments.ts           # peptidoform parsing, fragment ions, annotation
+│   │   ├── spectrumSummary.ts     # spectrum statistics, sequence coverage, ion table
+│   │   ├── useMirror.ts           # the spectrum viewer's mirror: other PSM, prediction, USI
 │   │   ├── mirror.ts              # Koina predictions, PROXI/USI, spectrum similarity
 │   │   ├── downloads.ts           # free-space check, confirm, cancel
 │   │   ├── progress.ts            # download progress from backend events
@@ -390,8 +404,12 @@ qpxui/
 │   │   └── *.test.ts              # Vitest unit tests
 │   └── components/
 │       ├── ReportView.vue         # report header, counts, citation, tabs
-│       ├── report/                # Overview, QC, PTMs, Samples, Proteins, Quant, Peptides
+│       ├── report/                # Overview, QC, PTMs, Samples, Proteins, Quant (+ protein
+│       │                          #   profile), Peptides (+ peptidoform profile), LargeGate
 │       ├── SpectrumViewer.vue     # annotated spectrum + mirror
+│       ├── spectrum/              # CoverageMap, FragmentIonTable, MirrorControls
+│       ├── table/                 # ResultCell (Browse and Query cells), CellMenu, HScroll
+│       ├── portal/                # PortalPicker's registry list and dataset heading
 │       ├── ChartCard.vue, ReportTable.vue
 │       ├── PeptideSeq.vue, PTMSegs.vue, PTMBadges.vue, PTMTip.vue  # PTM-coloured cells
 │       ├── SourcePicker.vue, PortalPicker.vue, S3Picker.vue, DownloadProgress.vue
@@ -402,6 +420,7 @@ qpxui/
 │       └── SettingsPanel.vue, StructuredView.vue
 ├── src-tauri/
 │   ├── tauri.conf.json, Cargo.toml, capabilities/
+│   ├── examples/stream_proxy.rs   # manual check of the stream proxy against S3 or the portal
 │   └── src/{lib.rs, qpx/, commands/}
 ├── scripts/                       # fetch-sample.mjs, make-icon.py
 └── .github/workflows/             # ci.yml (PR checks), release.yml (installers)
