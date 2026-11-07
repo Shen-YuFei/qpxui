@@ -28,8 +28,8 @@ export const PTM_PALETTE: PTMEntry[] = [
   { id: "dimethyl", label: "Dimethyl", accessions: ["UNIMOD:36"], keywords: ["dimethyl", "dethiomethyl"], default: "#14b8a6" },
   { id: "trimethyl", label: "Trimethyl", accessions: ["UNIMOD:37"], keywords: ["trimethyl"], default: "#0d9488" },
   { id: "glygly", label: "GlyGly / Ubiquitination", accessions: ["UNIMOD:121"], keywords: ["gly", "ubiquit"], default: "#38bdf8" },
-  { id: "sulfation", label: "Sulfation", accessions: ["UNIMOD:39"], keywords: ["sulfo", "sulf"], default: "#24d3cc" },
-  { id: "guanidinyl", label: "Guanidinyl", accessions: ["UNIMOD:43"], keywords: ["guanidin"], default: "#a78bfa" },
+  { id: "sulfation", label: "Sulfation", accessions: ["UNIMOD:40"], keywords: ["sulfo", "sulf"], default: "#24d3cc" },
+  { id: "guanidinyl", label: "Guanidinyl", accessions: ["UNIMOD:52"], keywords: ["guanidin"], default: "#a78bfa" },
   { id: "isobaric", label: "Isobaric labels (TMT / iTRAQ / SILAC)", accessions: [], keywords: ["tmt", "itraq", "silac", "label:", "isotopic", "icat", "chelator", "piol"], default: "#60a5fa" },
   { id: "unknown", label: "Unknown / mass-shift", accessions: [], keywords: [], default: "#94a3b8" },
 ];

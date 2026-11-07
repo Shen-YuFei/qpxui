@@ -47,7 +47,7 @@ export interface PTMMeta {
   code: string;
 }
 
-const PTM_META: Record<string, PTMMeta> = {
+export const PTM_META: Record<string, PTMMeta> = {
   phospho: { name: "Phospho", accession: "UNIMOD:21", mass: 79.966331, code: "P" },
   phosphorylation: { name: "Phosphorylation", accession: "UNIMOD:21", mass: 79.966331, code: "P" },
   oxidation: { name: "Oxidation", accession: "UNIMOD:35", mass: 15.994915, code: "Ox" },
@@ -70,12 +70,12 @@ const PTM_META: Record<string, PTMMeta> = {
   dimethylation: { name: "Dimethyl", accession: "UNIMOD:36", mass: 28.0313, code: "DiMe" },
   trimethyl: { name: "Trimethyl", accession: "UNIMOD:37", mass: 42.04695, code: "TriMe" },
   trimethylation: { name: "Trimethyl", accession: "UNIMOD:37", mass: 42.04695, code: "TriMe" },
-  guanidinyl: { name: "Guanidinyl", accession: "UNIMOD:43", mass: 42.021798, code: "Gu" },
-  guanidination: { name: "Guanidinyl", accession: "UNIMOD:43", mass: 42.021798, code: "Gu" },
-  sulfation: { name: "Sulfation", accession: "UNIMOD:39", mass: 79.956815, code: "SO3" },
-  sulfo: { name: "Sulfation", accession: "UNIMOD:39", mass: 79.956815, code: "SO3" },
+  guanidinyl: { name: "Guanidinyl", accession: "UNIMOD:52", mass: 42.021798, code: "Gu" },
+  guanidination: { name: "Guanidinyl", accession: "UNIMOD:52", mass: 42.021798, code: "Gu" },
+  sulfation: { name: "Sulfation", accession: "UNIMOD:40", mass: 79.956815, code: "SO3" },
+  sulfo: { name: "Sulfation", accession: "UNIMOD:40", mass: 79.956815, code: "SO3" },
   oxidation_orhydroxylation: { name: "Oxidation or Hydroxylation", accession: "UNIMOD:35", mass: 15.994915, code: "Ox" },
-  dethiomethyl: { name: "Dethiomethyl", accession: "UNIMOD:36", mass: 45.987721, code: "dM" },
+  dethiomethyl: { name: "Dethiomethyl", accession: "UNIMOD:526", mass: -48.003371, code: "dM" },
   carbamidomethylation_d: { name: "Carbamidomethyl (D)", accession: "UNIMOD:4", mass: 57.021464, code: "Cm" },
 };
 

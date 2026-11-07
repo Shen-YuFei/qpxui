@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { hasInlineMods, inlineToSegments, modBadges, ptmMeta, seqWithModsToSegments, shortCode } from "./ptm";
+import { modMass, modUnimodId } from "./fragments";
+import { hasInlineMods, inlineToSegments, modBadges, PTM_META, ptmMeta, seqWithModsToSegments, shortCode } from "./ptm";
+import { PTM_PALETTE } from "./settings";
 
 describe("inlineToSegments", () => {
   it("splits terminal and residue modifications", () => {
@@ -40,6 +42,30 @@ describe("short codes and metadata", () => {
     expect(shortCode(undefined, "UNIMOD:35")).toBe("Ox");
     expect(shortCode("TMT6plex")).toBe("TMT");
     expect(shortCode("+79.9663")).toBe("+80");
+  });
+
+  it("uses the right Unimod entries", () => {
+    expect(ptmMeta(undefined, "UNIMOD:40")?.name).toBe("Sulfation");
+    expect(ptmMeta(undefined, "UNIMOD:52")?.name).toBe("Guanidinyl");
+    expect(ptmMeta("Dethiomethyl")).toMatchObject({ accession: "UNIMOD:526", mass: -48.003371 });
+    // Methylthio and HexNAc are other modifications.
+    expect(ptmMeta(undefined, "UNIMOD:39")).toBeNull();
+    expect(ptmMeta(undefined, "UNIMOD:43")).toBeNull();
+  });
+
+  it("agrees with the fragment table and the colour palette", () => {
+    for (const [key, m] of Object.entries(PTM_META)) {
+      const mass = modMass(m.accession);
+      if (mass !== null) expect(mass, key).toBeCloseTo(m.mass, 4);
+      const id = modUnimodId(m.name);
+      if (id !== null) expect(`UNIMOD:${id}`, key).toBe(m.accession);
+    }
+    for (const e of PTM_PALETTE) {
+      for (const acc of e.accessions) {
+        const name = ptmMeta(undefined, acc)?.name.toLowerCase() ?? "";
+        expect(e.keywords.some((k) => name.includes(k)), `${e.id} ${acc}`).toBe(true);
+      }
+    }
   });
 
   it("looks up accessions case-insensitively", () => {
