@@ -37,15 +37,36 @@ pub fn scan_collection(path: String) -> Result<Vec<DatasetInfo>, String> {
     Ok(datasets)
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
 
+    #[test]
+    fn a_file_opens_with_its_sibling_views() {
+        let tmp = tempfile::tempdir().unwrap();
+        for name in ["A.pg.parquet", "A.psm.parquet", "B.pg.parquet"] {
+            std::fs::write(tmp.path().join(name), b"x").unwrap();
+        }
+        let path = |name: &str| tmp.path().join(name).to_string_lossy().to_string();
+        let ds = open_file(path("A.psm.parquet")).unwrap();
+        assert_eq!(ds.prefix, "A");
+        let views: Vec<_> = ds.views.iter().map(|v| v.view.as_str()).collect();
+        assert_eq!(views, ["pg", "psm"]);
+        let e = open_file(path("notes.txt")).unwrap_err();
+        assert!(e.starts_with("not a QPX file"), "{e}");
+
+        let empty = tempfile::tempdir().unwrap();
+        let e = scan_collection(empty.path().to_string_lossy().to_string()).unwrap_err();
+        assert!(e.starts_with("No QPX datasets"), "{e}");
+    }
+
+    #[cfg(unix)]
     fn set_mode(dir: &std::path::Path, mode: u32) {
+        use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(dir, std::fs::Permissions::from_mode(mode)).unwrap();
     }
 
+    #[cfg(unix)]
     #[test]
     fn unreadable_folder_reports_why() {
         let tmp = tempfile::tempdir().unwrap();
@@ -61,6 +82,7 @@ mod tests {
         assert!(open.unwrap_err().contains("Permission denied"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn unreadable_subfolder_does_not_stop_a_collection_scan() {
         let tmp = tempfile::tempdir().unwrap();

@@ -140,7 +140,7 @@ fn walk(dir: &Path, depth_left: u32, out: &mut Vec<DatasetInfo>) -> Result<(), S
 
 #[cfg(test)]
 mod tests {
-    use super::parse_filename;
+    use super::{collect_all, discover_dir, parse_filename};
 
     fn p(s: &str) -> Option<(String, String, String)> {
         parse_filename(s)
@@ -166,5 +166,58 @@ mod tests {
             t("PXD019483-hCOV", "psm", "parquet")
         );
         assert_eq!(p("plain.parquet"), None);
+    }
+
+    #[test]
+    fn a_folder_groups_its_view_files_by_prefix() {
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        for (name, len) in [
+            ("B.psm.parquet", 3),
+            ("A.pg.parquet", 1),
+            ("A.feature.parquet", 2),
+            ("notes.txt", 1),
+            ("plain.parquet", 1),
+        ] {
+            std::fs::write(d.join(name), vec![0u8; len]).unwrap();
+        }
+        std::fs::create_dir(d.join("C.run.parquet")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(d.join("gone"), d.join("D.pg.parquet")).unwrap();
+        let found: Vec<_> = discover_dir(d)
+            .unwrap()
+            .into_iter()
+            .map(|ds| {
+                let views: Vec<_> = ds
+                    .views
+                    .into_iter()
+                    .map(|v| (v.view, v.size_bytes))
+                    .collect();
+                (ds.prefix, views)
+            })
+            .collect();
+        let view = |v: &str, n: u64| (v.to_string(), n);
+        assert_eq!(
+            found,
+            [
+                ("A".to_string(), vec![view("feature", 2), view("pg", 1)]),
+                ("B".to_string(), vec![view("psm", 3)]),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_collection_scan_stops_at_its_depth() {
+        let tmp = tempfile::tempdir().unwrap();
+        let deep = tmp.path().join("a").join("b");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(tmp.path().join("a").join("X.pg.parquet"), b"x").unwrap();
+        std::fs::write(deep.join("Y.pg.parquet"), b"y").unwrap();
+        let prefixes = |depth| -> Vec<String> {
+            let found = collect_all(tmp.path(), depth).unwrap();
+            found.into_iter().map(|d| d.prefix).collect()
+        };
+        assert_eq!(prefixes(1), ["X"]);
+        assert_eq!(prefixes(2), ["X", "Y"]);
     }
 }
