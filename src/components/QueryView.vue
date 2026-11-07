@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, shallowRef } from "vue";
 import { ensureViewReady, type QueryResult } from "../lib/duck";
-import { QUERY_EXAMPLES as Examples, QUERY_LIMIT as limit, runQuery, substituteTable } from "../lib/queries/sqlConsole";
+import { QUERY_EXAMPLES as Examples, runQuery, substituteTable } from "../lib/queries/sqlConsole";
 import ResultCell from "./table/ResultCell.vue";
 import { isModificationsCol, peptideCells, type PTMSeg } from "../lib/ptm";
 import type { ViewInfo } from "../lib/api";
@@ -79,7 +79,7 @@ function isModsCell(j: number): boolean {
     ></textarea>
 
     <div class="meta">
-      <span v-if="lastSql" class="muted">{{ results.rowCount.toLocaleString() }} row(s) <span v-if="results.truncated">(capped at {{ limit }})</span></span>
+      <span v-if="lastSql" class="muted">{{ results.rowCount.toLocaleString() }} row(s) <span v-if="results.truncated">(capped at {{ results.rowCount.toLocaleString() }})</span></span>
       <span v-else class="muted">Results appear here. Quick examples are numbered above.</span>
       <span v-if="error" class="error">⚠ {{ error }}</span>
     </div>

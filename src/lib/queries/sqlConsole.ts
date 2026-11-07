@@ -19,17 +19,20 @@ export function substituteTable(text: string, table: string): string {
   return text.replace("{table}", ident(table));
 }
 
-/** The statement run for the query text: the whole table when the text is
- * empty, `{table}` substituted, and `LIMIT QUERY_LIMIT` appended unless the
- * query ends with a LIMIT. */
-export function querySql(text: string, table: string): string {
+/** The statement run for the query text (the whole table when the text is
+ * empty, `{table}` substituted) and the rows kept of it. A query without a
+ * trailing LIMIT of its own keeps QUERY_LIMIT rows and asks for one more, so
+ * the result is marked truncated when it was cut; otherwise the engine's row
+ * cap applies. */
+export function querySql(text: string, table: string): { sql: string; maxRows?: number } {
   let body = text.trim();
   if (!body) body = `SELECT * FROM ${ident(table)}`;
   body = substituteTable(body, table);
-  return /limit\s+\d+\s*$/i.test(body) ? body : `${body} LIMIT ${QUERY_LIMIT}`;
+  return /limit\s+\d+\s*$/i.test(body) ? { sql: body } : { sql: `${body} LIMIT ${QUERY_LIMIT + 1}`, maxRows: QUERY_LIMIT };
 }
 
 /** Runs the query text over the table. */
 export function runQuery(text: string, table: string): Promise<QueryResult> {
-  return runSql(querySql(text, table));
+  const q = querySql(text, table);
+  return runSql(q.sql, q.maxRows);
 }

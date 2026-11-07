@@ -3,18 +3,18 @@ import { QUERY_EXAMPLES, querySql, substituteTable } from "./sqlConsole";
 
 describe("querySql", () => {
   it("caps a query without a LIMIT", () => {
-    expect(querySql("SELECT * FROM {table}", "psm")).toBe('SELECT * FROM "psm" LIMIT 2000');
+    expect(querySql("SELECT * FROM {table}", "psm")).toEqual({ sql: 'SELECT * FROM "psm" LIMIT 2001', maxRows: 2000 });
   });
   it("keeps the query's own trailing LIMIT", () => {
-    expect(querySql("select 1 limit 10 ", "psm")).toBe("select 1 limit 10");
+    expect(querySql("select 1 limit 10 ", "psm")).toEqual({ sql: "select 1 limit 10" });
   });
   it("caps a LIMIT that is not at the end", () => {
-    expect(querySql("SELECT * FROM (SELECT * FROM {table} LIMIT 5) ORDER BY 1", "t")).toBe(
-      'SELECT * FROM (SELECT * FROM "t" LIMIT 5) ORDER BY 1 LIMIT 2000'
+    expect(querySql("SELECT * FROM (SELECT * FROM {table} LIMIT 5) ORDER BY 1", "t").sql).toBe(
+      'SELECT * FROM (SELECT * FROM "t" LIMIT 5) ORDER BY 1 LIMIT 2001'
     );
   });
   it("reads the whole table for empty text", () => {
-    expect(querySql("  ", "pg")).toBe('SELECT * FROM "pg" LIMIT 2000');
+    expect(querySql("  ", "pg").sql).toBe('SELECT * FROM "pg" LIMIT 2001');
   });
 });
 
