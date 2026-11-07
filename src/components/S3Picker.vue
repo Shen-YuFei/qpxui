@@ -47,29 +47,12 @@ function selection(): { prefix: string; view: ViewInfo }[] {
   return out;
 }
 
-function groupLocal(entries: { prefix: string; local: ViewInfo }[]): DatasetInfo[] {
+/** One dataset per prefix of the given views. */
+function group(entries: { prefix: string; view: ViewInfo }[]): DatasetInfo[] {
   const map = new Map<string, ViewInfo[]>();
   for (const e of entries) {
     if (!map.has(e.prefix)) map.set(e.prefix, []);
-    map.get(e.prefix)!.push(e.local);
-  }
-  return [...map.entries()].map(([prefix, views]) => ({
-    prefix,
-    path: `${listing.value!.bucket}/${prefix}`,
-    views: views.sort((a, b) => a.view.localeCompare(b.view)),
-  }));
-}
-
-/**
- * Build DatasetInfo for the selected views *without* downloading: each view
- * keeps its `s3://bucket/key` path, and DuckDB reads only the byte ranges
- * each query needs through the backend range proxy.
- */
-function groupStream(): DatasetInfo[] {
-  const map = new Map<string, ViewInfo[]>();
-  for (const s of selection()) {
-    if (!map.has(s.prefix)) map.set(s.prefix, []);
-    map.get(s.prefix)!.push(s.view); // s.view.path is already s3://bucket/key
+    map.get(e.prefix)!.push(e.view);
   }
   return [...map.entries()].map(([prefix, views]) => ({
     prefix,
@@ -83,7 +66,6 @@ async function loadSelection() {
   error.value = "";
   try {
     const sel = selection();
-    if (!sel.length) throw new Error("Select at least one view to load.");
     if (!(await confirmDownload(sel.map((s) => s.view), "s3"))) return;
     // The user may have left this source while the dialog was open, and a
     // download that still finishes must not load into the new source.
@@ -95,8 +77,7 @@ async function loadSelection() {
       error.value = "Download cancelled; partial files were removed.";
       return;
     }
-    const entries = sel.map((s, i) => ({ prefix: s.prefix, local: locals[i] }));
-    loadDatasets(groupLocal(entries), "s3");
+    loadDatasets(group(sel.map((s, i) => ({ prefix: s.prefix, view: locals[i] }))), "s3");
   } catch (e: any) {
     error.value = String(e);
   } finally {
@@ -104,18 +85,11 @@ async function loadSelection() {
   }
 }
 
-/** Load the selected views as streaming (lazy) datasets — no download. */
-async function streamSelection() {
-  busy.value = true;
-  error.value = "";
-  try {
-    if (!selection().length) throw new Error("Select at least one view to stream.");
-    loadDatasets(groupStream(), "s3");
-  } catch (e: any) {
-    error.value = String(e);
-  } finally {
-    busy.value = false;
-  }
+/** Load the selected views as streaming (lazy) datasets — no download: each
+ * keeps its `s3://bucket/key` path, and DuckDB reads only the byte ranges each
+ * query needs through the backend range proxy. */
+function streamSelection() {
+  loadDatasets(group(selection()), "s3");
 }
 
 function toggle(ds: DatasetInfo) {

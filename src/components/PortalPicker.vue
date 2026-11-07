@@ -126,7 +126,6 @@ async function loadSelection() {
   const sel = views.value.filter((v) => checked.value[v.path]);
   const target = selected.value;
   try {
-    if (!sel.length) throw new Error("Select at least one view to load.");
     if (!(await confirmDownload(sel, "portal"))) return;
     // The user may have left this dataset or source while the dialog was
     // open; don't start a transfer for a dataset they've already moved on from.
@@ -157,12 +156,7 @@ async function loadSelection() {
  * fetches only the byte ranges it needs from the portal's storage. */
 function streamSelection() {
   if (!selected.value) return;
-  error.value = "";
   const sel = views.value.filter((v) => checked.value[v.path]);
-  if (!sel.length) {
-    error.value = "Select at least one view to stream.";
-    return;
-  }
   const ds: DatasetInfo = {
     prefix: selected.value.accession,
     path: `quantms portal / ${portalName(selected.value)}`,
