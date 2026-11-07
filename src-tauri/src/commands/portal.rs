@@ -561,7 +561,7 @@ async fn list_views(
     .await?;
 
     // Prefer the `qpx/` sub-folder, else fall back to the run folder directly.
-    let qpx_url = if run_html.contains(">qpx/</a>") || run_html.contains(">qpx/<") {
+    let qpx_url = if run_html.contains(">qpx/<") {
         format!("{run_url}qpx/")
     } else {
         run_url
