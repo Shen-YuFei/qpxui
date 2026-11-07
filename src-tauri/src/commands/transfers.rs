@@ -282,18 +282,15 @@ pub async fn save(
 pub struct DiskSpace {
     pub free: u64,
     pub reserve: u64,
-    pub dir: String,
 }
 
 /// Tauri command: free space on the download cache volume, so the UI can
 /// warn before starting a download.
 #[tauri::command]
 pub fn cache_free_space(kind: CacheKind) -> Result<DiskSpace, String> {
-    let dir = kind.root()?;
     Ok(DiskSpace {
-        free: free_space(&dir)?,
+        free: free_space(&kind.root()?)?,
         reserve: RESERVE_BYTES,
-        dir: dir.to_string_lossy().to_string(),
     })
 }
 

@@ -148,7 +148,7 @@ export const api = {
   listS3: (bucket: string, prefix?: string) =>
     invoke<S3Listing>("list_s3", { bucket, prefix }),
 
-  cacheS3Views: (bucket: string, paths: string[], cancelId?: string) =>
+  cacheS3Views: (bucket: string, paths: string[], cancelId: string) =>
     invoke<ViewInfo[]>("cache_s3_views", { bucket, paths, cancelId }),
 
   /** Register S3 views with the backend range proxy (lazy, no download). */
@@ -167,7 +167,7 @@ export const api = {
   cancelDownload: (id: string) => invoke<void>("cancel_download", { id }),
   /** Free bytes on the download cache disk, and the spare amount always kept free. */
   cacheFreeSpace: (kind: "portal" | "s3") =>
-    invoke<{ free: number; reserve: number; dir: string }>("cache_free_space", { kind }),
+    invoke<{ free: number; reserve: number }>("cache_free_space", { kind }),
 
   writeFileBytes: (path: string, base64: string) =>
     invoke<void>("write_file_bytes", { path, base64 }),
@@ -228,7 +228,7 @@ export const api = {
     }),
   psModifications: () => invoke<PsModification[]>("ps_modifications"),
   portalListViews: (dataset: string, organism?: string | null, psmCount?: number | null) =>
-    invoke<ViewInfo[]>("portal_list_views", { dataset, organism: organism ?? null, psmCount: psmCount ?? null }),
-  portalCacheViews: (urls: string[], cancelId?: string) =>
+    invoke<ViewInfo[]>("portal_list_views", { dataset, organism, psmCount }),
+  portalCacheViews: (urls: string[], cancelId: string) =>
     invoke<ViewInfo[]>("portal_cache_views", { urls, cancelId }),
 };
