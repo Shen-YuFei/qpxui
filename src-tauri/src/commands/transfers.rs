@@ -66,6 +66,10 @@ pub fn cancel(id: &str) -> bool {
     }
 }
 
+/// The error of a cancelled download. The front end recognises a cancel by
+/// this exact text (`CANCELLED` in `src/lib/errors.ts`).
+pub const CANCELLED: &str = "cancelled";
+
 /// Poll helper for the download loop.
 pub fn is_cancelled(token: &AtomicBool) -> bool {
     token.load(Ordering::Relaxed)
@@ -89,7 +93,7 @@ where
             r = &mut fut => return r,
             _ = tick.tick() => {
                 if is_cancelled(token) {
-                    return Err("cancelled".to_string());
+                    return Err(CANCELLED.to_string());
                 }
             }
         }
@@ -255,11 +259,11 @@ pub async fn save(
     loop {
         let next = match tokio::time::timeout(POLL, body.next()).await {
             Ok(next) => next,
-            Err(_) if is_cancelled(token) => return Err("cancelled".to_string()),
+            Err(_) if is_cancelled(token) => return Err(CANCELLED.to_string()),
             Err(_) => continue,
         };
         if is_cancelled(token) {
-            return Err("cancelled".to_string());
+            return Err(CANCELLED.to_string());
         }
         let Some(chunk) = next else { break };
         part.write(&chunk?).await?;
@@ -308,6 +312,29 @@ mod tests {
         // Fits exactly only with the reserve left over.
         assert!(check_fits(19 * gb, 20 * gb).is_ok());
         assert!(check_fits(19 * gb + 1, 20 * gb).is_err());
+    }
+
+    #[test]
+    fn cancel_reaches_a_batch_only_while_it_runs() {
+        let batch = begin("test-cancel");
+        assert!(!is_cancelled(&batch.token));
+        assert!(cancel("test-cancel"));
+        assert!(is_cancelled(&batch.token));
+        assert!(!cancel("test-unknown"));
+        drop(batch);
+        assert!(!cancel("test-cancel"));
+    }
+
+    #[tokio::test]
+    async fn cancellable_ends_a_stalled_request() {
+        let batch = begin("test-cancellable");
+        assert_eq!(cancellable(&batch.token, async { Ok(7) }).await, Ok(7));
+        cancel("test-cancellable");
+        let stalled = std::future::pending::<Result<(), String>>();
+        assert_eq!(
+            cancellable(&batch.token, stalled).await,
+            Err(CANCELLED.to_string())
+        );
     }
 
     #[test]

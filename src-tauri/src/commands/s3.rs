@@ -226,7 +226,7 @@ async fn cache_s3_views_impl(
     let mut plan = Vec::new();
     for p in &paths {
         if xfers::is_cancelled(token) {
-            return Err("cancelled".to_string());
+            return Err(xfers::CANCELLED.to_string());
         }
         let key = p.trim_start_matches(&format!("s3://{bucket}/")).to_string();
         let name = key.rsplit_once('/').map_or(key.as_str(), |(_, n)| n);
@@ -260,7 +260,7 @@ async fn cache_s3_views_impl(
     let mut out = Vec::new();
     for (key, name, view, format, local, size) in plan {
         if xfers::is_cancelled(token) {
-            return Err("cancelled".to_string());
+            return Err(xfers::CANCELLED.to_string());
         }
         let size_bytes = match size {
             None => std::fs::metadata(&local)

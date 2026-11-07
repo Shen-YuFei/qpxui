@@ -773,7 +773,7 @@ async fn portal_cache_views_impl(
     let mut sizes = Vec::with_capacity(plan.len());
     for (url, name, .., local) in &plan {
         if xfers::is_cancelled(token) {
-            return Err("cancelled".to_string());
+            return Err(xfers::CANCELLED.to_string());
         }
         sizes.push(if local.exists() {
             None
@@ -793,7 +793,7 @@ async fn portal_cache_views_impl(
     let mut out = Vec::new();
     for ((url, name, view, format, dir, local), size) in plan.into_iter().zip(sizes) {
         if xfers::is_cancelled(token) {
-            return Err("cancelled".to_string());
+            return Err(xfers::CANCELLED.to_string());
         }
         let size_bytes = match size {
             None => std::fs::metadata(&local)
@@ -1066,7 +1066,10 @@ mod tests {
         let cancelled = AtomicBool::new(true);
         let size = remote_size(&client, &url, &cancelled);
         let r = tokio::time::timeout(std::time::Duration::from_secs(2), size).await;
-        assert_eq!(r.expect("cancel is prompt"), Err("cancelled".to_string()));
+        assert_eq!(
+            r.expect("cancel is prompt"),
+            Err(xfers::CANCELLED.to_string())
+        );
     }
 
     /// Answers every request with `status` and an empty body.
@@ -1180,7 +1183,7 @@ mod tests {
         });
         tokio::time::sleep(std::time::Duration::from_millis(400)).await;
         assert!(xfers::cancel("first"));
-        assert_eq!(job.await.unwrap().unwrap_err(), "cancelled");
+        assert_eq!(job.await.unwrap().unwrap_err(), xfers::CANCELLED);
 
         let body: Vec<u8> = (0..100_000u32).map(|i| (i % 7) as u8).collect();
         let base = no_head_server(body.clone()).await;
@@ -1220,7 +1223,7 @@ mod tests {
             .await
             .expect("cancel is prompt")
             .unwrap();
-        assert_eq!(r.unwrap_err(), "cancelled");
+        assert_eq!(r.unwrap_err(), xfers::CANCELLED);
         assert!(
             !part.exists() && !local.exists(),
             "partial download must be removed"
