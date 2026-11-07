@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { api, type PsHit, type PsModification, type PsSearchResult } from "../lib/api";
+import { fmtCount } from "../lib/format";
 import PortalViews from "./PortalViews.vue";
 
 defineProps<{ organisms: string[] }>();
@@ -30,11 +31,12 @@ const MATCHES = [
 ];
 const showMatch = computed(() => explicitType.value === "auto" || explicitType.value === "peptide");
 
-function rowKey(h: PsHit): string {
+/** A hit's run ref (the portal leaves it empty for some hits). */
+function hitRef(h: PsHit): string {
   return h.datasetRef || h.datasetAccession;
 }
 function isExpanded(h: PsHit): boolean {
-  return !!expanded.value && rowKey(expanded.value) === rowKey(h);
+  return !!expanded.value && hitRef(expanded.value) === hitRef(h);
 }
 
 // Enter can start a search while another runs; only the latest one may show.
@@ -65,13 +67,6 @@ async function runSearch() {
 
 function toggleHit(h: PsHit) {
   expanded.value = isExpanded(h) ? null : h;
-}
-
-function fmtCount(n: number | null | undefined): string {
-  if (n === null || n === undefined) return "—";
-  if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M`;
-  if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}K`;
-  return String(n);
 }
 
 onMounted(async () => {
@@ -146,7 +141,7 @@ onMounted(async () => {
       </div>
 
       <div v-if="result.datasets.length" class="hits">
-        <article v-for="h in result.datasets" :key="rowKey(h)" class="hit" :class="{ open: isExpanded(h) }">
+        <article v-for="h in result.datasets" :key="hitRef(h)" class="hit" :class="{ open: isExpanded(h) }">
           <header class="hit-head" @click="toggleHit(h)">
             <div class="acc-row">
               <span class="acc">{{ h.datasetAccession }}</span>
@@ -173,7 +168,7 @@ onMounted(async () => {
           <PortalViews
             v-if="isExpanded(h)"
             :accession="h.datasetAccession"
-            :dataset-ref="h.datasetRef || h.datasetAccession"
+            :dataset-ref="hitRef(h)"
             :organism="h.organism"
           />
         </article>

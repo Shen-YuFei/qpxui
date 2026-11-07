@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { api, type PortalDataset } from "../lib/api";
+import { api, portalRef, type PortalDataset } from "../lib/api";
+import { fmtCount } from "../lib/format";
 import PortalViews from "./PortalViews.vue";
 
 const datasets = ref<PortalDataset[]>([]);
@@ -10,16 +11,9 @@ const error = ref("");
 
 const selected = ref<PortalDataset | null>(null);
 
-function rowKey(ds: PortalDataset): string {
-  return ds.datasetRef ?? ds.accession;
-}
 function isOpen(ds: PortalDataset): boolean {
-  return !!selected.value && rowKey(selected.value) === rowKey(ds);
+  return !!selected.value && portalRef(selected.value) === portalRef(ds);
 }
-function portalName(ds: PortalDataset): string {
-  return ds.datasetRef ?? ds.accession;
-}
-
 async function loadRecommended() {
   busy.value = true;
   error.value = "";
@@ -37,7 +31,7 @@ async function loadRecommended() {
       if (picked.length >= 6) break;
       const res = await api.portalSearch(null, { collection: name, sort: "samples", pageSize: take });
       for (const d of res.datasets) {
-        const key = d.datasetRef ?? d.accession;
+        const key = portalRef(d);
         if (seen.has(key)) continue;
         seen.add(key);
         picked.push(d);
@@ -56,13 +50,6 @@ async function loadRecommended() {
 
 function toggleDataset(ds: PortalDataset) {
   selected.value = isOpen(ds) ? null : ds;
-}
-
-function fmtCount(n: number | null | undefined): string {
-  if (n === null || n === undefined) return "—";
-  if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M`;
-  if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}K`;
-  return String(n);
 }
 
 onMounted(() => {
@@ -89,7 +76,7 @@ onMounted(() => {
     <div v-if="datasets.length" class="grid">
       <article
         v-for="ds in datasets"
-        :key="rowKey(ds)"
+        :key="portalRef(ds)"
         class="card"
         :class="{ open: isOpen(ds) }"
       >
@@ -116,7 +103,7 @@ onMounted(() => {
         <PortalViews
           v-if="isOpen(ds)"
           :accession="ds.accession"
-          :dataset-ref="portalName(ds)"
+          :dataset-ref="portalRef(ds)"
           :organism="ds.organism"
           :psm-count="ds.psmCount"
           all-when-none

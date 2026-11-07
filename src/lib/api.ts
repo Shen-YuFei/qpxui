@@ -52,6 +52,13 @@ export interface PortalDataset {
   collection?: string | null;
 }
 
+/** The key of a portal dataset: some accessions hold several runs (one per
+ * organism), so it is the run's ref. Without one it is the bare accession,
+ * which the backend resolves by scanning the run sub-folders. */
+export function portalRef(d: PortalDataset): string {
+  return d.datasetRef ?? d.accession;
+}
+
 export interface PortalSearchResult {
   datasets: PortalDataset[];
   total: number;

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { api, type PortalDataset, type PortalFacets, type PortalSearchResult } from "../lib/api";
+import { api, portalRef, type PortalDataset, type PortalFacets, type PortalSearchResult } from "../lib/api";
+import { fmtBytes, fmtCount } from "../lib/format";
 import PortalViews from "./PortalViews.vue";
 import PeptideSearchPane from "./PeptideSearchPane.vue";
 
@@ -33,11 +34,8 @@ const SORTS: { key: string; label: string }[] = [
   { key: "accession", label: "Accession A–Z" },
 ];
 
-function rowKey(ds: PortalDataset): string {
-  return ds.datasetRef ?? ds.accession;
-}
 function isOpen(ds: PortalDataset): boolean {
-  return !!selected.value && rowKey(selected.value) === rowKey(ds);
+  return !!selected.value && portalRef(selected.value) === portalRef(ds);
 }
 
 // Searches overlap (typing, filters, paging); only the latest one may show.
@@ -61,7 +59,7 @@ async function load() {
     // longer on this page.
     if (selected.value) {
       const stillThere = results.value.datasets.some(
-        (d) => rowKey(d) === rowKey(selected.value!)
+        (d) => portalRef(d) === portalRef(selected.value!)
       );
       if (!stillThere) selected.value = null;
     }
@@ -104,22 +102,6 @@ function selectDataset(ds: PortalDataset) {
   selected.value = isOpen(ds) ? null : ds;
 }
 
-function portalName(ds: PortalDataset): string {
-  return ds.datasetRef ?? ds.accession;
-}
-
-function fmtCount(n: number | null | undefined): string {
-  if (n === null || n === undefined) return "—";
-  if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M`;
-  if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}K`;
-  return String(n);
-}
-function fmt(n: number | null | undefined, force = false): string {
-  if (!n) return force ? "0 B" : "—";
-  const u = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(n) / Math.log(1024));
-  return `${(n / Math.pow(1024, i)).toFixed(1)} ${u[i]}`;
-}
 function clip(list: string[] | null | undefined, n: number): string[] {
   return (list ?? []).slice(0, n);
 }
@@ -201,13 +183,13 @@ const hasNext = computed(() => page.value < results.value.totalPages);
     </div>
 
     <div v-if="results.datasets.length" class="cards">
-      <article v-for="ds in results.datasets" :key="rowKey(ds)" class="card" :class="{ open: isOpen(ds) }">
+      <article v-for="ds in results.datasets" :key="portalRef(ds)" class="card" :class="{ open: isOpen(ds) }">
         <header class="card-head" @click="selectDataset(ds)">
           <div class="acc-row">
             <span class="acc">{{ ds.accession }}</span>
             <span v-if="ds.collectionTitle" class="chip" :title="ds.collectionTitle">{{ ds.collectionTitle }}</span>
             <span class="spacer"></span>
-            <span v-if="ds.totalSize" class="size muted">{{ fmt(ds.totalSize) }}</span>
+            <span v-if="ds.totalSize" class="size muted">{{ fmtBytes(ds.totalSize) }}</span>
             <span class="chev">{{ isOpen(ds) ? "▾" : "▸" }}</span>
           </div>
           <h4>{{ ds.title || ds.accession }}</h4>
@@ -245,7 +227,7 @@ const hasNext = computed(() => page.value < results.value.totalPages);
         <PortalViews
           v-if="isOpen(ds)"
           :accession="ds.accession"
-          :dataset-ref="portalName(ds)"
+          :dataset-ref="portalRef(ds)"
           :organism="ds.organism"
           :psm-count="ds.psmCount"
         />

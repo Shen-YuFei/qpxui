@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { api, type DatasetInfo, type PortalDataset, type ViewInfo } from "../lib/api";
+import { api, portalRef, type DatasetInfo, type PortalDataset, type ViewInfo } from "../lib/api";
 import { loadDatasets } from "../store";
 import { confirmDownload, totalBytes, useDownload } from "../lib/downloads";
-import { fmtBytes } from "../lib/format";
+import { fmtBytes, fmtCount } from "../lib/format";
 import DownloadProgress from "./DownloadProgress.vue";
 
 const rows = ref<PortalDataset[]>([]);
@@ -50,26 +50,14 @@ const filtered = computed(() => {
   const k = sortKey.value;
   const dir = sortDesc.value ? -1 : 1;
   return list.sort((a, b) => {
-    if (k === "accession") return dir * rowKey(a).localeCompare(rowKey(b));
+    if (k === "accession") return dir * portalRef(a).localeCompare(portalRef(b));
     // Missing values always sink to the bottom.
     const x = a[k] ?? null;
     const y = b[k] ?? null;
     if (x === null || y === null) return x === y ? 0 : x === null ? 1 : -1;
-    return dir * (x - y) || rowKey(a).localeCompare(rowKey(b));
+    return dir * (x - y) || portalRef(a).localeCompare(portalRef(b));
   });
 });
-
-/** Some accessions hold several runs (one per organism), so key by run ref. */
-function rowKey(r: PortalDataset): string {
-  return r.datasetRef ?? r.accession;
-}
-
-function fmtCount(n: number | null | undefined): string {
-  if (n === null || n === undefined) return "—";
-  if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M`;
-  if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}K`;
-  return String(n);
-}
 
 const selectedCount = computed(
   () => views.value.filter((v) => checked.value[v.path]).length
@@ -100,10 +88,7 @@ async function selectDataset(ds: PortalDataset | null) {
   busy.value = true;
   error.value = "";
   try {
-    // Prefer the resolved run ref; fall back to the bare code (which the
-    // backend resolves by scanning the run sub-folders).
-    const ref = ds.datasetRef ?? ds.accession;
-    const v = await api.portalListViews(ref, ds.organism, ds.psmCount);
+    const v = await api.portalListViews(portalRef(ds), ds.organism, ds.psmCount);
     // A slower reply for an earlier click must not replace the current list.
     if (selected.value === ds) views.value = v;
   } catch (e: any) {
@@ -111,11 +96,6 @@ async function selectDataset(ds: PortalDataset | null) {
   } finally {
     if (selected.value === ds) busy.value = false;
   }
-}
-
-/** Runs of one accession are separate datasets, so key them by the run ref. */
-function portalName(ds: PortalDataset): string {
-  return ds.datasetRef ?? ds.accession;
 }
 
 async function loadSelection() {
@@ -139,7 +119,7 @@ async function loadSelection() {
     }
     const ds: DatasetInfo = {
       prefix: target.accession,
-      path: `quantms portal / ${portalName(target)}`,
+      path: `quantms portal / ${portalRef(target)}`,
       views: local.sort((a, b) => a.view.localeCompare(b.view)),
     };
     loadDatasets([ds], "portal | " + target.accession);
@@ -159,7 +139,7 @@ function streamSelection() {
   const sel = views.value.filter((v) => checked.value[v.path]);
   const ds: DatasetInfo = {
     prefix: selected.value.accession,
-    path: `quantms portal / ${portalName(selected.value)}`,
+    path: `quantms portal / ${portalRef(selected.value)}`,
     views: sel.map((v) => ({ ...v })).sort((a, b) => a.view.localeCompare(b.view)),
   };
   loadDatasets([ds], "portal | " + selected.value.accession + " (stream)");
@@ -222,9 +202,9 @@ onMounted(loadRegistry);
         <div class="rows">
           <button
             v-for="r in filtered"
-            :key="rowKey(r)"
+            :key="portalRef(r)"
             class="row"
-            :class="{ active: selected && rowKey(selected) === rowKey(r) }"
+            :class="{ active: selected && portalRef(selected) === portalRef(r) }"
             @click="selectDataset(r)"
           >
             <div class="row-top">

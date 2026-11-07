@@ -89,6 +89,14 @@ export function fmtNum(x: number): string {
   return x.toPrecision(2);
 }
 
+/** A dataset count for the portal lists (1.2K, 34K, 5.6M); a dash when the
+ * portal has none. */
+export function fmtCount(n: number | null | undefined): string {
+  if (n === null || n === undefined) return "—";
+  if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}K`;
+  return String(n);
+}
 export function fmtShort(n: number): string {
   if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
   if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
