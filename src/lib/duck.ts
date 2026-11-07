@@ -1,6 +1,7 @@
 import * as duckdb from "@duckdb/duckdb-wasm";
 import { state } from "../store";
 import { api, type ViewInfo } from "./api";
+import { engineErrorText } from "./errors";
 
 // Bundle the DuckDB WASM + worker assets locally (no CDN), so the desktop
 // app keeps working offline. Vite turns these imports into static asset URLs.
@@ -150,27 +151,6 @@ async function initDb(): Promise<{ db: duckdb.AsyncDuckDB; conn: duckdb.AsyncDuc
   return { db: db!, conn: conn! };
 }
 
-/**
- * Annotate a DuckDB error that looks like a failed *remote/lazy* read with a
- * helpful hint, so the user knows it's usually a CORS/Range issue on the S3
- * bucket rather than a bug in the query.
- */
-function guardError(e: unknown): string {
-  const msg = String((e as any)?.message ?? e);
-  if (
-    /access-control|CORS|403|NetworkError|Failed to fetch|Fetch error|range|HTTP error|Unable to connect/i.test(
-      msg
-    )
-  ) {
-    return (
-      `${msg}\n\n` +
-      "Hint: this looks like a failed remote (streamed) read — check your AWS credentials " +
-      "and network, or use “Download to cache” for this view instead."
-    );
-  }
-  return msg;
-}
-
 export type Cell = string | number | boolean | null;
 
 export interface QueryResult {
@@ -265,7 +245,7 @@ export async function runSql(
     const c = conn!;
     res = await tracked(() => c.query(sql));
   } catch (e) {
-    throw new Error(guardError(e));
+    throw new Error(engineErrorText(e));
   } finally {
     if (import.meta.env.DEV) w.__qpending--;
   }
@@ -296,7 +276,7 @@ export async function countRows(table: string): Promise<number> {
     const c = conn!;
     res = await tracked(() => c.query(`SELECT COUNT(*) AS n FROM "${table}"`));
   } catch (e) {
-    throw new Error(guardError(e));
+    throw new Error(engineErrorText(e));
   }
   const objects = res.toArray() as { n: string | number }[];
   return Number(objects[0]?.n ?? 0);
@@ -315,7 +295,7 @@ export async function describeTable(table: string): Promise<ColumnInfo[]> {
     const c = conn!;
     res = await tracked(() => c.query(`DESCRIBE "${table}"`));
   } catch (e) {
-    throw new Error(guardError(e));
+    throw new Error(engineErrorText(e));
   }
   const objects = res.toArray() as Record<string, unknown>[];
   return objects.map((o) => ({
