@@ -6,26 +6,20 @@ import ReportTable from "../ReportTable.vue";
 import type { Column } from "../../lib/report";
 import type { DatasetInfo } from "../../lib/api";
 import type { ChartSpec } from "../../lib/charts";
+import { evidence, proteinExpr, viewScale, type DatasetTables, type ViewScale } from "../../lib/report";
 import {
-  evidence,
-  ident,
-  intensitySumExpr,
-  objects,
-  proteinExpr,
-  proteinMatchWhere,
-  proteinTextWhere,
-  targetWhere,
-  viewScale,
-  type DatasetTables,
-  type ViewScale,
-} from "../../lib/report";
+  PROTEIN_LIMIT as LIMIT,
+  proteinGroupNames,
+  proteinGroupRuns,
+  proteinPeptidoforms,
+  proteinRunsChart,
+  searchProteins,
+} from "../../lib/queries/proteins";
 import { fmtBytes, listText } from "../../lib/format";
-import { runSql } from "../../lib/duck";
 import { searchFor, state } from "../../store";
 
 const props = defineProps<{ ds: DatasetInfo; t: DatasetTables; fileBase: string }>();
 
-const LIMIT = 500;
 const ev = evidence(props.t);
 const pg = props.t.pg;
 const prot = ev ? proteinExpr(ev) : null;
@@ -61,46 +55,6 @@ const listCols = computed<Column[]>(() => {
   return base.filter((c) => rows.value.length === 0 || c.key in rows.value[0]);
 });
 
-function pgSql(where: string): string {
-  const P = pg!;
-  const T = ident(P.table);
-  const has = (c: string) => P.cols.has(c);
-  const isum = intensitySumExpr(P);
-  const sel = [
-    "anchor_protein AS protein",
-    has("pg_accessions") ? "any_value(pg_accessions) AS accessions" : null,
-    has("pg_names") ? "any_value(pg_names) AS names" : null,
-    has("gg_names") ? "any_value(gg_names) AS genes" : null,
-    has("run_file_name") ? "count(DISTINCT run_file_name)::BIGINT AS runs" : null,
-    has("peptide_counts") ? "max(peptide_counts.total_sequences)::BIGINT AS peptides" : null,
-    has("peptide_counts") ? "max(peptide_counts.unique_sequences)::BIGINT AS unique_peptides" : null,
-    has("global_qvalue") ? "min(global_qvalue) AS qvalue" : has("pg_qvalue") ? "min(pg_qvalue) AS qvalue" : null,
-    has("sequence_coverage") ? "max(sequence_coverage) AS coverage" : null,
-    isum ? `avg(CASE WHEN ${isum} > 0 THEN log10(${isum}) END) AS log_int` : null,
-  ].filter(Boolean);
-  return `SELECT ${sel.join(", ")} FROM ${T}
-WHERE ${targetWhere(P)} AND anchor_protein IS NOT NULL AND ${where}
-GROUP BY anchor_protein ORDER BY ${has("run_file_name") ? "runs DESC, " : ""}${has("peptide_counts") ? "peptides DESC, " : ""}protein
-LIMIT ${LIMIT + 1}`;
-}
-
-function evSql(where: string): string {
-  const E = ev!;
-  const T = ident(E.table);
-  const isum = intensitySumExpr(E);
-  const sel = [
-    `${prot} AS protein`,
-    E.cols.has("gg_names") ? "any_value(gg_names) AS genes" : null,
-    E.cols.has("run_file_name") ? "count(DISTINCT run_file_name)::BIGINT AS runs" : null,
-    E.seq !== "NULL" ? `count(DISTINCT ${E.seq})::BIGINT AS peptides` : null,
-    "count(*)::BIGINT AS n_ev",
-    isum ? `avg(CASE WHEN ${isum} > 0 THEN log10(${isum}) END) AS log_int` : null,
-  ].filter(Boolean);
-  return `SELECT ${sel.join(", ")} FROM ${T}
-WHERE ${targetWhere(E)} AND ${prot} IS NOT NULL AND ${where}
-GROUP BY 1 ORDER BY ${E.seq !== "NULL" ? "peptides DESC, " : ""}n_ev DESC LIMIT ${LIMIT + 1}`;
-}
-
 async function search() {
   if (!pg && !(ev && prot)) return;
   waiting.value = false;
@@ -108,11 +62,9 @@ async function search() {
   error.value = "";
   const t0 = performance.now();
   try {
-    const sql = pg ? pgSql(proteinTextWhere(pg, q.value)) : evSql(proteinTextWhere(ev!, q.value));
-    const r = await runSql(sql, LIMIT + 1);
-    const out = objects(r);
-    truncated.value = out.length > LIMIT;
-    rows.value = out.slice(0, LIMIT);
+    const r = await searchProteins(pg, ev, prot, q.value);
+    truncated.value = r.truncated;
+    rows.value = r.rows;
     elapsed.value = performance.now() - t0;
     if (rows.value.length === 1 && q.value.trim()) select(rows.value[0].protein);
   } catch (e: any) {
@@ -166,65 +118,13 @@ async function loadDetail(acc: string) {
   pgRuns.value = [];
   try {
     if (ev) {
-      const T = ident(ev.table);
-      const W = `${targetWhere(ev)} AND ${proteinMatchWhere(ev, acc)}`;
-      const isum = intensitySumExpr(ev);
-      const has = (c: string) => ev.cols.has(c);
-      const pf = has("peptidoform") ? "peptidoform" : ev.seq;
-      const sel = [
-        `${pf} AS peptidoform`,
-        `any_value(${ev.seq}) AS sequence`,
-        has("modifications") ? "any_value(modifications) AS modifications" : null,
-        has("charge") ? "list_sort(list_distinct(list(charge))) AS charges" : null,
-        "count(*)::BIGINT AS n_ev",
-        has("run_file_name") ? "count(DISTINCT run_file_name)::BIGINT AS runs" : null,
-        has("posterior_error_probability") ? "min(posterior_error_probability) AS best_pep" : null,
-        isum ? `avg(CASE WHEN ${isum} > 0 THEN log10(${isum}) END) AS log_int` : null,
-        has("unique") ? `bool_or("unique") AS "unique"` : null,
-      ].filter(Boolean);
-      const r = await runSql(`SELECT ${sel.join(", ")} FROM ${T} WHERE ${W} GROUP BY 1 ORDER BY n_ev DESC LIMIT 2000`, 2000);
-      peptides.value = objects(r);
-      if (has("run_file_name")) {
-        const rr = await runSql(
-          `SELECT run_file_name, count(*)::BIGINT AS n${ev.seq !== "NULL" ? `, count(DISTINCT ${ev.seq})::BIGINT AS p` : ""}
-           ${isum ? `, median(CASE WHEN ${isum} > 0 THEN log10(${isum}) END) AS li` : ""}
-           FROM ${T} WHERE ${W} GROUP BY 1 ORDER BY 1`
-        );
-        const o = objects(rr).sort((a, b) => String(a.run_file_name).localeCompare(String(b.run_file_name), undefined, { numeric: true }));
-        perRun.value = {
-          kind: "bar",
-          labels: o.map((x) => String(x.run_file_name)),
-          series: [
-            { name: evName, values: o.map((x) => x.n) },
-            ...(ev.seq !== "NULL" ? [{ name: "peptides", values: o.map((x) => x.p) }] : []),
-          ],
-          notes: isum ? o.map((x) => (x.li == null ? "" : `median log10 intensity ${Number(x.li).toFixed(2)}`)) : undefined,
-          xName: "run",
-          hideLabels: o.length > 30,
-        };
-      }
+      peptides.value = await proteinPeptidoforms(ev, acc);
+      perRun.value = await proteinRunsChart(ev, acc, evName);
     }
     if (pg && pg.cols.has("run_file_name")) {
-      const isum = intensitySumExpr(pg);
-      const has = (c: string) => pg.cols.has(c);
-      const sel = [
-        "run_file_name",
-        has("peptide_counts") ? "peptide_counts.total_sequences AS peptides" : null,
-        has("peptide_counts") ? "peptide_counts.unique_sequences AS unique_peptides" : null,
-        has("feature_counts") ? "feature_counts.total_features AS features" : null,
-        has("pg_qvalue") ? "pg_qvalue AS qvalue" : has("global_qvalue") ? "global_qvalue AS qvalue" : null,
-        isum ? `CASE WHEN ${isum} > 0 THEN log10(${isum}) END AS log_int` : null,
-      ].filter(Boolean);
-      const r = await runSql(
-        `SELECT ${sel.join(", ")} FROM ${ident(pg.table)} WHERE ${targetWhere(pg)} AND anchor_protein = '${acc.replace(/'/g, "''")}' ORDER BY run_file_name`
-      );
-      pgRuns.value = objects(r);
+      pgRuns.value = await proteinGroupRuns(pg, acc);
       if (!detail.value?.names && pgRuns.value.length) {
-        const meta = await runSql(
-          `SELECT any_value(pg_accessions) AS accessions${has("pg_names") ? ", any_value(pg_names) AS names" : ""}${has("gg_names") ? ", any_value(gg_names) AS genes" : ""}
-           FROM ${ident(pg.table)} WHERE anchor_protein = '${acc.replace(/'/g, "''")}'`
-        );
-        detail.value = { ...detail.value, ...objects(meta)[0] };
+        detail.value = { ...detail.value, ...(await proteinGroupNames(pg, acc)) };
       }
     }
   } catch (e: any) {
