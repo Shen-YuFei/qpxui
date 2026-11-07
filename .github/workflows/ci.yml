@@ -20,8 +20,10 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npx vue-tsc --noEmit
-      - run: npx vite build
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
 
   rust:
     runs-on: ubuntu-22.04
@@ -46,12 +48,18 @@ jobs:
           done
           sudo apt-get $APT install -y --no-install-recommends $PKGS
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
       # tauri::generate_context! needs the frontend dist folder to exist.
       - run: mkdir -p dist
-      - run: cargo check
+      - run: cargo fmt --check
         working-directory: src-tauri
-      - run: cargo test --lib commands::portal_http::tests
+      - run: cargo clippy --locked --all-targets -- -D warnings
+        working-directory: src-tauri
+      # Tests that need the live quantms portal are #[ignore]d; run them
+      # locally with `cargo test -- --ignored`.
+      - run: cargo test --locked
         working-directory: src-tauri
