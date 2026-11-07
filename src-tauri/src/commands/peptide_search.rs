@@ -131,9 +131,7 @@ pub async fn ps_search(
         qp.append_pair("limit", &limit.unwrap_or(50).min(200).to_string());
     }
 
-    let client = portal_http::client_builder()?
-        .build()
-        .map_err(|e| format!("portal HTTP client: {e:?}"))?;
+    let client = portal_http::client()?;
 
     #[derive(serde::Deserialize)]
     struct Raw {
@@ -169,9 +167,7 @@ pub async fn ps_modifications() -> Result<Vec<PsModification>, String> {
         #[serde(default)]
         modifications: Vec<PsModification>,
     }
-    let client = portal_http::client_builder()?
-        .build()
-        .map_err(|e| format!("portal HTTP client: {e:?}"))?;
+    let client = portal_http::client()?;
     let raw: ModsRaw = client
         .get(format!("{BASE}/modifications"))
         .send()

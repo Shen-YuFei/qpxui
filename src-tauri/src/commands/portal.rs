@@ -396,9 +396,7 @@ pub async fn portal_search(
     page: Option<usize>,
     page_size: Option<usize>,
 ) -> Result<PortalSearchResult, String> {
-    let client = portal_http::client_builder()?
-        .build()
-        .map_err(|e| format!("portal HTTP client: {e:?}"))?;
+    let client = portal_http::client()?;
 
     let mut url = reqwest::Url::parse("https://api.quantms.org/dataset-search/datasets")
         .map_err(|e| format!("bad search URL: {e}"))?;
@@ -444,9 +442,7 @@ pub async fn portal_search(
 /// Facet options (organisms, instruments, collections) for the discover UI.
 #[tauri::command]
 pub async fn portal_facets() -> Result<PortalFacets, String> {
-    let client = portal_http::client_builder()?
-        .build()
-        .map_err(|e| format!("portal HTTP client: {e:?}"))?;
+    let client = portal_http::client()?;
 
     async fn get_json(client: &Client, url: &str) -> Result<serde_json::Value, String> {
         let mut last = "no attempt".to_string();
