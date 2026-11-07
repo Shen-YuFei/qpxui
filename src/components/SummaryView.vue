@@ -34,8 +34,8 @@ const heldBytes = computed(() =>
 
 const cards = ref<any[]>([]);
 const numericCol = ref("");
-const histOpt = computed<any>(() => (chart.value ? chart.value.option : null));
-const chart = ref<any>({ option: null });
+const hist = ref<any>(null);
+const histError = ref("");
 
 const numericCols = computed(() =>
   cols.value.filter((c) => isNumericScalar(c.type))
@@ -116,6 +116,8 @@ async function buildHistogram() {
   if (!numericCol.value) return;
   const col = numericCol.value;
   const t = table.value;
+  hist.value = null;
+  histError.value = "";
   // In DOUBLE: max - min of 64-bit ids overflows BIGINT.
   const x = `${ident(col)}::DOUBLE`;
   const q = `
@@ -127,10 +129,16 @@ async function buildHistogram() {
            COUNT(*) AS n
     FROM "${t}" WHERE ${ident(col)} IS NOT NULL
     GROUP BY 1 ORDER BY 1`;
-  const r = await runSql(q);
-  const labels = r.rows.map((row) => String(row[0] ?? ""));
-  const values = r.rows.map((row) => Number(row[1] ?? 0));
-  chart.value = { option: barOption(labels, values, `Histogram of ${col}`) };
+  try {
+    const r = await runSql(q);
+    const labels = r.rows.map((row) => String(row[0] ?? ""));
+    const values = r.rows.map((row) => Number(row[1] ?? 0));
+    hist.value = barOption(labels, values, `Histogram of ${col}`);
+  } catch (e: any) {
+    // A numeric column can still fail to histogram (e.g. infinite values):
+    // say why in its place and keep the other charts.
+    histError.value = String(e?.message ?? e);
+  }
 }
 
 onMounted(async () => {
@@ -169,15 +177,7 @@ async function computeHeld() {
 
 async function buildAll() {
   await buildSummaries();
-  if (numericCol.value) {
-    try {
-      await buildHistogram();
-    } catch (e) {
-      // A numeric-ish column can still fail to histogram (e.g. extreme
-      // values); don't let it take down the whole summary.
-      console.warn("histogram skipped:", e);
-    }
-  }
+  await buildHistogram();
 }
 </script>
 
@@ -208,13 +208,14 @@ async function buildAll() {
     </div>
 
     <div class="cards" v-else>
-      <div v-if="histOpt && chart.option" class="card wide">
-        <VChart :option="histOpt" autoresize style="width: 100%; height: 300px" />
+      <div v-if="hist" class="card wide">
+        <VChart :option="hist" autoresize style="width: 100%; height: 300px" />
       </div>
+      <div v-else-if="histError" class="card wide error pad">⚠ No histogram of {{ numericCol }}: {{ histError }}</div>
       <div v-for="c in cards" :key="c.key" class="card">
         <VChart :option="c.option" autoresize style="width: 100%; height: 300px" />
       </div>
-      <p v-if="!cards.length && !chart.option" class="muted pad">
+      <p v-if="!cards.length && !hist && !histError" class="muted pad">
         No obvious categorical/numeric columns to summarise for this view. Try the Query tab.
       </p>
     </div>
