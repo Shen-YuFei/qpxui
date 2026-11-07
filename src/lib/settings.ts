@@ -101,10 +101,8 @@ export function resetPtmColor(id: string) {
  */
 export function resolvePtmColor(name?: string, accession?: string): string {
   const acc = (accession || "").toUpperCase();
-  if (acc && PTM_PALETTE.some((e) => e.accessions.includes(acc))) {
-    const entry = PTM_PALETTE.find((e) => e.accessions.includes(acc))!;
-    return effectivePtmColor(entry.id);
-  }
+  const byAcc = acc ? PTM_PALETTE.find((e) => e.accessions.includes(acc)) : undefined;
+  if (byAcc) return effectivePtmColor(byAcc.id);
   const n = (name || "").toLowerCase();
   if (n.trim()) {
     const byKw = PTM_PALETTE.find((e) => e.keywords.some((k) => n.includes(k)));

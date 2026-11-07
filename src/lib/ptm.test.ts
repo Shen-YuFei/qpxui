@@ -15,6 +15,12 @@ describe("inlineToSegments", () => {
     expect(inlineToSegments("PEM[UNIMOD:35]K")[2]).toMatchObject({ modName: "Oxidation", accession: "UNIMOD:35" });
     expect(inlineToSegments("PEM(Oxidation)K")[2]).toMatchObject({ modName: "Oxidation" });
   });
+
+  it("reads a leading bracket without the dash as an N-terminal modification", () => {
+    const segs = inlineToSegments("[Acetyl]PEK");
+    expect(segs[0]).toMatchObject({ terminal: "N", modName: "Acetyl", pos: -1 });
+    expect(segs.slice(1).map((s) => s.text).join("")).toBe("PEK");
+  });
 });
 
 describe("seqWithModsToSegments", () => {
@@ -42,6 +48,8 @@ describe("short codes and metadata", () => {
     expect(shortCode(undefined, "UNIMOD:35")).toBe("Ox");
     expect(shortCode("TMT6plex")).toBe("TMT");
     expect(shortCode("+79.9663")).toBe("+80");
+    expect(shortCode("-17.027")).toBe("-17");
+    expect(shortCode("+42.011 Da")).toBe("+42");
   });
 
   it("uses the right Unimod entries", () => {
