@@ -79,67 +79,63 @@ fn into_datasets(by_prefix: BTreeMap<String, Vec<ViewInfo>>, dir: String) -> Vec
 }
 
 /// Discover all datasets (grouped by prefix) directly inside `dir`.
-pub fn discover_dir(dir: &Path) -> Vec<DatasetInfo> {
+pub fn discover_dir(dir: &Path) -> Result<Vec<DatasetInfo>, String> {
+    let fail = |e: std::io::Error| format!("{}: {e}", dir.display());
     let mut by_prefix: BTreeMap<String, Vec<ViewInfo>> = BTreeMap::new();
-    if let Ok(readdir) = std::fs::read_dir(dir) {
-        for entry in readdir.flatten() {
-            let p = entry.path();
-            if p.is_file() {
-                if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
-                    if let Some((prefix, view, format)) = parse_filename(name) {
-                        let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
-                        by_prefix.entry(prefix).or_default().push(ViewInfo {
-                            name: name.to_string(),
-                            view,
-                            format,
-                            path: p.to_string_lossy().to_string(),
-                            size_bytes: size,
-                        });
-                    }
-                }
-            }
+    for entry in std::fs::read_dir(dir).map_err(fail)? {
+        let path = entry.map_err(fail)?.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let Some((prefix, view, format)) = parse_filename(name) else {
+            continue;
+        };
+        let meta = match std::fs::metadata(&path) {
+            Ok(meta) => meta,
+            // A dangling symlink is not a view.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(format!("{}: {e}", path.display())),
+        };
+        if !meta.is_file() {
+            continue;
         }
+        by_prefix.entry(prefix).or_default().push(ViewInfo {
+            name: name.to_string(),
+            view,
+            format,
+            path: path.to_string_lossy().to_string(),
+            size_bytes: meta.len(),
+        });
     }
-    into_datasets(by_prefix, dir.to_string_lossy().to_string())
+    Ok(into_datasets(by_prefix, dir.to_string_lossy().to_string()))
 }
 
-/// Recursively walk a folder (up to `max_depth`) collecting datasets from
-/// every directory that directly contains QPX parquet files. This handles
-/// flat collections (many prefixes in one dir) and nested collections
-/// (one dataset per subdirectory).
-pub fn collect_all(root: &Path, max_depth: u32) -> Vec<DatasetInfo> {
+/// Recursively walk a folder (up to `max_depth` levels below it) collecting
+/// datasets from every directory that directly contains QPX parquet files.
+/// This handles flat collections (many prefixes in one dir) and nested
+/// collections (one dataset per subdirectory). An error reading `root` is
+/// returned; an unreadable sub-folder (a protected system folder in a large
+/// tree, say) is skipped so that the rest of the tree still opens.
+pub fn collect_all(root: &Path, max_depth: u32) -> Result<Vec<DatasetInfo>, String> {
     let mut out = Vec::new();
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    walk(root, 0, max_depth, &mut out, &mut seen);
-    out
+    walk(root, max_depth, &mut out)?;
+    Ok(out)
 }
 
-fn walk(
-    dir: &Path,
-    depth: u32,
-    max_depth: u32,
-    out: &mut Vec<DatasetInfo>,
-    seen: &mut std::collections::HashSet<String>,
-) {
-    if depth > max_depth {
-        return;
+fn walk(dir: &Path, depth_left: u32, out: &mut Vec<DatasetInfo>) -> Result<(), String> {
+    out.extend(discover_dir(dir)?);
+    if depth_left == 0 {
+        return Ok(());
     }
-    for ds in discover_dir(dir) {
-        // Avoid pushing the same dataset twice if a dir and a descendant
-        // both contain its files.
-        let key = format!("{}|{}", ds.path, ds.prefix);
-        if seen.insert(key) {
-            out.push(ds);
+    let fail = |e: std::io::Error| format!("{}: {e}", dir.display());
+    for entry in std::fs::read_dir(dir).map_err(fail)? {
+        let path = entry.map_err(fail)?.path();
+        if path.is_dir() {
+            // Skips only this sub-folder (see `collect_all`).
+            let _ = walk(&path, depth_left - 1, out);
         }
     }
-    if let Ok(readdir) = std::fs::read_dir(dir) {
-        for entry in readdir.flatten() {
-            let p = entry.path();
-            if p.is_dir() {
-                walk(&p, depth + 1, max_depth, out, seen);
-            }
-        }
-    }
+    Ok(())
 }
 
 #[cfg(test)]
