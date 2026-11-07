@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fmtBytes, formatCompact, scalarText } from "./format";
+import { fmtBytes, formatCompact, listText, scalarText } from "./format";
 
 describe("scalarText", () => {
   it("marks missing values", () => {
@@ -39,5 +39,12 @@ describe("fmtBytes", () => {
     expect(fmtBytes(512)).toBe("512 B");
     expect(fmtBytes(1536)).toBe("1.5 KB");
     expect(fmtBytes(5 * 1024 ** 3)).toBe("5.0 GB");
+  });
+});
+
+describe("listText", () => {
+  it("shows struct elements in their compact form", () => {
+    expect(listText([{ sample_accession: "S1", label: "lf" }])).toBe("{ sample_accession: S1, label: lf }");
+    expect(listText(["a", "b", "c", "d"])).toBe("a, b, c +1");
   });
 });

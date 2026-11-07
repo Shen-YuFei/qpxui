@@ -94,11 +94,12 @@ export function fmtShort(n: number): string {
   return n.toLocaleString();
 }
 
-/** Join the first element of a VARCHAR[] (or a scalar) for display. */
+/** The first `max` elements of a list (or a scalar) as one line; struct
+ * elements in their compact form. */
 export function listText(v: unknown, max = 3): string {
   if (v === null || v === undefined) return "";
   if (Array.isArray(v)) {
-    const items = v.filter((x) => x !== null && x !== undefined).map(String);
+    const items = v.filter((x) => x !== null && x !== undefined).map((x) => (isStructured(x) ? formatCompact(x) : String(x)));
     return items.length > max ? `${items.slice(0, max).join(", ")} +${items.length - max}` : items.join(", ");
   }
   return String(v);
