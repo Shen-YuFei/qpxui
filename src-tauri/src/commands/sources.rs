@@ -23,13 +23,6 @@ pub fn open_file(path: String) -> Result<DatasetInfo, String> {
         .ok_or_else(|| format!("no QPX view files found for prefix {prefix}"))
 }
 
-/// Scan a folder that is itself one QPX dataset (all `<prefix>.*.parquet`
-/// files in the folder). Returns one DatasetInfo per distinct prefix.
-#[tauri::command]
-pub fn scan_folder(path: String) -> Result<Vec<DatasetInfo>, String> {
-    Ok(qpx::discover_dir(&PathBuf::from(&path), "dataset"))
-}
-
 /// Scan a collection folder: a directory tree that contains many QPX
 /// projects. Every directory holding parquet files is treated as a dataset.
 #[tauri::command]

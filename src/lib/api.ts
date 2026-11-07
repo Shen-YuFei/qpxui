@@ -132,8 +132,6 @@ export const api = {
 
   openFile: (path: string) => invoke<DatasetInfo>("open_file", { path }),
 
-  scanFolder: (path: string) => invoke<DatasetInfo[]>("scan_folder", { path }),
-
   scanCollection: (path: string) => invoke<DatasetInfo[]>("scan_collection", { path }),
 
   listS3: (bucket: string, prefix?: string) =>
@@ -171,7 +169,6 @@ export const api = {
     save({ defaultPath, filters: [{ name, extensions }] }) as Promise<string | null>,
 
   // ---- quantms portal (public example source over HTTPS) ----
-  portalDatasets: (limit?: number) => invoke<string[]>("portal_datasets", { limit }),
   portalRegistry: (pageSize?: number) =>
     invoke<PortalDataset[]>("portal_registry", { pageSize }),
   /** Server-side search over the quantms portal catalogue (q text + facets + sort). */

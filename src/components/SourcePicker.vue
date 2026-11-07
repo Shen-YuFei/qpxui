@@ -38,15 +38,7 @@ async function openFolder() {
   await run(async () => {
     const path = await api.chooseFolder();
     if (!path) return;
-    const datasets = await api.scanCollection(path);
-    if (!datasets.length) {
-      // fall back to a flat scan of a data folder with multiple prefixes
-      const flat = await api.scanFolder(path);
-      if (!flat.length) throw new Error("No QPX parquet files found in this folder.");
-      loadDatasets(flat, "dataset");
-      return;
-    }
-    loadDatasets(datasets, "collection");
+    loadDatasets(await api.scanCollection(path), "collection");
   });
 }
 </script>

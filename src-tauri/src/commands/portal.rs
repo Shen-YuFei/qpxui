@@ -208,33 +208,6 @@ fn parquet_entries(html: &str) -> Vec<(String, u64)> {
     out
 }
 
-/// List all dataset codes at the portal root (PXD…, IPX…, MSV…, PDC…, PMID…).
-#[tauri::command]
-pub async fn portal_datasets(limit: Option<usize>) -> Result<Vec<String>, String> {
-    let url = format!("{BASE}{DATASETS_ROOT}");
-    let html = get_html(&url).await?;
-    let mut codes: Vec<String> = extract_links(&html)
-        .into_iter()
-        .map(|(href, _)| href.trim_end_matches('/').to_string())
-        .filter_map(|h| h.rsplit('/').next().map(|s| s.to_string()))
-        .filter(|name| {
-            !name.is_empty()
-                && name != ".."
-                && name
-                    .chars()
-                    .next()
-                    .map(|c| c.is_ascii_uppercase())
-                    .unwrap_or(false)
-        })
-        .collect();
-    codes.sort();
-    codes.dedup();
-    if let Some(n) = limit {
-        codes.truncate(n);
-    }
-    Ok(codes)
-}
-
 fn view_base() -> String {
     format!("{BASE}{DATASETS_ROOT}")
 }
