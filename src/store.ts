@@ -1,4 +1,5 @@
 import { reactive } from "vue";
+import { cancelAllDownloads } from "./lib/downloads";
 import type { DatasetInfo, ViewInfo } from "./lib/api";
 import { clearReportCache } from "./lib/report";
 import { abandonQueries } from "./lib/duck";
@@ -57,6 +58,7 @@ export function stopQueries() {
 }
 
 export function reset() {
+  cancelAllDownloads();
   stopQueries();
   clearReportCache();
   state.datasets = [];
