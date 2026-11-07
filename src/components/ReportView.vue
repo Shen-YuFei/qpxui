@@ -6,7 +6,6 @@ import {
   cachedSql,
   datasetTables,
   evidence,
-  fmtShort,
   ident,
   objects,
   proteinExpr,
@@ -15,6 +14,7 @@ import {
   type DatasetTables,
   type TableRef,
 } from "../lib/report";
+import { fmtShort } from "../lib/format";
 import { saveText } from "../lib/export";
 import ReportOverview from "./report/ReportOverview.vue";
 import ReportQC from "./report/ReportQC.vue";

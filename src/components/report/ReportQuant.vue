@@ -15,7 +15,6 @@ import LargeGate from "./LargeGate.vue";
 import {
   cachedSql,
   ident,
-  listText,
   objects,
   proteinExpr,
   sampleMapSql,
@@ -24,6 +23,7 @@ import {
   type DatasetTables,
   type TableRef,
 } from "../../lib/report";
+import { listText } from "../../lib/format";
 import {
   averageLinkageOrder,
   column,

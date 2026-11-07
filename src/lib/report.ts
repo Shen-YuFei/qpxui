@@ -4,6 +4,7 @@
 
 import type { DatasetInfo, ViewInfo } from "./api";
 import { describeTable, ensureViewReady, runSql, type QueryResult } from "./duck";
+import { fmtNum } from "./format";
 
 export type ViewKind = "feature" | "psm" | "pg" | "run" | "sample" | "dataset";
 
@@ -350,37 +351,6 @@ export function histogramData(r: QueryResult, bins = 40): { labels: string[]; va
   return { labels, values: counts };
 }
 
-export function fmtNum(x: number): string {
-  if (!Number.isFinite(x)) return String(x);
-  const a = Math.abs(x);
-  if (a === 0) return "0";
-  if (a >= 1000) return x.toFixed(0);
-  if (a >= 10) return x.toFixed(1);
-  if (a >= 1) return x.toFixed(2);
-  return x.toPrecision(2);
-}
-
-export function fmtCount(n: number | null | undefined): string {
-  if (n === null || n === undefined || !Number.isFinite(n)) return "–";
-  return Math.round(n).toLocaleString();
-}
-
-export function fmtShort(n: number): string {
-  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
-  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
-  if (n >= 1e4) return `${(n / 1e3).toFixed(1)}K`;
-  return n.toLocaleString();
-}
-
-/** Join the first element of a VARCHAR[] (or a scalar) for display. */
-export function listText(v: unknown, max = 3): string {
-  if (v === null || v === undefined) return "";
-  if (Array.isArray(v)) {
-    const items = v.filter((x) => x !== null && x !== undefined).map(String);
-    return items.length > max ? `${items.slice(0, max).join(", ")} +${items.length - max}` : items.join(", ");
-  }
-  return String(v);
-}
 
 /** SQL pieces that map a run (`x.r`) and channel label (`x.i.label`) to a
  * sample through the run view: by (run, label) for multiplexed data, by run

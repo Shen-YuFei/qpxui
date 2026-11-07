@@ -8,7 +8,6 @@ import type { ChartSpec } from "../../lib/charts";
 import {
   cachedSql,
   evidence,
-  fmtNum,
   ident,
   intensitySumExpr,
   objects,
@@ -16,6 +15,7 @@ import {
   targetWhere,
   type DatasetTables,
 } from "../../lib/report";
+import { fmtNum } from "../../lib/format";
 import { useSlots } from "../../lib/useSlots";
 import { useLargeGate } from "../../lib/useLargeGate";
 import LargeGate from "./LargeGate.vue";

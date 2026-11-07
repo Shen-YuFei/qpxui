@@ -13,7 +13,6 @@ import {
   ident,
   intensitySumExpr,
   likePattern,
-  listText,
   lit,
   objects,
   proteinExpr,
@@ -23,7 +22,7 @@ import {
   type ViewScale,
 } from "../../lib/report";
 import { runSql } from "../../lib/duck";
-import { fmtBytes } from "../../lib/format";
+import { fmtBytes, listText } from "../../lib/format";
 import { openProtein, state } from "../../store";
 
 const props = defineProps<{ ds: DatasetInfo; t: DatasetTables; fileBase: string; accession?: string }>();

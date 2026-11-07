@@ -10,7 +10,6 @@ import {
   evidence,
   ident,
   intensitySumExpr,
-  listText,
   objects,
   proteinExpr,
   proteinMatchWhere,
@@ -20,7 +19,7 @@ import {
   type DatasetTables,
   type ViewScale,
 } from "../../lib/report";
-import { fmtBytes } from "../../lib/format";
+import { fmtBytes, listText } from "../../lib/format";
 import { runSql } from "../../lib/duck";
 import { searchFor, state } from "../../store";
 

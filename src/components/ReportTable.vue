@@ -2,7 +2,8 @@
 import { computed, ref } from "vue";
 import { toCsv } from "../lib/charts";
 import { saveText } from "../lib/export";
-import { listText, type Column } from "../lib/report";
+import type { Column } from "../lib/report";
+import { listText } from "../lib/format";
 
 type Row = Record<string, any>;
 
