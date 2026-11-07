@@ -2,6 +2,7 @@
 import { computed, defineAsyncComponent, onMounted, ref } from "vue";
 import { state, reset } from "./store";
 import { applyTheme } from "./lib/settings";
+import { init } from "./lib/duck";
 import SourcePicker from "./components/SourcePicker.vue";
 import DatasetExplorer from "./components/DatasetExplorer.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
@@ -14,7 +15,12 @@ const ReportView = defineAsyncComponent(() => import("./components/ReportView.vu
 const hasData = computed(() => state.datasets.length > 0);
 const settingsOpen = ref(false);
 
-onMounted(applyTheme);
+onMounted(() => {
+  applyTheme();
+  // Compiling the engine's wasm takes seconds: start it while the user picks a
+  // source. A failure resurfaces (and retries) at the first query.
+  void init();
+});
 
 function newSource() {
   reset();
