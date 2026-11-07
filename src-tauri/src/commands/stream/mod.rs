@@ -98,45 +98,46 @@ fn random_token() -> String {
     out
 }
 
+/// The app's proxy, started on first use.
 async fn proxy() -> Result<Arc<Proxy>, String> {
-    PROXY
-        .get_or_try_init(|| async {
-            let listener = TcpListener::bind(("127.0.0.1", 0))
-                .await
-                .map_err(|e| format!("stream proxy bind: {e}"))?;
-            let port = listener.local_addr().map_err(|e| e.to_string())?.port();
-            let p = Arc::new(Proxy {
-                port,
-                token: random_token(),
-                objects: Mutex::new(HashMap::new()),
-                cache: Mutex::new(LruCache::new(NonZeroUsize::new(CACHE_BLOCKS).unwrap())),
-            });
-            let served = p.clone();
-            tokio::spawn(async move {
-                loop {
-                    let stream = match listener.accept().await {
-                        Ok((stream, _)) => stream,
-                        Err(e) => {
-                            // E.g. out of file descriptors: the connection
-                            // stays queued, so retrying at once would spin.
-                            log::warn!("stream proxy accept: {e}");
-                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                            continue;
-                        }
-                    };
-                    let p = served.clone();
-                    tokio::spawn(async move {
-                        let svc = service_fn(move |req| server::handle(p.clone(), req));
-                        let _ = http1::Builder::new()
-                            .keep_alive(true)
-                            .serve_connection(TokioIo::new(stream), svc)
-                            .await;
-                    });
-                }
-            });
-            log::info!("S3 stream proxy listening on 127.0.0.1:{port}");
-            Ok(p)
-        })
+    PROXY.get_or_try_init(start).await.cloned()
+}
+
+/// Bind a proxy to a free local port and serve it on the current runtime.
+async fn start() -> Result<Arc<Proxy>, String> {
+    let listener = TcpListener::bind(("127.0.0.1", 0))
         .await
-        .cloned()
+        .map_err(|e| format!("stream proxy bind: {e}"))?;
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+    let p = Arc::new(Proxy {
+        port,
+        token: random_token(),
+        objects: Mutex::new(HashMap::new()),
+        cache: Mutex::new(LruCache::new(NonZeroUsize::new(CACHE_BLOCKS).unwrap())),
+    });
+    let served = p.clone();
+    tokio::spawn(async move {
+        loop {
+            let stream = match listener.accept().await {
+                Ok((stream, _)) => stream,
+                Err(e) => {
+                    // E.g. out of file descriptors: the connection
+                    // stays queued, so retrying at once would spin.
+                    log::warn!("stream proxy accept: {e}");
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    continue;
+                }
+            };
+            let p = served.clone();
+            tokio::spawn(async move {
+                let svc = service_fn(move |req| server::handle(p.clone(), req));
+                let _ = http1::Builder::new()
+                    .keep_alive(true)
+                    .serve_connection(TokioIo::new(stream), svc)
+                    .await;
+            });
+        }
+    });
+    log::info!("S3 stream proxy listening on 127.0.0.1:{port}");
+    Ok(p)
 }

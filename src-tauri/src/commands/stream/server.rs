@@ -129,7 +129,44 @@ pub(super) async fn handle(
 
 #[cfg(test)]
 mod tests {
+    use super::super::{start, Object, Source};
     use super::*;
+    use std::sync::atomic::AtomicU64;
+
+    #[tokio::test]
+    async fn serves_ranges_of_a_registered_object_to_token_holders() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("x.parquet");
+        std::fs::write(&file, b"0123456789").unwrap();
+        let p = start().await.unwrap();
+        p.objects.lock().unwrap().insert(
+            "id1".into(),
+            Arc::new(Object {
+                path: "x.parquet".into(),
+                size: 10,
+                last_modified: None,
+                source: Source::Local { path: file },
+                fetched: AtomicU64::new(0),
+                requests: AtomicU64::new(0),
+            }),
+        );
+        let client = reqwest::Client::new();
+        let url = |path: &str| format!("http://127.0.0.1:{}/{path}/x.parquet", p.port);
+        let get = |path: &str, range: &str| client.get(url(path)).header("Range", range).send();
+        let ok = format!("{}/id1", p.token);
+
+        let r = get(&ok, "bytes=2-5").await.unwrap();
+        assert_eq!(r.status(), 206);
+        assert_eq!(r.headers()["content-range"], "bytes 2-5/10");
+        assert_eq!(&r.bytes().await.unwrap()[..], b"2345");
+        let head = client.head(url(&ok)).send().await.unwrap();
+        assert_eq!(head.status(), 200);
+        assert_eq!(head.headers()["content-length"], "10");
+        assert_eq!(get(&ok, "bytes=20-30").await.unwrap().status(), 416);
+        assert_eq!(get("wrong/id1", "bytes=0-1").await.unwrap().status(), 403);
+        let unknown = format!("{}/id2", p.token);
+        assert_eq!(get(&unknown, "bytes=0-1").await.unwrap().status(), 404);
+    }
 
     #[test]
     fn range_headers_parse_to_inclusive_bounds() {
