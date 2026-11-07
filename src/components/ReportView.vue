@@ -2,18 +2,8 @@
 import { computed, ref, watch } from "vue";
 import { openReport, state, type ReportTab } from "../store";
 import type { DatasetInfo } from "../lib/api";
-import {
-  cachedSql,
-  datasetTables,
-  evidence,
-  ident,
-  objects,
-  proteinExpr,
-  targetWhere,
-  viewScale,
-  type DatasetTables,
-  type TableRef,
-} from "../lib/report";
+import { datasetTables, evidence, proteinExpr, viewScale, type DatasetTables, type TableRef } from "../lib/report";
+import { countValue, datasetMeta, kpiSources, runInstrumentsEnzymes, sampleOrganisms } from "../lib/queries/header";
 import { fmtShort } from "../lib/format";
 import { saveText } from "../lib/export";
 import ReportOverview from "./report/ReportOverview.vue";
@@ -95,15 +85,6 @@ async function load() {
   }
 }
 
-async function count(key: string, sql: string): Promise<number | null> {
-  try {
-    const r = await cachedSql(props.ds, key, sql);
-    return Number(r.rows[0]?.[0] ?? 0);
-  } catch {
-    return null;
-  }
-}
-
 /** Row count of a view from its parquet footer (no data read). */
 async function footerRows(ref: TableRef): Promise<number> {
   return (await viewScale(ref)).rows;
@@ -132,12 +113,7 @@ async function compute(k: Kpi) {
 async function loadHeader(t: DatasetTables) {
   if (t.dataset) {
     try {
-      const sel = ["project_accession", "project_title", "project_description", "pubmed_id", "software_name", "software_version", "creation_date"]
-        .filter((c) => t.dataset!.cols.has(c));
-      if (sel.length) {
-        const r = await cachedSql(props.ds, "hdr.dataset", `SELECT ${sel.join(", ")} FROM ${ident(t.dataset.table)} LIMIT 1`);
-        meta.value = objects(r)[0] ?? {};
-      }
+      meta.value = await datasetMeta(props.ds, t.dataset);
     } catch {
       /* optional */
     }
@@ -147,44 +123,25 @@ async function loadHeader(t: DatasetTables) {
     list.push(k);
     kpis.value = [...list];
   };
-  const ev = evidence(t);
   // Distinct counts read whole columns; on a large streamed view they wait
   // for a click. Plain row counts come from the parquet footer.
-  const distinct = async (ref: TableRef, k: Omit<Kpi, "value">, key: string, sql: string) => {
-    const run = () => count(key, sql);
-    if (await isLarge(ref)) push({ ...k, value: null, defer: run, title: "Large streamed view: click to count (reads a whole column)" });
+  for (const s of kpiSources(t)) {
+    const k = { key: s.key, label: s.label, ...(s.title ? { title: s.title } : {}) };
+    const run = () => countValue(props.ds, s);
+    if (s.kind === "count") push({ ...k, value: await run() });
+    else if (s.kind === "rows") push({ ...k, value: (await isLarge(s.ref)) ? await footerRows(s.ref) : await run() });
+    else if (await isLarge(s.ref)) push({ ...k, value: null, defer: run, title: "Large streamed view: click to count (reads a whole column)" });
     else push({ ...k, value: await run() });
-  };
-  const rows = async (ref: TableRef, key: string) =>
-    (await isLarge(ref)) ? footerRows(ref) : count(key, `SELECT count(*) FROM ${ident(ref.table)}`);
-  if (t.pg) {
-    await distinct(t.pg, { key: "pg", label: "Protein groups", title: "Distinct anchor proteins (target) in the pg view" }, "kpi.pg", `SELECT count(DISTINCT anchor_protein) FROM ${ident(t.pg.table)} WHERE ${targetWhere(t.pg)}`);
-  } else if (ev && proteinExpr(ev)) {
-    await distinct(ev, { key: "pg", label: "Proteins" }, "kpi.prot", `SELECT count(DISTINCT ${proteinExpr(ev)}) FROM ${ident(ev.table)} WHERE ${targetWhere(ev)}`);
   }
-  if (ev && ev.seq !== "NULL") {
-    await distinct(ev, { key: "pep", label: "Peptides", title: "Distinct target peptide sequences" }, "kpi.pep", `SELECT count(DISTINCT ${ev.seq}) FROM ${ident(ev.table)} WHERE ${targetWhere(ev)}`);
-  }
-  if (t.feature) push({ key: "feat", label: "Features", value: await rows(t.feature, "kpi.feat") });
-  if (t.psm) push({ key: "psm", label: "PSMs", value: await rows(t.psm, "kpi.psm") });
-  if (t.run) push({ key: "run", label: "Runs", value: await count("kpi.run", `SELECT count(*) FROM ${ident(t.run.table)}`) });
-  else if (ev?.cols.has("run_file_name")) await distinct(ev, { key: "run", label: "Runs" }, "kpi.run2", `SELECT count(DISTINCT run_file_name) FROM ${ident(ev.table)}`);
-  if (t.sample) push({ key: "smp", label: "Samples", value: await count("kpi.smp", `SELECT count(*) FROM ${ident(t.sample.table)}`) });
 
   try {
     if (t.run) {
-      const c = t.run.cols;
-      const parts = [
-        c.has("instrument") ? "list_sort(list_distinct(list(instrument))) AS instruments" : "[]::VARCHAR[] AS instruments",
-        c.has("enzymes") ? "list_sort(list_distinct(flatten(list(enzymes)))) AS enzymes" : "[]::VARCHAR[] AS enzymes",
-      ];
-      const r = objects(await cachedSql(props.ds, "hdr.run", `SELECT ${parts.join(", ")} FROM ${ident(t.run.table)}`))[0];
-      runMeta.value.instruments = (r?.instruments ?? []).filter(Boolean);
-      runMeta.value.enzymes = (r?.enzymes ?? []).filter(Boolean);
+      const r = await runInstrumentsEnzymes(props.ds, t.run);
+      runMeta.value.instruments = r.instruments;
+      runMeta.value.enzymes = r.enzymes;
     }
     if (t.sample?.cols.has("organism")) {
-      const r = await cachedSql(props.ds, "hdr.org", `SELECT DISTINCT organism FROM ${ident(t.sample.table)} WHERE organism IS NOT NULL ORDER BY 1`);
-      runMeta.value.organisms = r.rows.map((x) => String(x[0]));
+      runMeta.value.organisms = await sampleOrganisms(props.ds, t.sample);
     }
   } catch {
     /* optional */
