@@ -535,12 +535,31 @@ fn object_id(path: &str) -> String {
     format!("{:016x}", h.finish())
 }
 
+/// The proxy URL of a registered object. Only the token and the id route a
+/// request; the last segment names the file, kept URL-safe.
 fn handle_for(p: &Proxy, id: &str, path: &str, size: u64) -> StreamHandle {
-    let file = path.rsplit('/').next().unwrap_or("file.parquet");
     StreamHandle {
-        url: format!("http://127.0.0.1:{}/{}/{id}/{file}", p.port, p.token),
+        url: format!(
+            "http://127.0.0.1:{}/{}/{id}/{}",
+            p.port,
+            p.token,
+            url_name(path)
+        ),
         size_bytes: size,
     }
+}
+
+fn url_name(path: &str) -> String {
+    let name = path.rsplit_once(['/', '\\']).map_or(path, |(_, name)| name);
+    name.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || "._-".contains(c) {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 /// Register `s3://bucket/key` views with the local stream proxy and return a
@@ -692,22 +711,7 @@ pub async fn register_local(paths: &[String]) -> Result<BTreeMap<String, StreamH
             });
             p.objects.lock().unwrap().insert(id.clone(), o);
         }
-        let size = meta.len();
-        // The URL's last segment is cosmetic; keep it URL-safe.
-        let name: String = pb
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("file.parquet")
-            .chars()
-            .map(|c| {
-                if c.is_ascii_alphanumeric() || "._-".contains(c) {
-                    c
-                } else {
-                    '_'
-                }
-            })
-            .collect();
-        out.insert(path.clone(), handle_for(&p, &id, &name, size));
+        out.insert(path.clone(), handle_for(&p, &id, path, meta.len()));
     }
     Ok(out)
 }
@@ -774,6 +778,16 @@ mod tests {
         assert_eq!(parse_range("bytes=4-", 10), Some((4, 9)));
         assert_eq!(parse_range("bytes=20-30", 10), None);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn url_names_are_url_safe() {
+        assert_eq!(
+            url_name("s3://b/dir/a b#1?.psm.parquet"),
+            "a_b_1_.psm.parquet"
+        );
+        assert_eq!(url_name(r"C:\data\x y.parquet"), "x_y.parquet");
+        assert_eq!(url_name("/data/PXD1.pg.parquet"), "PXD1.pg.parquet");
     }
 
     #[tokio::test]
