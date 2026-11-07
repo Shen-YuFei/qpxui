@@ -84,8 +84,14 @@ Download the installer for your platform from the
 | **S3 bucket** | Lists datasets under a bucket/prefix using your AWS credentials. You can stream the files lazily or download them to a local cache. S3-compatible stores (MinIO, Ceph) work too. |
 | **Quantms portal** | Searchable list of the datasets on [portal.quantms.org](https://portal.quantms.org) (title, organism, instrument, counts). You can stream a dataset lazily or download it to a local cache. No account needed. |
 
-Downloads show progress and can be cancelled. While you stream, the sidebar shows how much of each
-file has actually been fetched (for example `⚡ 16 MB / 170 MB`).
+Downloads show progress and can be cancelled at any point, even in the middle of a file; partial
+files are removed. Before a download starts, the app checks the free space on the cache disk: it
+refuses a download that would leave less than 1 GB free, and asks before downloading more than
+2 GB. Choosing **New source** or another dataset cancels a running download and stops the previous
+dataset's queries.
+
+While you stream, the sidebar shows how much of each file has actually been fetched (for example
+`⚡ 16 MB / 170 MB`).
 
 ### Dataset report
 
@@ -144,7 +150,9 @@ The **Quantification** tab appears when the `pg` view (or, failing that, the `fe
   - its protein group in each run.
 - **Peptidoforms**: search by sequence (*contains*, *starts with* or *exact*), or by peptidoform text
   such as `M[Oxidation]` or `UNIMOD:21`. Filters for modification and minimum charge are available.
-  Clicking a peptidoform shows every observation of it (run, charge, RT, m/z, ppm, PEP, intensity),
+  Clicking a peptidoform opens its **Profile**: its intensity in every sample (runs and TMT channels
+  mapped to samples through the run view), the distribution per sample group, and its retention time
+  in each run. The **List** pane shows every observation (run, charge, RT, m/z, ppm, PEP, intensity),
   and its protein links open the protein.
 
 ![Protein view: per-run evidence, PTM-coloured peptidoforms and the protein group in each run](docs/screenshots/protein.png)
@@ -224,6 +232,21 @@ Click a view in the sidebar to work with its rows directly:
 **Download to cache** instead fetches whole files once (with progress and cancel), for fully
 offline use. Cached files are kept in the OS cache folder (`~/Library/Caches/qpxui/` on macOS,
 `~/.cache/qpxui/` on Linux, `%LOCALAPPDATA%\qpxui\` on Windows).
+
+### Large streamed files
+
+Opening a streamed file of 1 GB or more reads only its parquet footer, so it opens in seconds
+however big it is. Anything that would read whole columns waits for you to ask:
+
+- **Header**: PSM and feature counts come from the footer; protein, peptide and run counts show a
+  **count** button.
+- **Overview, QC, PTMs, Quantification**: a **Compute** button shows a lower-bound estimate of the
+  data it will fetch.
+- **Proteins and Peptidoforms**: wait for a search term; peptide search defaults to an exact sequence match.
+- **Browse**: peak arrays start hidden; **Summary** builds its charts on request.
+
+How fast searches and spectra are depends on how the file was written: files sorted by peptidoform
+with small row groups (`qpxc transform relayout`) let each lookup read a few MB.
 
 ---
 
