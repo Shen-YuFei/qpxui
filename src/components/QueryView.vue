@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, shallowRef } from "vue";
 import { ensureViewReady, runSql, type QueryResult } from "../lib/duck";
 import { isStructured, formatCompact, scalarText } from "../lib/format";
 import PTMBadges from "./PTMBadges.vue";
@@ -13,7 +13,8 @@ const props = defineProps<{ view: ViewInfo }>();
 const tableName = ref("");
 const sql = ref("");
 const limit = 2000;
-const results = ref<QueryResult>({ columns: [], rows: [], rowCount: 0, truncated: false });
+// Replaced as a whole on each run: no deep proxies over the rows.
+const results = shallowRef<QueryResult>({ columns: [], rows: [], rowCount: 0, truncated: false });
 const busy = ref(false);
 const error = ref("");
 const lastSql = ref("");

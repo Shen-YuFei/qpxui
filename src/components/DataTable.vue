@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import { describeTable, ensureViewReady, runSql, type QueryResult } from "../lib/duck";
 import { isStructured, formatCompact, scalarText } from "../lib/format";
 import type { ViewInfo } from "../lib/api";
@@ -14,7 +14,8 @@ import { isModificationsCol, peptideCells, type PTMSeg } from "../lib/ptm";
 
 const props = defineProps<{ view: ViewInfo }>();
 const table = ref("");
-const result = ref<QueryResult>({ columns: [], rows: [], rowCount: 0, truncated: false });
+// Replaced as a whole on each load: no deep proxies over rows and peak arrays.
+const result = shallowRef<QueryResult>({ columns: [], rows: [], rowCount: 0, truncated: false });
 const total = ref(0);
 const page = ref(0);
 const pageSize = 500;
