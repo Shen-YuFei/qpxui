@@ -294,9 +294,14 @@ npm run tauri build    # installers for this platform → src-tauri/target/relea
 **Checks** (the same ones CI runs on every PR):
 
 ```bash
-npx vue-tsc --noEmit           # type-check the frontend
-npx vite build                 # build the frontend
-(cd src-tauri && cargo check)  # check the backend
+npm run lint                   # ESLint
+npm run typecheck              # vue-tsc
+npm test                       # Vitest unit tests (src/lib/*.test.ts)
+npm run build                  # vite build; the backend embeds dist/
+cd src-tauri
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test                     # add -- --ignored for the tests that need the portal
 ```
 
 **Sample data**
@@ -326,12 +331,15 @@ Many reanalysed datasets (e.g. `PXD014414`) can be opened directly with the **Qu
                │ Tauri IPC                        │ HTTP range reads
 ┌──────────────▼─────────────────────────────────▼──────────────────┐
 │ Rust backend                                                      │
-│  sources.rs   QPX discovery (file / folder / collection)          │
-│  io.rs        read local files, write exports                     │
-│  s3.rs        list / download S3 objects (aws-sdk-s3, rustls)     │
-│  portal.rs    quantms portal registry, listing, downloads         │
-│  s3stream.rs  127.0.0.1 range proxy with block cache (S3 + HTTP)  │
-│  transfers.rs progress events and cancellation                    │
+│  sources.rs     QPX discovery (file / folder / collection)        │
+│  io.rs          write exports                                     │
+│  s3.rs          list / download S3 objects (aws-sdk-s3, rustls)   │
+│  portal.rs      quantms portal registry, listing, downloads       │
+│  portal_http.rs shared HTTPS client, certificate settings         │
+│  s3stream.rs    127.0.0.1 range proxy with block cache            │
+│                 (S3, portal HTTP and local files)                 │
+│  transfers.rs   download loop, cache folders, free space, cancel  │
+│  progress.rs    download progress events                          │
 └───────────────────────────────────────────────────────────────────┘
 ```
 
@@ -353,23 +361,31 @@ qpxui/
 │   ├── lib/
 │   │   ├── api.ts                 # Tauri IPC wrappers + types
 │   │   ├── duck.ts                # DuckDB init, view registration, queries
+│   │   ├── errors.ts              # cancellation and engine error texts
+│   │   ├── qpx.ts                 # QPX view names, footer key, sample facets
 │   │   ├── report.ts              # report SQL helpers, dataset table registry, search
-│   │   ├── charts.ts              # ECharts option builder, CSV export
+│   │   ├── charts.ts              # ECharts setup and option builders, CSV export
 │   │   ├── quant.ts               # normalisation, correlation, clustering, PCA
 │   │   ├── fragments.ts           # peptidoform parsing, fragment ions, annotation
 │   │   ├── mirror.ts              # Koina predictions, PROXI/USI, spectrum similarity
+│   │   ├── downloads.ts           # free-space check, confirm, cancel
+│   │   ├── progress.ts            # download progress from backend events
 │   │   ├── export.ts              # save dialog helpers (PNG / CSV / BibTeX)
+│   │   ├── format.ts              # number, size and cell formatting
 │   │   ├── ptm.ts, settings.ts    # PTM parsing/colours, theme + settings
-│   │   └── useSlots.ts            # sequential chart loading with progress
+│   │   ├── useSlots.ts            # sequential chart loading with progress
+│   │   ├── useLargeGate.ts        # hold whole-column reads on large streamed files
+│   │   └── *.test.ts              # Vitest unit tests
 │   └── components/
 │       ├── ReportView.vue         # report header, counts, citation, tabs
 │       ├── report/                # Overview, QC, PTMs, Samples, Proteins, Quant, Peptides
 │       ├── SpectrumViewer.vue     # annotated spectrum + mirror
-│       ├── ChartCard.vue, ReportTable.vue, PeptideSeq.vue
-│       ├── SourcePicker.vue, PortalPicker.vue, S3Picker.vue
+│       ├── ChartCard.vue, ReportTable.vue
+│       ├── PeptideSeq.vue, PTMSegs.vue, PTMBadges.vue, PTMTip.vue  # PTM-coloured cells
+│       ├── SourcePicker.vue, PortalPicker.vue, S3Picker.vue, DownloadProgress.vue
 │       ├── DatasetExplorer.vue    # sidebar: search, datasets, views
 │       ├── ViewPanel.vue, DataTable.vue, SummaryView.vue, QueryView.vue
-│       └── SettingsPanel.vue, StructuredView.vue, PTMTip.vue
+│       └── SettingsPanel.vue, StructuredView.vue
 ├── src-tauri/
 │   ├── tauri.conf.json, Cargo.toml, capabilities/
 │   └── src/{lib.rs, qpx/, commands/}
@@ -405,9 +421,9 @@ with `npx tauri icon src-tauri/icons/icon-source.png`.
 
 - AnnData/HDF5 matrices (`.ae.h5ad`, `.de.h5ad`, `.h5mu`) are listed but not yet rendered; the
   viewer focuses on the Parquet views.
-- Local files are loaded into the webview's memory when first queried. Very large local views
-  (e.g. spectra in `mz`) may hit the limits of DuckDB-wasm, so streaming is preferable for big
-  remote files.
+- Local files are range-read through the same proxy as remote ones, but every query runs in
+  DuckDB-wasm inside the webview: queries that read whole large columns (e.g. spectra in `mz`)
+  may hit its memory limits.
 - The builds are not code-signed yet (see the macOS note under [Install](#install)).
 
 ## License
