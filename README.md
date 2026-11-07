@@ -230,21 +230,25 @@ Click a view in the sidebar to work with its rows directly:
   a new one when it expires.
 
 Portal HTTPS requests use the operating system's certificate verifier and trust store, including
-system-provided intermediates on macOS and Windows. If a corporate VPN uses a separate CA, ask
-your IT team for its CA certificates in PEM format. You can also add a PEM bundle explicitly by
-setting `QPXUI_PORTAL_CA_BUNDLE` before starting qpxui:
+system-provided intermediates on macOS and Windows. If your company installs its CA in the system
+store, no extra configuration should be needed.
+
+Alternatively, set `SSL_CERT_FILE` to a PEM certificate bundle and/or `SSL_CERT_DIR` to directories
+of PEM certificates before starting qpxui. As in uv, non-empty settings replace the default trust
+source: include every CA needed for portal and storage hosts. Separate multiple directories with
+`:` on Unix or `;` on Windows. Configured paths that cannot be read, or sources containing no
+certificates, cause an error rather than falling back to system trust.
 
 ```bash
-QPXUI_PORTAL_CA_BUNDLE=/path/to/company-ca.pem qpxui
+SSL_CERT_FILE=/path/to/ca-bundle.pem qpxui
 ```
 
 On macOS, launch the executable directly (for example,
-`QPXUI_PORTAL_CA_BUNDLE=/path/to/company-ca.pem /Applications/qpxui.app/Contents/MacOS/qpxui`);
-on Windows PowerShell, set `$env:QPXUI_PORTAL_CA_BUNDLE` before launching the executable.
-Every certificate in the bundle is added as a trusted CA alongside the system trust store, so only
-use a bundle from a trusted source. Restart the app after changing the bundle. This setting applies
-to portal registry, listing, downloads and streaming, not the separate S3 client. HTTPS certificate
-verification remains enabled.
+`SSL_CERT_FILE=/path/to/ca-bundle.pem /Applications/qpxui.app/Contents/MacOS/qpxui`);
+on Windows PowerShell, set `$env:SSL_CERT_FILE` before launching the executable.
+Only use certificates from a trusted source. Restart the app after changing the configuration.
+These settings apply to portal registry, listing, downloads and streaming; the separate S3 client
+may handle certificate configuration differently. HTTPS certificate verification remains enabled.
 
 **Download to cache** instead fetches whole files once (with progress and cancel), for fully
 offline use. Cached files are kept in the OS cache folder (`~/Library/Caches/qpxui/` on macOS,

@@ -53,3 +53,5 @@ jobs:
       - run: mkdir -p dist
       - run: cargo check
         working-directory: src-tauri
+      - run: cargo test --lib commands::portal_http::tests
+        working-directory: src-tauri
