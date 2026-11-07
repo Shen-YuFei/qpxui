@@ -109,9 +109,32 @@ function safeName(name: string): string {
  * then the touched column chunks), so huge files open instantly, nothing is
  * downloaded up front, and the bucket needs no CORS.
  */
+/** Table name per view path. Two folders of a collection can hold files of the
+ * same name: the later one gets a numbered table instead of replacing the
+ * first one's. */
+const tableNames = new Map<string, string>();
+
+export function tableName(view: ViewInfo): string {
+  let name = tableNames.get(view.path);
+  if (!name) {
+    const base = safeName(view.name);
+    const taken = new Set(tableNames.values());
+    name = base;
+    for (let i = 2; taken.has(name); i++) name = `${base}_${i}`;
+    tableNames.set(view.path, name);
+  }
+  return name;
+}
+
+/** A new source: its views may take the names of the previous one's. */
+export function forgetTableNames(): void {
+  tableNames.clear();
+}
+
 export async function ensureViewReady(view: ViewInfo): Promise<string> {
+  // Named before any await, so concurrent registrations can't pick one name.
+  const table = tableName(view);
   await init();
-  const table = safeName(view.name);
   if (state.registered.has(view.path)) return table;
   const gen = generation;
   await tracked(() => register(view, table));

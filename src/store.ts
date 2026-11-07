@@ -2,7 +2,7 @@ import { reactive } from "vue";
 import { cancelAllDownloads } from "./lib/downloads";
 import type { DatasetInfo, ViewInfo } from "./lib/api";
 import { clearReportCache } from "./lib/report";
-import { abandonQueries } from "./lib/duck";
+import { abandonQueries, forgetTableNames } from "./lib/duck";
 
 // Simple reactive store (no Pinia needed for this scale).
 export const state = reactive({
@@ -77,6 +77,7 @@ export function loadDatasets(datasets: DatasetInfo[], kind: string) {
   state.selectedDataset = datasets[0] ?? null;
   state.selectedView = datasets[0]?.views[0] ?? null;
   state.registered = new Set();
+  forgetTableNames();
   state.page = hasReport(datasets[0]) ? "report" : "view";
   state.reportTab = "overview";
   state.proteinFocus = null;
