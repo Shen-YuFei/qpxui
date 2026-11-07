@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { api, type DatasetInfo, type S3Listing, type ViewInfo } from "../lib/api";
 import { loadDatasets } from "../store";
 import { installProgress, overall, progress } from "../lib/progress";
+import { isCancelled } from "../lib/errors";
 import { cancelDownload, confirmDownload, totalBytes, trackDownload, untrackDownload } from "../lib/downloads";
 
 const bucket = ref("");
@@ -21,9 +22,6 @@ const selectedBytes = computed(() => totalBytes(selection().map((s) => s.view)))
 
 function generateId(): string {
   return (crypto?.randomUUID?.() ?? `d${Date.now()}-${Math.random().toString(36).slice(2)}`);
-}
-function isCancelledErr(e: unknown): boolean {
-  return /cancell?/i.test(String(e));
 }
 function clearProgressFor(files: string[]) {
   for (const f of files) delete progress[f];
@@ -127,7 +125,7 @@ async function loadSelection() {
       const entries = sel.map((s, i) => ({ prefix: s.prefix, local: locals[i] }));
       loadDatasets(groupLocal(entries), "s3");
     } catch (e: any) {
-      if (isCancelledErr(e)) {
+      if (isCancelled(e)) {
         error.value = "Download cancelled; partial files were removed.";
         clearProgressFor(files);
       } else {

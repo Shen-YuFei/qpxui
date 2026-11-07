@@ -1,4 +1,12 @@
-// Error texts shared by the query engine and the views that show its errors.
+// Error texts shared by the query engine, the backend and the views.
+
+/** What a cancelled download or an abandoned engine query rejects with: the
+ * backend's error string, or an Error carrying it. */
+export const CANCELLED = "cancelled";
+
+export function isCancelled(e: unknown): boolean {
+  return (e instanceof Error ? e.message : e) === CANCELLED;
+}
 
 /**
  * The text of a DuckDB error. A failed read of a streamed file (duckdb-wasm

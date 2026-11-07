@@ -2,6 +2,7 @@
 import { ref, watch } from "vue";
 import { state } from "../store";
 import { ensureViewReady } from "../lib/duck";
+import { isCancelled } from "../lib/errors";
 import DataTable from "./DataTable.vue";
 import SummaryView from "./SummaryView.vue";
 import QueryView from "./QueryView.vue";
@@ -26,7 +27,7 @@ async function activate() {
   } catch (e: any) {
     if (my !== seq) return;
     // A switch abandoned this open; don't show "cancelled" over the new view.
-    if (String(e).includes("cancelled")) return;
+    if (isCancelled(e)) return;
     error.value = String(e);
   } finally {
     if (my === seq) loadingView.value = false;

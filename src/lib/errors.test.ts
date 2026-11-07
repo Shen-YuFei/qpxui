@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { engineErrorText } from "./errors";
+import { engineErrorText, isCancelled } from "./errors";
 
 const hinted = (msg: string) => engineErrorText(new Error(msg)) !== msg;
+
+describe("isCancelled", () => {
+  it("recognises the backend's and the engine's cancellations only", () => {
+    expect(isCancelled("cancelled")).toBe(true);
+    expect(isCancelled(new Error("cancelled"))).toBe(true);
+    expect(isCancelled("PXD1.cancel-test.psm.parquet: got 10 of 20 bytes")).toBe(false);
+    expect(isCancelled(new Error("IO Error: Range request for x failed with error: request cancelled"))).toBe(false);
+  });
+});
 
 describe("engineErrorText", () => {
   it("hints at the network for failed range reads of streamed files", () => {

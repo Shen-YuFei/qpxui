@@ -1,7 +1,7 @@
 import * as duckdb from "@duckdb/duckdb-wasm";
 import { state } from "../store";
 import { api, type ViewInfo } from "./api";
-import { engineErrorText } from "./errors";
+import { CANCELLED, engineErrorText } from "./errors";
 
 // Bundle the DuckDB WASM + worker assets locally (no CDN), so the desktop
 // app keeps working offline. Vite turns these imports into static asset URLs.
@@ -67,7 +67,7 @@ export function abandonQueries(): boolean {
   generation++;
   const toCancel = Array.from(trackedCancels);
   trackedCancels.clear();
-  for (const r of toCancel) r(new Error("cancelled"));
+  for (const r of toCancel) r(new Error(CANCELLED));
   void old.terminate().catch(() => {});
   return true;
 }
@@ -122,7 +122,7 @@ export async function ensureViewReady(view: ViewInfo): Promise<string> {
   const gen = generation;
   await tracked(() => register(view, table));
   // The engine was restarted meanwhile: the table belongs to the old one.
-  if (gen !== generation) throw new Error("cancelled");
+  if (gen !== generation) throw new Error(CANCELLED);
   state.registered.add(view.path);
   state.tableName[view.path] = table;
   return table;

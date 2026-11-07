@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { api, type DatasetInfo, type PortalDataset, type ViewInfo } from "../lib/api";
 import { loadDatasets } from "../store";
 import { installProgress, overall, progress } from "../lib/progress";
+import { isCancelled } from "../lib/errors";
 import { cancelDownload, confirmDownload, totalBytes, trackDownload, untrackDownload } from "../lib/downloads";
 
 const rows = ref<PortalDataset[]>([]);
@@ -18,9 +19,6 @@ const cancelling = ref(false);
 
 function generateId(): string {
   return crypto?.randomUUID?.() ?? `d${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-function isCancelledErr(e: unknown): boolean {
-  return /cancell?/i.test(String(e));
 }
 function clearProgressFor(files: string[]) {
   for (const f of files) delete progress[f];
@@ -169,7 +167,7 @@ async function loadSelection() {
       };
       loadDatasets([ds], "portal | " + target.accession);
     } catch (e: any) {
-      if (isCancelledErr(e)) {
+      if (isCancelled(e)) {
         // Cancelled by switching dataset or source: say nothing there.
         if (!unmounted && selected.value === target) error.value = "Download cancelled; partial files were removed.";
         clearProgressFor(files);
