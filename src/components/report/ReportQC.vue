@@ -190,6 +190,7 @@ onMounted(() => {
   <div>
     <div v-if="!ev" class="muted pad">No feature or PSM view in this dataset.</div>
     <LargeGate v-else-if="gate.blocked" :bytes="gate.bytes" :size="gate.size" what="Per-run QC" @go="release" />
+    <div v-else-if="gate.error" class="error pad">⚠ {{ gate.error }}</div>
     <div v-else-if="gate.checking" class="muted pad"><span class="spinner"></span></div>
     <template v-else>
       <p class="muted note">

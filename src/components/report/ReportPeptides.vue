@@ -232,11 +232,15 @@ async function loadMods() {
 
 onMounted(async () => {
   if (!ev) return;
-  hasSpectra(props.t.psm).then((v) => (spectra.value = v && !!props.t.psm?.cols.has("peptidoform"))).catch(() => {});
+  hasSpectra(props.t.psm)
+    .then((v) => (spectra.value = v && !!props.t.psm?.cols.has("peptidoform")))
+    .catch((e) => (error.value = String(e?.message ?? e)));
   try {
     scale.value = await viewScale(ev);
-  } catch {
-    scale.value = null;
+  } catch (e: any) {
+    // Without the footer the file's size is unknown: don't scan it blindly.
+    error.value = String(e?.message ?? e);
+    return;
   }
   if (large.value) {
     // Listing the top peptidoforms or the modifications reads whole columns of

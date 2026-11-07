@@ -71,15 +71,11 @@ export function strippedPeptidoform(col = "peptidoform"): string {
 async function detectSeqExpr(ref: TableRef): Promise<string> {
   if (!ref.cols.has("sequence")) return ref.cols.has("peptidoform") ? strippedPeptidoform() : "NULL";
   if (!ref.cols.has("peptidoform")) return "sequence";
-  try {
-    const r = await runSql(
-      `SELECT count(*) FILTER (WHERE sequence <> ${strippedPeptidoform()}) AS bad
-       FROM (SELECT sequence, peptidoform FROM ${ident(ref.table)} LIMIT 2000)`
-    );
-    return Number(r.rows[0]?.[0] ?? 0) > 0 ? strippedPeptidoform() : "sequence";
-  } catch {
-    return "sequence";
-  }
+  const r = await runSql(
+    `SELECT count(*) FILTER (WHERE sequence <> ${strippedPeptidoform()}) AS bad
+     FROM (SELECT sequence, peptidoform FROM ${ident(ref.table)} LIMIT 2000)`
+  );
+  return Number(r.rows[0][0]) > 0 ? strippedPeptidoform() : "sequence";
 }
 
 /** Query result rows as plain objects keyed by column name. */
@@ -121,16 +117,13 @@ export function hasSpectra(ref: TableRef | undefined): Promise<boolean> {
   let p = spectraCache.get(key);
   if (!p) {
     p = (async () => {
-      try {
-        const r = await runSql(
-          `SELECT sum(num_values)::BIGINT, sum(coalesce(stats_null_count, 0))::BIGINT, count(stats_null_count)::BIGINT, count(*)::BIGINT
-           FROM parquet_metadata(${lit(`${ref.table}.parquet`)}) WHERE path_in_schema LIKE 'mz_array%'`
-        );
-        const [vals, nulls, withStats, chunks] = (r.rows[0] ?? []).map(Number);
-        if (chunks > 0 && withStats === chunks) return vals > nulls;
-      } catch {
-        /* fall through to a data probe */
-      }
+      const stats = await runSql(
+        `SELECT sum(num_values)::BIGINT, sum(coalesce(stats_null_count, 0))::BIGINT, count(stats_null_count)::BIGINT, count(*)::BIGINT
+         FROM parquet_metadata(${lit(`${ref.table}.parquet`)}) WHERE path_in_schema LIKE 'mz_array%'`
+      );
+      const [vals, nulls, withStats, chunks] = stats.rows[0].map(Number);
+      if (chunks > 0 && withStats === chunks) return vals > nulls;
+      // Some writers leave out null counts: look for one spectrum instead.
       const r = await runSql(`SELECT 1 FROM ${ident(ref.table)} WHERE len(mz_array) > 0 LIMIT 1`, 1);
       return r.rows.length > 0;
     })();
@@ -167,37 +160,26 @@ export function viewScale(ref: Pick<TableRef, "view" | "table">): Promise<ViewSc
     p = (async () => {
       const remote = /^(s3|https?):\/\//.test(ref.view.path);
       const file = lit(`${ref.table}.parquet`);
-      let rows = 0;
-      let bytes = ref.view.sizeBytes || 0;
+      const r = await runSql(`SELECT sum(num_rows)::BIGINT FROM parquet_file_metadata(${file})`, 1);
+      const rows = Number(r.rows[0][0]);
+      const b = await runSql(
+        `SELECT lower(split_part(path_in_schema, ', ', 1)) AS c, sum(total_compressed_size)::BIGINT
+         FROM parquet_metadata(${file}) GROUP BY 1`,
+        10000
+      );
       const colBytes: Record<string, number> = {};
-      try {
-        const r = await runSql(`SELECT sum(num_rows)::BIGINT FROM parquet_file_metadata(${file})`, 1);
-        rows = Number(r.rows[0]?.[0] ?? 0);
-        const b = await runSql(
-          `SELECT lower(split_part(path_in_schema, ', ', 1)) AS c, sum(total_compressed_size)::BIGINT
-           FROM parquet_metadata(${file}) GROUP BY 1`,
-          10000
-        );
-        let total = 0;
-        for (const [c, n] of b.rows) {
-          colBytes[String(c)] = Number(n);
-          total += Number(n);
-        }
-        bytes = Math.max(bytes, total);
-      } catch {
-        /* keep the listing size */
+      let total = 0;
+      for (const [c, n] of b.rows) {
+        colBytes[String(c)] = Number(n);
+        total += Number(n);
       }
-      let sortedBy: string[] = [];
-      try {
-        const r = await runSql(
-          `SELECT decode(value) FROM parquet_kv_metadata(${file}) WHERE decode(key) = 'qpx.sort_order' LIMIT 1`,
-          1
-        );
-        const v = r.rows[0]?.[0];
-        if (v != null) sortedBy = parseSortOrder(String(v));
-      } catch {
-        /* no footer key */
-      }
+      const bytes = Math.max(ref.view.sizeBytes, total);
+      const kv = await runSql(
+        `SELECT decode(value) FROM parquet_kv_metadata(${file}) WHERE decode(key) = 'qpx.sort_order' LIMIT 1`,
+        1
+      );
+      const order = kv.rows[0]?.[0];
+      const sortedBy = order == null ? [] : parseSortOrder(String(order));
       return { remote, rows, bytes, large: remote && bytes >= LARGE_STREAM_BYTES, sortedBy, colBytes };
     })();
     p.catch(() => scaleCache.delete(key));
@@ -218,12 +200,8 @@ export async function largeViews(refs: (TableRef | undefined)[]): Promise<{ ref:
   const out: { ref: TableRef; scale: ViewScale }[] = [];
   for (const ref of refs) {
     if (!ref || !/^(s3|https?):\/\//.test(ref.view.path)) continue;
-    try {
-      const scale = await viewScale(ref);
-      if (scale.large) out.push({ ref, scale });
-    } catch {
-      /* treat as small */
-    }
+    const scale = await viewScale(ref);
+    if (scale.large) out.push({ ref, scale });
   }
   return out;
 }

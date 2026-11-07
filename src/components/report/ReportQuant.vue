@@ -547,6 +547,7 @@ const sourceText = computed(() => {
   <div>
     <div v-if="!src" class="muted pad">This dataset has no quantitative intensities (pg or feature view with <code>intensities</code>).</div>
     <div v-else-if="error" class="error pad">⚠ {{ error }}</div>
+    <div v-else-if="gate.error" class="error pad">⚠ {{ gate.error }}</div>
     <div v-else-if="gate.checking" class="muted pad"><span class="spinner"></span></div>
     <LargeGate v-else-if="gate.blocked" :bytes="gate.bytes" :size="gate.size" what="Building the protein × sample matrix" @go="release" />
     <div v-else-if="busy" class="muted pad">Building the protein × sample matrix… <span class="spinner"></span></div>

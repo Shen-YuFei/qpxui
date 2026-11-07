@@ -256,8 +256,10 @@ onMounted(async () => {
   if (src && !q.value.trim()) {
     try {
       scale.value = await viewScale(src);
-    } catch {
-      scale.value = null;
+    } catch (e: any) {
+      // Without the footer the file's size is unknown: don't scan it blindly.
+      error.value = String(e?.message ?? e);
+      return;
     }
     if (scale.value?.large) {
       waiting.value = true;

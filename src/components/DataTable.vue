@@ -71,11 +71,7 @@ async function load() {
       colNames.value = desc.map((d) => d.name);
       colTypes.value = Object.fromEntries(desc.map((d) => [d.name.toLowerCase(), d.type]));
       if (hasPeakCols.value && /^(s3|https?):\/\//.test(props.view.path)) {
-        try {
-          largeRemote.value = (await viewScale({ view: props.view, table: table.value })).large;
-        } catch {
-          /* keep peaks on */
-        }
+        largeRemote.value = (await viewScale({ view: props.view, table: table.value })).large;
         if (largeRemote.value) {
           showPeaks.value = false;
           return; // the showPeaks watcher reloads without the peak columns

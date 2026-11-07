@@ -105,21 +105,12 @@ async function count(key: string, sql: string): Promise<number | null> {
 }
 
 /** Row count of a view from its parquet footer (no data read). */
-async function footerRows(ref: TableRef): Promise<number | null> {
-  try {
-    return (await viewScale(ref)).rows;
-  } catch {
-    return null;
-  }
+async function footerRows(ref: TableRef): Promise<number> {
+  return (await viewScale(ref)).rows;
 }
 
-async function isLarge(ref: TableRef | undefined): Promise<boolean> {
-  if (!ref) return false;
-  try {
-    return (await viewScale(ref)).large;
-  } catch {
-    return false;
-  }
+async function isLarge(ref: TableRef): Promise<boolean> {
+  return (await viewScale(ref)).large;
 }
 
 async function compute(k: Kpi) {

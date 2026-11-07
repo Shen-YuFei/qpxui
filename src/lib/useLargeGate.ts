@@ -11,17 +11,26 @@ export interface GateNeed {
  * `check` reads only parquet footers; when a view is large it sets `blocked`
  * and the estimated bytes, and the tab shows a button that calls `release`. */
 export function useLargeGate() {
-  const gate = reactive({ checking: true, blocked: false, bytes: 0, size: 0 });
+  const gate = reactive({ checking: true, blocked: false, bytes: 0, size: 0, error: "" });
   let resume: (() => void) | null = null;
   let disposed = false;
 
   async function check(needs: GateNeed[], go: () => void): Promise<void> {
     gate.checking = true;
-    const big = await largeViews(needs.map((n) => n.ref));
+    gate.error = "";
+    let big: Awaited<ReturnType<typeof largeViews>>;
+    try {
+      big = await largeViews(needs.map((n) => n.ref));
+    } catch (e: any) {
+      // Without the footer a view's size is unknown: don't scan it blindly.
+      big = [];
+      gate.error = String(e?.message ?? e);
+    }
     // The tab was unmounted (dataset switched) while the footer read was in
     // flight: don't start its whole-file queries on the new dataset.
     if (disposed) return;
     gate.checking = false;
+    if (gate.error) return;
     if (!big.length) {
       go();
       return;

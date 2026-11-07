@@ -135,11 +135,7 @@ onMounted(async () => {
     cols.value = await describeTable(table.value);
     numericCol.value = numericCols.value[0]?.name ?? "";
     if (/^(s3|https?):\/\//.test(props.view.path)) {
-      try {
-        scale.value = await viewScale({ view: props.view, table: table.value });
-      } catch {
-        scale.value = null;
-      }
+      scale.value = await viewScale({ view: props.view, table: table.value });
     }
     if (scale.value?.large) {
       total.value = scale.value.rows;
