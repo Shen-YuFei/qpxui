@@ -59,7 +59,7 @@ const protCols: Column[] = [
       :subtitle="focusRow ? `${focus} · quantified in ${focusRow.n} of ${nCols} ${colUnit}${groupBy ? ' · lines = group means' : ''}` : 'Pick a protein.'"
       :option="option"
       :csv="csv"
-      :empty-text="focus ? '' : 'Pick a protein.'"
+      :empty-text="focusRow ? '' : 'Pick a protein.'"
       :file-base="`${fileBase}_${focusRow?.gene ?? focus ?? ''}`"
       :height="420"
     />

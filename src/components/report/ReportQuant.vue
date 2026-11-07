@@ -228,9 +228,9 @@ const profileOption = computed(() => {
 
 function profileCsv(): string {
   const m = matrix.value;
-  if (!m || !focus.value) return "";
-  const i = m.proteins.indexOf(focus.value);
-  return proteinProfileCsv(m.samples, order.value, m.values[i], groupBy.value, groupOf);
+  // The contaminant filter can hide the focused protein.
+  const i = m && focus.value ? m.proteins.indexOf(focus.value) : -1;
+  return m && i >= 0 ? proteinProfileCsv(m.samples, order.value, m.values[i], groupBy.value, groupOf) : "";
 }
 
 const saved = ref("");
