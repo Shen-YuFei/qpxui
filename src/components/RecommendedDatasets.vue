@@ -13,31 +13,25 @@ const selected = ref<PortalDataset | null>(null);
 function isOpen(ds: PortalDataset): boolean {
   return !!selected.value && portalRef(selected.value) === portalRef(ds);
 }
+// Feature the biological collections (e.g. human cancer cell lines) and
+// skip the huge MS-Net reanalysis collection, which otherwise dominates a
+// by-sample-count ranking. Take the most-analyzed datasets per collection.
+const FEATURED: { name: string; take: number }[] = [
+  { name: "celllines", take: 5 },
+  { name: "immunopeptidomics", take: 1 },
+];
+
 async function loadRecommended() {
   busy.value = true;
   error.value = "";
   try {
-    // Feature the biological collections (e.g. human cancer cell lines) and
-    // skip the huge MS-Net reanalysis collection, which otherwise dominates a
-    // by-sample-count ranking. Take the most-analyzed datasets per collection.
-    const preferred: { name: string; take: number }[] = [
-      { name: "celllines", take: 5 },
-      { name: "immunopeptidomics", take: 1 },
-    ];
-    const picked: PortalDataset[] = [];
-    const seen = new Set<string>();
-    for (const { name, take } of preferred) {
-      if (picked.length >= 6) break;
-      const res = await api.portalSearch(null, { collection: name, sort: "samples", pageSize: take });
-      for (const d of res.datasets) {
-        const key = portalRef(d);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        picked.push(d);
-        if (picked.length >= 6) break;
-      }
-    }
-    datasets.value = picked;
+    const pages = await Promise.all(
+      FEATURED.map(({ name, take }) => api.portalSearch(null, { collection: name, sort: "samples", pageSize: take }))
+    );
+    // A dataset in both collections is listed once.
+    const byRef = new Map<string, PortalDataset>();
+    for (const d of pages.flatMap((p) => p.datasets)) if (!byRef.has(portalRef(d))) byRef.set(portalRef(d), d);
+    datasets.value = [...byRef.values()].slice(0, 6);
   } catch (e: any) {
     error.value = String(e);
   } finally {
