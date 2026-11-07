@@ -236,8 +236,8 @@ store, no extra configuration should be needed.
 Alternatively, set `SSL_CERT_FILE` to a PEM certificate bundle and/or `SSL_CERT_DIR` to directories
 of PEM certificates before starting qpxui. As in uv, non-empty settings replace the default trust
 source: include every CA needed for portal and storage hosts. Separate multiple directories with
-`:` on Unix or `;` on Windows. Configured paths that cannot be read, or sources containing no
-certificates, cause an error rather than falling back to system trust.
+`:` on Unix or `;` on Windows. Configured paths that cannot be read, or configured sources that
+collectively contain no certificates, cause an error rather than falling back to system trust.
 
 ```bash
 SSL_CERT_FILE=/path/to/ca-bundle.pem qpxui
