@@ -24,10 +24,14 @@ import {
 } from "../lib/mirror";
 import {
   annotatePeaks,
+  coverageMarks,
   fragmentIons,
-  ionKey,
+  ionTableCharges,
+  ionTableRows,
+  matchedIonKeys,
   parsePeptidoform,
   precursorMz,
+  spectrumStats,
   storedAnnotations,
   toProForma,
   type Peak,
@@ -87,31 +91,9 @@ const peaks = computed<Peak[]>(() => {
   return annotatePeaks(mz, inten, ions.value, tol.value);
 });
 
-const matchedKeys = computed(() => {
-  const s = new Set<string>();
-  for (const p of peaks.value) if (p.ion) s.add(ionKey(p.ion.type, p.ion.num, p.ion.loss, p.ion.charge));
-  return s;
-});
+const matchedKeys = computed(() => matchedIonKeys(peaks.value));
 
-const stats = computed(() => {
-  const n = parsed.value.residues.length;
-  const tic = peaks.value.reduce((a, p) => a + p.intensity, 0) || 1;
-  const ann = peaks.value.filter((p) => p.ion);
-  const bNums = new Set(ann.filter((p) => p.ion!.type === "b").map((p) => p.ion!.num));
-  const yNums = new Set(ann.filter((p) => p.ion!.type === "y").map((p) => p.ion!.num));
-  // A backbone cleavage is explained if either the b or the complementary y ion is seen.
-  let cleav = 0;
-  for (let k = 1; k < n; k++) if (bNums.has(k) || yNums.has(n - k)) cleav++;
-  return {
-    peaks: peaks.value.length,
-    annotated: ann.length,
-    ticPct: (ann.reduce((a, p) => a + p.intensity, 0) / tic) * 100,
-    b: bNums.size,
-    y: yNums.size,
-    cleav,
-    n,
-  };
-});
+const stats = computed(() => spectrumStats(parsed.value, peaks.value));
 
 const theoMz = computed(() => precursorMz(parsed.value, charge.value));
 
@@ -217,44 +199,11 @@ const usi = computed(() => {
 const prideUrl = computed(() => (usi.value && /^(PXD|MSV)/.test(pxd.value) ? `https://www.ebi.ac.uk/pride/archive/usi?usi=${encodeURIComponent(usi.value)}` : ""));
 
 // Cleavage marks for the coverage map: after residue k (1-based), b_k and y_(n-k).
-const coverage = computed(() => {
-  const n = parsed.value.residues.length;
-  const bSeen = new Set<number>();
-  const ySeen = new Set<number>();
-  for (const p of peaks.value) {
-    if (!p.ion || p.ion.loss) continue;
-    (p.ion.type === "b" ? bSeen : ySeen).add(p.ion.num);
-  }
-  return parsed.value.residues.map((aa, k) => ({
-    aa,
-    mod: parsed.value.mods[k] !== 0 || (k === 0 && parsed.value.nterm !== 0),
-    b: k < n - 1 && bSeen.has(k + 1),
-    y: k < n - 1 && ySeen.has(n - k - 1),
-  }));
-});
+const coverage = computed(() => coverageMarks(parsed.value, peaks.value));
 
 // Fragment ion table (USI viewer / Lorikeet style).
-const tableCharges = computed(() => {
-  const zs = new Set<number>();
-  for (const i of ions.value) if (!i.loss) zs.add(i.charge);
-  return [...zs].sort((a, b) => a - b).slice(0, 3);
-});
-const ionTable = computed(() => {
-  const n = parsed.value.residues.length;
-  const lookup = new Map(ions.value.filter((i) => !i.loss).map((i) => [ionKey(i.type, i.num, "", i.charge), i.mz]));
-  return parsed.value.residues.map((aa, k) => {
-    const bNum = k + 1;
-    const yNum = n - k;
-    return {
-      bNum,
-      yNum,
-      aa,
-      mod: parsed.value.modNames[k].join(", "),
-      b: tableCharges.value.map((z) => (bNum < n ? { mz: lookup.get(ionKey("b", bNum, "", z)), hit: matchedKeys.value.has(ionKey("b", bNum, "", z)) } : null)),
-      y: tableCharges.value.map((z) => (yNum < n ? { mz: lookup.get(ionKey("y", yNum, "", z)), hit: matchedKeys.value.has(ionKey("y", yNum, "", z)) } : null)),
-    };
-  });
-});
+const tableCharges = computed(() => ionTableCharges(ions.value));
+const ionTable = computed(() => ionTableRows(parsed.value, ions.value, matchedKeys.value, tableCharges.value));
 
 const option = computed(() => {
   void settings.theme;
