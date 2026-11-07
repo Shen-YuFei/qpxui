@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import VChart from "vue-echarts";
-import { ensureViewReady, describeTable, countRows, runSql, type ColumnInfo } from "../lib/duck";
+import { ensureViewReady, describeTable, countRows, type ColumnInfo } from "../lib/duck";
 import type { ViewInfo } from "../lib/api";
-import { ident, scanBytes, viewScale, type ViewScale } from "../lib/report";
+import { scanBytes, viewScale, type ViewScale } from "../lib/report";
+import { columnHistogram, isNumericScalar, summaryCounts } from "../lib/queries/summary";
 import { chartTheme } from "../lib/charts";
 import { fmtBytes } from "../lib/format";
 
@@ -29,21 +30,6 @@ const numericCols = computed(() =>
   cols.value.filter((c) => isNumericScalar(c.type))
 );
 
-// Only treat columns whose *scalar base* type is numeric as histogrammable.
-// Complex/nested types (MAP, LIST, ARRAY, STRUCT, ENUM, UNION) are rejected —
-// previously a `MAP(VARCHAR, BIGINT)` column was matched because "BIGINT"
-// contains "int", producing SQL that divides/subtracts MAPs and fails.
-function isNumericScalar(type: string): boolean {
-  const t = type.trim();
-  if (/map|list|array|struct|union|enum|\[/i.test(t)) return false;
-  const base = t.split(/[[(]/)[0].trim().toLowerCase();
-  return [
-    "tinyint", "smallint", "integer", "bigint", "hugeint",
-    "utinyint", "usmallint", "uinteger", "ubigint", "uhugeint",
-    "float", "real", "double", "decimal", "numeric",
-  ].includes(base);
-}
-
 function barOption(labels: string[], values: number[], title: string) {
   return {
     title: { text: title, textStyle: { color: chartTheme().text, fontSize: 13 } },
@@ -59,13 +45,6 @@ function barOption(labels: string[], values: number[], title: string) {
   };
 }
 
-async function runCard(label: string, sql: string, key: string): Promise<any> {
-  const r = await runSql(sql);
-  const labels = r.rows.map((row) => String(row[0] ?? "∅"));
-  const values = r.rows.map((row) => Number(row[1] ?? 0));
-  return { label, key, option: barOption(labels, values, label) };
-}
-
 // QPX row unit for each view, used in chart titles.
 const ROW_UNIT: Record<string, string> = { psm: "PSMs", feature: "features", pg: "protein groups" };
 const unit = () => ROW_UNIT[props.view.view] ?? "rows";
@@ -73,55 +52,19 @@ const unit = () => ROW_UNIT[props.view.view] ?? "rows";
 async function buildSummaries() {
   busy.value = true;
   error.value = "";
-  const t = table.value;
   const names = new Set(cols.value.map((c) => c.name.toLowerCase()));
-  const list: any[] = [];
-  const push = (c: any) => {
-    if (c.option?.series?.[0]?.data?.length) list.push(c);
-  };
-
-  if (names.has("charge")) {
-    push(await runCard("Charge distribution", `SELECT charge AS k, COUNT(*) AS n FROM "${t}" GROUP BY 1 ORDER BY 1`, "charge"));
-  }
-  if (names.has("anchor_protein") || names.has("pg_accessions")) {
-    const col = names.has("anchor_protein") ? "anchor_protein" : "pg_accessions";
-    push(await runCard(`Top ${col === "anchor_protein" ? "anchor proteins" : "protein groups"} by ${unit()}`, `SELECT ${col} AS k, COUNT(*) AS n FROM "${t}" WHERE ${col} IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 25`, "protein"));
-  }
-  if (names.has("run_file_name")) {
-    push(await runCard(`${unit()[0].toUpperCase()}${unit().slice(1)} per run`, `SELECT run_file_name AS k, COUNT(*) AS n FROM "${t}" GROUP BY 1 ORDER BY 2 DESC LIMIT 25`, "run"));
-  }
-  if (names.has("peptide_qvalue") || names.has("posterior_error_probability")) {
-    const col = names.has("peptide_qvalue") ? "peptide_qvalue" : "posterior_error_probability";
-    push(await runCard(`${col} distribution`, `SELECT round(${col},2) AS k, COUNT(*) AS n FROM "${t}" WHERE ${col} IS NOT NULL GROUP BY 1 ORDER BY 1`, "q"));
-  }
-  if (names.has("missed_cleavages")) {
-    push(await runCard("Missed cleavages", `SELECT missed_cleavages AS k, COUNT(*) AS n FROM "${t}" GROUP BY 1 ORDER BY 1`, "mc"));
-  }
-  cards.value = list;
+  const list = await summaryCounts(table.value, names, unit());
+  cards.value = list.map((c) => ({ label: c.label, key: c.key, option: barOption(c.labels, c.values, c.label) }));
 }
 
 async function buildHistogram() {
   if (!numericCol.value) return;
   const col = numericCol.value;
-  const t = table.value;
   hist.value = null;
   histError.value = "";
-  // In DOUBLE: max - min of 64-bit ids overflows BIGINT.
-  const x = `${ident(col)}::DOUBLE`;
-  const q = `
-    WITH stats AS (
-      SELECT min(${x}) AS mn, (max(${x}) - min(${x}))/30.0 AS w
-      FROM "${t}" WHERE ${ident(col)} IS NOT NULL
-    )
-    SELECT (floor((${x} - (SELECT mn FROM stats)) / NULLIF((SELECT w FROM stats),0)))::INT AS bin,
-           COUNT(*) AS n
-    FROM "${t}" WHERE ${ident(col)} IS NOT NULL
-    GROUP BY 1 ORDER BY 1`;
   try {
-    const r = await runSql(q);
-    const labels = r.rows.map((row) => String(row[0] ?? ""));
-    const values = r.rows.map((row) => Number(row[1] ?? 0));
-    hist.value = barOption(labels, values, `Histogram of ${col}`);
+    const r = await columnHistogram(table.value, col);
+    hist.value = barOption(r.labels, r.values, `Histogram of ${col}`);
   } catch (e: any) {
     // A numeric column can still fail to histogram (e.g. infinite values):
     // say why in its place and keep the other charts.
