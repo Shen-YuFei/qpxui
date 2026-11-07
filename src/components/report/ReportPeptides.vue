@@ -106,7 +106,7 @@ function whereClause(): string {
       : mode.value === "prefix" ? `starts_with(${E.seq}, ${lit(aa)})`
       : `contains(${E.seq}, ${lit(aa)})`;
     // Also match peptidoform text (e.g. "M[Oxidation]" or "UNIMOD:21").
-    const pfCond = E.cols.has("peptidoform") && /[\[\]:+]/.test(q.value) ? ` OR peptidoform ILIKE ${likePattern(q.value.trim())}` : "";
+    const pfCond = E.cols.has("peptidoform") && /[[\]:+]/.test(q.value) ? ` OR peptidoform ILIKE ${likePattern(q.value.trim())}` : "";
     parts.push(`(${aa ? seqCond : "FALSE"}${pfCond})`);
   }
   if (mod.value && E.cols.has("modifications")) {

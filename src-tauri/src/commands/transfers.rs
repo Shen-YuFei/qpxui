@@ -41,7 +41,7 @@ pub fn end(id: &str) {
 pub fn cancel(id: &str) -> bool {
     let hit = {
         let guard = registry().lock().expect("transfers registry poisoned");
-        guard.get(id).map(|t| t.clone())
+        guard.get(id).cloned()
     };
     match hit {
         Some(token) => {
@@ -104,7 +104,9 @@ pub const RESERVE_BYTES: u64 = 1 << 30;
 pub fn free_space(dir: &Path) -> Result<u64, String> {
     let mut p = dir;
     while !p.exists() {
-        p = p.parent().ok_or_else(|| format!("no existing parent for {}", dir.display()))?;
+        p = p
+            .parent()
+            .ok_or_else(|| format!("no existing parent for {}", dir.display()))?;
     }
     fs4::available_space(p).map_err(|e| format!("free space of {}: {e}", p.display()))
 }
@@ -118,7 +120,11 @@ pub fn human(n: u64) -> String {
         v /= 1024.0;
         i += 1;
     }
-    if i == 0 { format!("{n} B") } else { format!("{v:.1} {}", U[i]) }
+    if i == 0 {
+        format!("{n} B")
+    } else {
+        format!("{v:.1} {}", U[i])
+    }
 }
 
 /// Fail when `need` bytes (plus [`RESERVE_BYTES`]) do not fit in `free`.
@@ -157,7 +163,12 @@ impl PartFile {
         let file = tokio::fs::File::create(&part)
             .await
             .map_err(|e| format!("create {}: {e}", part.display()))?;
-        Ok(Self { part, dest: dest.to_path_buf(), file: Some(file), written: 0 })
+        Ok(Self {
+            part,
+            dest: dest.to_path_buf(),
+            file: Some(file),
+            written: 0,
+        })
     }
 
     pub async fn write(&mut self, chunk: &[u8]) -> Result<(), String> {
@@ -210,8 +221,14 @@ pub fn cache_free_space(kind: String) -> Result<DiskSpace, String> {
     let base = dirs::cache_dir()
         .or_else(dirs::data_local_dir)
         .ok_or_else(|| "no cache directory available".to_string())?;
-    let dir = base.join("qpxui").join(if kind == "s3" { "s3-cache" } else { "portal" });
-    Ok(DiskSpace { free: free_space(&dir)?, reserve: RESERVE_BYTES, dir: dir.to_string_lossy().to_string() })
+    let dir = base
+        .join("qpxui")
+        .join(if kind == "s3" { "s3-cache" } else { "portal" });
+    Ok(DiskSpace {
+        free: free_space(&dir)?,
+        reserve: RESERVE_BYTES,
+        dir: dir.to_string_lossy().to_string(),
+    })
 }
 
 #[cfg(test)]

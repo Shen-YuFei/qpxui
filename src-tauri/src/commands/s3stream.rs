@@ -48,11 +48,19 @@ const PARALLEL_FETCHES: usize = 8;
 /// Where a streamed object's bytes come from.
 enum Source {
     /// An S3 object read with the user's AWS credentials.
-    S3 { client: Client, bucket: String, key: String },
+    S3 {
+        client: Client,
+        bucket: String,
+        key: String,
+    },
     /// A public HTTPS URL (e.g. the quantms portal). The portal answers with a
     /// redirect to a short-lived signed URL on S3-compatible storage; we keep
     /// the resolved URL and re-resolve when it expires.
-    Http { client: reqwest::Client, url: String, resolved: Mutex<Option<String>> },
+    Http {
+        client: reqwest::Client,
+        url: String,
+        resolved: Mutex<Option<String>>,
+    },
     /// A local parquet file (or one already downloaded to the cache). Served
     /// straight from disk, so DuckDB reads only the ranges it needs instead of
     /// the whole file being copied into the webview.
@@ -112,7 +120,9 @@ async fn proxy() -> Result<Arc<Proxy>, String> {
             let served = p.clone();
             tokio::spawn(async move {
                 loop {
-                    let Ok((stream, _)) = listener.accept().await else { continue };
+                    let Ok((stream, _)) = listener.accept().await else {
+                        continue;
+                    };
                     let p = served.clone();
                     tokio::spawn(async move {
                         let svc = service_fn(move |req| handle(p.clone(), req));
@@ -161,13 +171,20 @@ fn parse_range(h: &str, size: u64) -> Option<(u64, u64)> {
         (size.saturating_sub(n), size - 1)
     } else {
         let s: u64 = a.parse().ok()?;
-        let e = if b.is_empty() { size - 1 } else { b.parse::<u64>().ok()?.min(size - 1) };
+        let e = if b.is_empty() {
+            size - 1
+        } else {
+            b.parse::<u64>().ok()?.min(size - 1)
+        };
         (s, e)
     };
     (start <= end && start < size).then_some((start, end))
 }
 
-async fn handle(p: Arc<Proxy>, req: Request<Incoming>) -> Result<Response<Full<Bytes>>, Infallible> {
+async fn handle(
+    p: Arc<Proxy>,
+    req: Request<Incoming>,
+) -> Result<Response<Full<Bytes>>, Infallible> {
     if req.method() == Method::OPTIONS {
         return Ok(cors(Response::builder().status(StatusCode::NO_CONTENT))
             .body(Full::new(Bytes::new()))
@@ -189,13 +206,20 @@ async fn handle(p: Arc<Proxy>, req: Request<Incoming>) -> Result<Response<Full<B
         .and_then(|v| v.to_str().ok())
         .map(|r| parse_range(r, obj.size));
     if let Some(None) = range {
-        return Ok(cors(Response::builder().status(StatusCode::RANGE_NOT_SATISFIABLE))
-            .header(header::CONTENT_RANGE, format!("bytes */{}", obj.size))
-            .body(Full::new(Bytes::new()))
-            .unwrap());
+        return Ok(
+            cors(Response::builder().status(StatusCode::RANGE_NOT_SATISFIABLE))
+                .header(header::CONTENT_RANGE, format!("bytes */{}", obj.size))
+                .body(Full::new(Bytes::new()))
+                .unwrap(),
+        );
     }
     let range = range.flatten();
-    log::debug!("{} {} range={range:?} size={}", req.method(), obj.path, obj.size);
+    log::debug!(
+        "{} {} range={range:?} size={}",
+        req.method(),
+        obj.path,
+        obj.size
+    );
     let (start, end) = range.unwrap_or((0, obj.size.saturating_sub(1)));
     let len = if obj.size == 0 { 0 } else { end - start + 1 };
 
@@ -207,8 +231,10 @@ async fn handle(p: Arc<Proxy>, req: Request<Incoming>) -> Result<Response<Full<B
         b = b.header(header::LAST_MODIFIED, lm.as_str());
     }
     b = if range.is_some() {
-        b.status(StatusCode::PARTIAL_CONTENT)
-            .header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{}", obj.size))
+        b.status(StatusCode::PARTIAL_CONTENT).header(
+            header::CONTENT_RANGE,
+            format!("bytes {start}-{end}/{}", obj.size),
+        )
     } else {
         b.status(StatusCode::OK)
     };
@@ -240,7 +266,11 @@ async fn resolve(client: &reqwest::Client, url: &str) -> Result<String, String> 
         .await
         .map_err(|e| format!("resolve {url}: {e}"))?;
     if resp.status().is_redirection() {
-        if let Some(loc) = resp.headers().get(reqwest::header::LOCATION).and_then(|v| v.to_str().ok()) {
+        if let Some(loc) = resp
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|v| v.to_str().ok())
+        {
             // Location may be relative to the requested URL.
             return reqwest::Url::parse(url)
                 .and_then(|base| base.join(loc))
@@ -313,7 +343,9 @@ async fn http_range(
                     tokio::time::sleep(backoff_delay(attempt)).await;
                     continue;
                 }
-                return Err(format!("range get {url}: {e} after {MAX_ATTEMPTS} attempts"));
+                return Err(format!(
+                    "range get {url}: {e} after {MAX_ATTEMPTS} attempts"
+                ));
             }
         };
 
@@ -342,7 +374,11 @@ async fn http_range(
 async fn fetch(obj: &Object, start: u64, end: u64) -> Result<Bytes, String> {
     let range = format!("bytes={start}-{end}");
     let data = match &obj.source {
-        Source::S3 { client, bucket, key } => {
+        Source::S3 {
+            client,
+            bucket,
+            key,
+        } => {
             let out = client
                 .get_object()
                 .bucket(bucket)
@@ -350,8 +386,17 @@ async fn fetch(obj: &Object, start: u64, end: u64) -> Result<Bytes, String> {
                 .range(range)
                 .send()
                 .await
-                .map_err(|e| format!("S3 range get {key}: {}", aws_sdk_s3::error::DisplayErrorContext(e)))?;
-            out.body.collect().await.map_err(|e| e.to_string())?.into_bytes()
+                .map_err(|e| {
+                    format!(
+                        "S3 range get {key}: {}",
+                        aws_sdk_s3::error::DisplayErrorContext(e)
+                    )
+                })?;
+            out.body
+                .collect()
+                .await
+                .map_err(|e| e.to_string())?
+                .into_bytes()
         }
         Source::Local { path } => {
             let path = path.clone();
@@ -359,7 +404,11 @@ async fn fetch(obj: &Object, start: u64, end: u64) -> Result<Bytes, String> {
                 .await
                 .map_err(|e| e.to_string())??
         }
-        Source::Http { client, url, resolved } => {
+        Source::Http {
+            client,
+            url,
+            resolved,
+        } => {
             let resp = http_range(client, url, resolved, &range).await?;
             let full = resp.status().as_u16() == 200;
             let body = resp.bytes().await.map_err(|e| format!("read {url}: {e}"))?;
@@ -383,13 +432,20 @@ fn read_local(path: &std::path::Path, start: u64, end: u64) -> Result<Bytes, Str
     let mut f = std::fs::File::open(path).map_err(|e| format!("open {}: {e}", path.display()))?;
     f.seek(SeekFrom::Start(start)).map_err(|e| e.to_string())?;
     let mut buf = vec![0u8; (end - start + 1) as usize];
-    f.read_exact(&mut buf).map_err(|e| format!("read {}: {e}", path.display()))?;
+    f.read_exact(&mut buf)
+        .map_err(|e| format!("read {}: {e}", path.display()))?;
     Ok(Bytes::from(buf))
 }
 
 /// Serve [start, end] from the block cache, fetching missing blocks from S3 in
 /// as few contiguous range requests as possible.
-async fn read_range(p: &Proxy, id: &str, obj: &Object, start: u64, end: u64) -> Result<Bytes, String> {
+async fn read_range(
+    p: &Proxy,
+    id: &str,
+    obj: &Object,
+    start: u64,
+    end: u64,
+) -> Result<Bytes, String> {
     // Local files are already one seek away (and in the OS page cache); keep
     // the block cache for remote objects.
     if matches!(obj.source, Source::Local { .. }) {
@@ -490,12 +546,17 @@ fn handle_for(p: &Proxy, id: &str, path: &str, size: u64) -> StreamHandle {
 /// Register `s3://bucket/key` views with the local stream proxy and return a
 /// 127.0.0.1 URL per view that DuckDB can range-read. Only a HEAD request is
 /// made here; the data itself is fetched lazily as queries need it.
-pub async fn register(bucket: &str, paths: &[String]) -> Result<BTreeMap<String, StreamHandle>, String> {
+pub async fn register(
+    bucket: &str,
+    paths: &[String],
+) -> Result<BTreeMap<String, StreamHandle>, String> {
     let p = proxy().await?;
     let client = client_for_bucket(bucket).await?;
     let mut out = BTreeMap::new();
     for path in paths {
-        let key = path.trim_start_matches(&format!("s3://{bucket}/")).to_string();
+        let key = path
+            .trim_start_matches(&format!("s3://{bucket}/"))
+            .to_string();
         let id = object_id(path);
         let existing = p.objects.lock().unwrap().get(&id).cloned();
         let obj = match existing {
@@ -507,14 +568,23 @@ pub async fn register(bucket: &str, paths: &[String]) -> Result<BTreeMap<String,
                     .key(&key)
                     .send()
                     .await
-                    .map_err(|e| format!("S3 head {key}: {}", aws_sdk_s3::error::DisplayErrorContext(e)))?;
+                    .map_err(|e| {
+                        format!(
+                            "S3 head {key}: {}",
+                            aws_sdk_s3::error::DisplayErrorContext(e)
+                        )
+                    })?;
                 let o = Arc::new(Object {
                     path: path.clone(),
                     size: head.content_length().unwrap_or(0).max(0) as u64,
                     last_modified: head
                         .last_modified()
                         .and_then(|d| d.fmt(aws_sdk_s3::primitives::DateTimeFormat::HttpDate).ok()),
-                    source: Source::S3 { client: client.clone(), bucket: bucket.to_string(), key: key.clone() },
+                    source: Source::S3 {
+                        client: client.clone(),
+                        bucket: bucket.to_string(),
+                        key: key.clone(),
+                    },
                     fetched: AtomicU64::new(0),
                     requests: AtomicU64::new(0),
                 });
@@ -539,7 +609,9 @@ pub async fn register_http(urls: &[String]) -> Result<BTreeMap<String, StreamHan
     for url in urls {
         // Only the quantms portal: the proxy must not fetch arbitrary hosts.
         if !url.starts_with("https://browse.quantms.org/") {
-            return Err(format!("{url}: only https://browse.quantms.org files can be streamed"));
+            return Err(format!(
+                "{url}: only https://browse.quantms.org files can be streamed"
+            ));
         }
         let id = object_id(url);
         let existing = p.objects.lock().unwrap().get(&id).cloned();
@@ -554,7 +626,11 @@ pub async fn register_http(urls: &[String]) -> Result<BTreeMap<String, StreamHan
                     .and_then(|v| v.to_str().ok())
                     .and_then(|v| v.rsplit('/').next())
                     .and_then(|v| v.parse::<u64>().ok())
-                    .or_else(|| (resp.status().as_u16() == 200).then(|| resp.content_length()).flatten())
+                    .or_else(|| {
+                        (resp.status().as_u16() == 200)
+                            .then(|| resp.content_length())
+                            .flatten()
+                    })
                     .ok_or_else(|| format!("{url}: server does not support range requests"))?;
                 let last_modified = h
                     .get(reqwest::header::LAST_MODIFIED)
@@ -564,7 +640,11 @@ pub async fn register_http(urls: &[String]) -> Result<BTreeMap<String, StreamHan
                     path: url.clone(),
                     size: total,
                     last_modified,
-                    source: Source::Http { client: client.clone(), url: url.clone(), resolved },
+                    source: Source::Http {
+                        client: client.clone(),
+                        url: url.clone(),
+                        resolved,
+                    },
                     fetched: AtomicU64::new(0),
                     requests: AtomicU64::new(0),
                 });
@@ -622,7 +702,13 @@ pub async fn register_local(paths: &[String]) -> Result<BTreeMap<String, StreamH
             .and_then(|n| n.to_str())
             .unwrap_or("file.parquet")
             .chars()
-            .map(|c| if c.is_ascii_alphanumeric() || "._-".contains(c) { c } else { '_' })
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || "._-".contains(c) {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect();
         out.insert(path.clone(), handle_for(&p, &id, &name, size));
     }
@@ -631,7 +717,9 @@ pub async fn register_local(paths: &[String]) -> Result<BTreeMap<String, StreamH
 
 /// Bytes actually pulled per streamed view (keyed by its `s3://` / https path).
 pub fn stats() -> BTreeMap<String, StreamStat> {
-    let Some(p) = PROXY.get() else { return BTreeMap::new() };
+    let Some(p) = PROXY.get() else {
+        return BTreeMap::new();
+    };
     let objects = p.objects.lock().unwrap();
     objects
         .values()
@@ -663,7 +751,9 @@ pub async fn stream_http_urls(urls: Vec<String>) -> Result<BTreeMap<String, Stre
 }
 
 #[tauri::command]
-pub async fn stream_local_files(paths: Vec<String>) -> Result<BTreeMap<String, StreamHandle>, String> {
+pub async fn stream_local_files(
+    paths: Vec<String>,
+) -> Result<BTreeMap<String, StreamHandle>, String> {
     register_local(&paths).await
 }
 
@@ -691,7 +781,9 @@ mod tests {
 
     #[tokio::test]
     async fn register_local_rejects_non_parquet() {
-        let err = register_local(&["/etc/hosts".to_string()]).await.unwrap_err();
+        let err = register_local(&["/etc/hosts".to_string()])
+            .await
+            .unwrap_err();
         assert!(err.contains("only .parquet"));
     }
 }

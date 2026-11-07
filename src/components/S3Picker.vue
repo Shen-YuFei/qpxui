@@ -9,7 +9,6 @@ const bucket = ref("");
 const prefix = ref("");
 const busy = ref(false);
 const error = ref("");
-const showAdvanced = ref(false);
 const listing = ref<S3Listing | null>(null);
 const checked = ref<Record<string, boolean>>({});
 const downloadId = ref("");

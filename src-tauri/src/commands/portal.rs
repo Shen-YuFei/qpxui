@@ -28,7 +28,8 @@ fn safe_component(s: &str) -> bool {
     !s.is_empty()
         && s != "."
         && !s.contains("..")
-        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
 /// Cache folder for one run of a dataset (`<PXD>/<run-hash>`), so runs of the
@@ -83,14 +84,15 @@ async fn remote_size(client: &Client, url: &str, token: &AtomicBool) -> Result<u
         // length. On a 206 without a size the probe read is one byte, which
         // is not a real total, so don't trust it.
         let status = r.status();
-        Ok(total.or_else(|| {
-            if status == reqwest::StatusCode::OK {
-                r.content_length()
-            } else {
-                None
-            }
-        })
-        .unwrap_or(0))
+        Ok(total
+            .or_else(|| {
+                if status == reqwest::StatusCode::OK {
+                    r.content_length()
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(0))
     })
     .await?;
     Ok(total)
@@ -104,7 +106,9 @@ fn cache_root() -> Result<PathBuf, String> {
 }
 
 async fn get_html(url: &str) -> Result<String, String> {
-    let client = portal_http::client_builder()?.build().map_err(|e| format!("portal HTTP client: {e:?}"))?;
+    let client = portal_http::client_builder()?
+        .build()
+        .map_err(|e| format!("portal HTTP client: {e:?}"))?;
     let resp = client
         .get(url)
         .header("Accept", "text/html")
@@ -114,10 +118,7 @@ async fn get_html(url: &str) -> Result<String, String> {
     if !resp.status().is_success() {
         return Err(format!("request {url}: HTTP {}", resp.status()));
     }
-    let body = resp
-        .text()
-        .await
-        .map_err(|e| format!("read {url}: {e}"))?;
+    let body = resp.text().await.map_err(|e| format!("read {url}: {e}"))?;
     Ok(body)
 }
 
@@ -127,12 +128,16 @@ fn extract_links(html: &str) -> Vec<(String, String)> {
     let mut rest = html;
     while let Some(rel) = rest.find("<a href=\"") {
         let after = &rest[rel + 9..];
-        let Some(end_href) = after.find('"') else { break };
+        let Some(end_href) = after.find('"') else {
+            break;
+        };
         let href = &after[..end_href];
         let rest2 = &after[end_href + 1..];
         let Some(gt) = rest2.find('>') else { break };
         let between = &rest2[gt + 1..];
-        let Some(close) = between.find("</a>") else { break };
+        let Some(close) = between.find("</a>") else {
+            break;
+        };
         let text = between[..close].trim();
         out.push((href.to_string(), text.to_string()));
         rest = &between[close + 4..];
@@ -185,7 +190,9 @@ fn parquet_entries(html: &str) -> Vec<(String, u64)> {
     let mut rest = html;
     while let Some(rel) = rest.find("<a href=\"") {
         let after = &rest[rel + 9..];
-        let Some(end_href) = after.find('"') else { break };
+        let Some(end_href) = after.find('"') else {
+            break;
+        };
         let href = &after[..end_href];
         if !href.ends_with(".parquet") {
             rest = &after[end_href..];
@@ -194,7 +201,9 @@ fn parquet_entries(html: &str) -> Vec<(String, u64)> {
         let rest2 = &after[end_href + 1..];
         let Some(gt) = rest2.find('>') else { break };
         let between = &rest2[gt + 1..];
-        let Some(close) = between.find("</a>") else { break };
+        let Some(close) = between.find("</a>") else {
+            break;
+        };
         let name = between[..close].trim();
         // After `</a>` comes whitespace, `&nbsp;`, then the size, then `<br>`.
         let after_close = &between[close + 4..];
@@ -265,7 +274,10 @@ pub struct PortalDataset {
     pub dataset_ref: Option<String>,
     #[serde(default, rename(deserialize = "px_url", serialize = "pxUrl"))]
     pub px_url: Option<String>,
-    #[serde(default, rename(deserialize = "collection_title", serialize = "collectionTitle"))]
+    #[serde(
+        default,
+        rename(deserialize = "collection_title", serialize = "collectionTitle")
+    )]
     pub collection_title: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
@@ -307,12 +319,11 @@ struct DatasetSearchPage {
 #[tauri::command]
 pub async fn portal_registry(page_size: Option<usize>) -> Result<Vec<PortalDataset>, String> {
     let page_size = page_size.unwrap_or(50).clamp(1, 100);
-    let client = portal_http::client_builder()?.build().map_err(|e| format!("portal HTTP client: {e:?}"))?;
+    let client = portal_http::client_builder()?
+        .build()
+        .map_err(|e| format!("portal HTTP client: {e:?}"))?;
 
-    async fn get_page(
-        client: &Client,
-        url: &str,
-    ) -> Result<DatasetSearchPage, String> {
+    async fn get_page(client: &Client, url: &str) -> Result<DatasetSearchPage, String> {
         let mut last = "no attempt".to_string();
         for _ in 0..3 {
             match client.get(url).send().await {
@@ -339,7 +350,9 @@ pub async fn portal_registry(page_size: Option<usize>) -> Result<Vec<PortalDatas
     for p in 2..=total_pages {
         let page = get_page(
             &client,
-            &format!("https://api.quantms.org/dataset-search/datasets?page_size={page_size}&page={p}"),
+            &format!(
+                "https://api.quantms.org/dataset-search/datasets?page_size={page_size}&page={p}"
+            ),
         )
         .await?;
         all.extend(page.datasets);
@@ -347,7 +360,11 @@ pub async fn portal_registry(page_size: Option<usize>) -> Result<Vec<PortalDatas
     // One accession can hold several runs (e.g. PXD014877 has one per
     // organism), so the run ref, not the accession, identifies an entry.
     let key = |d: &PortalDataset| d.dataset_ref.clone().unwrap_or_else(|| d.accession.clone());
-    all.sort_by(|a, b| a.accession.cmp(&b.accession).then_with(|| key(a).cmp(&key(b))));
+    all.sort_by(|a, b| {
+        a.accession
+            .cmp(&b.accession)
+            .then_with(|| key(a).cmp(&key(b)))
+    });
     all.dedup_by(|a, b| key(a) == key(b));
     Ok(all)
 }
@@ -397,7 +414,10 @@ pub struct CollectionOption {
     pub name: String,
     #[serde(default)]
     pub title: Option<String>,
-    #[serde(default, rename(deserialize = "dataset_count", serialize = "datasetCount"))]
+    #[serde(
+        default,
+        rename(deserialize = "dataset_count", serialize = "datasetCount")
+    )]
     pub dataset_count: usize,
 }
 
@@ -415,7 +435,9 @@ pub async fn portal_search(
     page: Option<usize>,
     page_size: Option<usize>,
 ) -> Result<PortalSearchResult, String> {
-    let client = portal_http::client_builder()?.build().map_err(|e| format!("portal HTTP client: {e:?}"))?;
+    let client = portal_http::client_builder()?
+        .build()
+        .map_err(|e| format!("portal HTTP client: {e:?}"))?;
 
     let mut url = reqwest::Url::parse("https://api.quantms.org/dataset-search/datasets")
         .map_err(|e| format!("bad search URL: {e}"))?;
@@ -432,7 +454,10 @@ pub async fn portal_search(
         add("instrument", instrument.as_deref());
         add("sort", sort.as_deref());
         qp.append_pair("page", &page.unwrap_or(1).max(1).to_string());
-        qp.append_pair("page_size", &page_size.unwrap_or(50).clamp(1, 100).to_string());
+        qp.append_pair(
+            "page_size",
+            &page_size.unwrap_or(50).clamp(1, 100).to_string(),
+        );
     }
 
     let raw = client
@@ -458,7 +483,9 @@ pub async fn portal_search(
 /// Facet options (organisms, instruments, collections) for the discover UI.
 #[tauri::command]
 pub async fn portal_facets() -> Result<PortalFacets, String> {
-    let client = portal_http::client_builder()?.build().map_err(|e| format!("portal HTTP client: {e:?}"))?;
+    let client = portal_http::client_builder()?
+        .build()
+        .map_err(|e| format!("portal HTTP client: {e:?}"))?;
 
     async fn get_json(client: &Client, url: &str) -> Result<serde_json::Value, String> {
         let mut last = "no attempt".to_string();
@@ -501,7 +528,11 @@ pub async fn portal_facets() -> Result<PortalFacets, String> {
         collections: Vec<CollectionOption>,
     }
     let colls: CollectionsRaw = serde_json::from_value(
-        get_json(&client, "https://api.quantms.org/dataset-search/collections").await?,
+        get_json(
+            &client,
+            "https://api.quantms.org/dataset-search/collections",
+        )
+        .await?,
     )
     .map_err(|e| format!("collections: {e}"))?;
 
@@ -548,7 +579,9 @@ pub async fn portal_list_views(
             let run = pick_run(&ds_url, &ds_html, organism.as_deref(), psm_count)
                 .await
                 .map_err(|e| match &wanted {
-                    Some(run) => format!("the registry's run {accession}/{run} is gone from the portal; {e}"),
+                    Some(run) => {
+                        format!("the registry's run {accession}/{run} is gone from the portal; {e}")
+                    }
                     None => e,
                 })?;
             let run_url = format!("{ds_url}{run}/");
@@ -588,7 +621,12 @@ pub async fn portal_list_views(
 fn run_subdirs(html: &str) -> Vec<String> {
     let mut runs: Vec<String> = extract_links(html)
         .into_iter()
-        .filter_map(|(href, _)| href.trim_end_matches('/').rsplit('/').next().map(str::to_string))
+        .filter_map(|(href, _)| {
+            href.trim_end_matches('/')
+                .rsplit('/')
+                .next()
+                .map(str::to_string)
+        })
         .filter(|last| last.len() >= 8 && last.chars().all(|c| c.is_ascii_hexdigit()))
         .collect();
     runs.dedup();
@@ -622,13 +660,27 @@ fn run_info(run: String, p: RunProvenance) -> RunInfo {
         .map(|(prefix, _, _)| prefix)
         .next()
         .unwrap_or_default();
-    let organism = p.stats.get("organism").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let organism = p
+        .stats
+        .get("organism")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let psms = p.stats.get("psms").and_then(|v| v.as_u64());
-    RunInfo { run, committed_at: p.committed_at, organism, prefix, psms }
+    RunInfo {
+        run,
+        committed_at: p.committed_at,
+        organism,
+        prefix,
+        psms,
+    }
 }
 
 fn norm(s: &str) -> String {
-    s.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_lowercase()
+    s.chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_lowercase()
 }
 
 /// Choose the run of an accession to open. Runs without QPX parquet files are
@@ -636,12 +688,16 @@ fn norm(s: &str) -> String {
 /// PXD014877, one per enzyme in PXD009737), so the registry's PSM count, then
 /// its organism, narrow the runs to one prefix; runs sharing a prefix are
 /// versions of it, and the newest wins.
-fn choose_run(runs: Vec<RunInfo>, organism: Option<&str>, psm_count: Option<u64>) -> Result<String, String> {
+fn choose_run(
+    runs: Vec<RunInfo>,
+    organism: Option<&str>,
+    psm_count: Option<u64>,
+) -> Result<String, String> {
     let mut runs: Vec<RunInfo> = runs.into_iter().filter(|r| !r.prefix.is_empty()).collect();
     if runs.is_empty() {
         return Err("it has no run with QPX parquet files".to_string());
     }
-    runs.sort_by(|a, b| b.committed_at.cmp(&a.committed_at));
+    runs.sort_by_key(|r| std::cmp::Reverse(r.committed_at));
     let narrow = |runs: &mut Vec<RunInfo>, keep: &dyn Fn(&RunInfo) -> bool| {
         if runs.iter().any(keep) {
             runs.retain(|r| keep(r));
@@ -660,7 +716,10 @@ fn choose_run(runs: Vec<RunInfo>, organism: Option<&str>, psm_count: Option<u64>
     let mut names: Vec<&str> = runs.iter().map(|r| r.prefix.as_str()).collect();
     names.sort();
     names.dedup();
-    Err(format!("it holds separate runs ({}) and none matches this entry", names.join(", ")))
+    Err(format!(
+        "it holds separate runs ({}) and none matches this entry",
+        names.join(", ")
+    ))
 }
 
 async fn pick_run(
@@ -676,17 +735,29 @@ async fn pick_run(
     if runs.len() == 1 {
         return Ok(runs[0].clone());
     }
-    let client = portal_http::client_builder()?.build().map_err(|e| format!("portal HTTP client: {e:?}"))?;
+    let client = portal_http::client_builder()?
+        .build()
+        .map_err(|e| format!("portal HTTP client: {e:?}"))?;
     let fetches = runs.into_iter().map(|run| {
         let client = client.clone();
         let url = format!("{ds_url}{run}/provenance.json");
         async move {
-            let p = client.get(&url).send().await.ok()?.error_for_status().ok()?;
+            let p = client
+                .get(&url)
+                .send()
+                .await
+                .ok()?
+                .error_for_status()
+                .ok()?;
             let p: RunProvenance = p.json().await.ok()?;
             Some(run_info(run, p))
         }
     });
-    let infos: Vec<RunInfo> = futures::future::join_all(fetches).await.into_iter().flatten().collect();
+    let infos: Vec<RunInfo> = futures::future::join_all(fetches)
+        .await
+        .into_iter()
+        .flatten()
+        .collect();
     choose_run(infos, organism, psm_count)
 }
 
@@ -708,7 +779,9 @@ async fn portal_cache_views_impl(
     cancel_id: String,
     urls: Vec<String>,
 ) -> Result<Vec<ViewInfo>, String> {
-    let client = portal_http::client_builder()?.build().map_err(|e| format!("portal HTTP client: {e:?}"))?;
+    let client = portal_http::client_builder()?
+        .build()
+        .map_err(|e| format!("portal HTTP client: {e:?}"))?;
     let root = cache_root()?;
     std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
 
@@ -743,7 +816,9 @@ async fn portal_cache_views_impl(
             let size = if local.exists() {
                 0
             } else {
-                remote_size(&client, url, &token).await.map_err(|e| format!("size of {name}: {e}"))?
+                remote_size(&client, url, &token)
+                    .await
+                    .map_err(|e| format!("size of {name}: {e}"))?
             };
             need = need.saturating_add(size);
             sizes.push(size);
@@ -755,9 +830,8 @@ async fn portal_cache_views_impl(
             if xfers::is_cancelled(&token) {
                 return Err("cancelled".to_string());
             }
-            let (_, view, format) = crate::qpx::parse_filename(&name).unwrap_or_else(|| {
-                (String::new(), String::new(), "parquet".to_string())
-            });
+            let (_, view, format) = crate::qpx::parse_filename(&name)
+                .unwrap_or_else(|| (String::new(), String::new(), "parquet".to_string()));
             std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
             let size = if local.exists() {
                 std::fs::metadata(&local).map(|m| m.len()).unwrap_or(0)
@@ -787,7 +861,9 @@ async fn portal_cache_views_impl(
                 loop {
                     let next = match tokio::time::timeout(xfers::POLL, stream.next()).await {
                         Ok(n) => n,
-                        Err(_) if xfers::is_cancelled(&token) => return Err("cancelled".to_string()),
+                        Err(_) if xfers::is_cancelled(&token) => {
+                            return Err("cancelled".to_string())
+                        }
                         Err(_) => continue,
                     };
                     if xfers::is_cancelled(&token) {
@@ -801,7 +877,10 @@ async fn portal_cache_views_impl(
                     }
                 }
                 if total > 0 && part.written != total {
-                    return Err(format!("download {name}: got {} of {} bytes", part.written, total));
+                    return Err(format!(
+                        "download {name}: got {} of {} bytes",
+                        part.written, total
+                    ));
                 }
                 let done = part.finish().await?;
                 if let Some(app) = app {
@@ -841,9 +920,14 @@ mod tests {
     #[tokio::test]
     async fn portal_lists_and_downloads_pxd014414() {
         let ds = "PXD014414".to_string();
-        let views = portal_list_views(ds.clone(), None, None).await.expect("list views");
+        let views = portal_list_views(ds.clone(), None, None)
+            .await
+            .expect("list views");
         assert!(!views.is_empty(), "expected views for {ds}");
-        assert!(views.iter().any(|v| v.size_bytes > 0), "sizes should be > 0");
+        assert!(
+            views.iter().any(|v| v.size_bytes > 0),
+            "sizes should be > 0"
+        );
 
         let url = views
             .iter()
@@ -866,12 +950,18 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             loop {
-                let Ok((mut sock, _)) = listener.accept().await else { return };
+                let Ok((mut sock, _)) = listener.accept().await else {
+                    return;
+                };
                 tokio::spawn(async move {
                     let mut buf = [0u8; 2048];
                     let n = sock.read(&mut buf).await.unwrap_or(0);
-                    let head = std::str::from_utf8(&buf[..n]).unwrap_or("").starts_with("HEAD");
-                    let hdr = format!("HTTP/1.1 200 OK\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n");
+                    let head = std::str::from_utf8(&buf[..n])
+                        .unwrap_or("")
+                        .starts_with("HEAD");
+                    let hdr = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n"
+                    );
                     if sock.write_all(hdr.as_bytes()).await.is_err() || head {
                         return;
                     }
@@ -889,13 +979,16 @@ mod tests {
     }
 
     /// HTTP server like the portal's: HEAD is 405, GET honours `Range`.
-    async fn no_head_server(body: Vec<u8>) -> String {        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    async fn no_head_server(body: Vec<u8>) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let body = std::sync::Arc::new(body);
         tokio::spawn(async move {
             loop {
-                let Ok((mut sock, _)) = listener.accept().await else { return };
+                let Ok((mut sock, _)) = listener.accept().await else {
+                    return;
+                };
                 let body = body.clone();
                 tokio::spawn(async move {
                     let mut buf = [0u8; 4096];
@@ -912,7 +1005,11 @@ mod tests {
                         r.push(body[0]);
                         r
                     } else {
-                        let mut r = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).into_bytes();
+                        let mut r = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        )
+                        .into_bytes();
                         r.extend_from_slice(&body);
                         r
                     };
@@ -928,11 +1025,18 @@ mod tests {
         let body: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
         let base = no_head_server(body.clone()).await;
         let client = Client::new();
-        assert_eq!(remote_size(&client, &format!("{base}/x"), &AtomicBool::new(false)).await.unwrap(), body.len() as u64);
+        assert_eq!(
+            remote_size(&client, &format!("{base}/x"), &AtomicBool::new(false))
+                .await
+                .unwrap(),
+            body.len() as u64
+        );
 
         let name = format!("nohead-test-{}.feature.parquet", std::process::id());
         let url = format!("{base}/{name}");
-        let out = portal_cache_views_impl(None, "nohead".into(), vec![url]).await.expect("download");
+        let out = portal_cache_views_impl(None, "nohead".into(), vec![url])
+            .await
+            .expect("download");
         let got = std::fs::read(&out[0].path).unwrap();
         std::fs::remove_file(&out[0].path).ok();
         assert_eq!(got, body);
@@ -947,16 +1051,26 @@ mod tests {
         let body = std::sync::Arc::new(body);
         tokio::spawn(async move {
             loop {
-                let Ok((mut sock, _)) = listener.accept().await else { return };
+                let Ok((mut sock, _)) = listener.accept().await else {
+                    return;
+                };
                 let body = body.clone();
                 tokio::spawn(async move {
                     let mut buf = [0u8; 4096];
                     let n = sock.read(&mut buf).await.unwrap_or(0);
                     let req = String::from_utf8_lossy(&buf[..n]).to_lowercase();
                     let resp = if req.starts_with("head") {
-                        format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).into_bytes()
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        )
+                        .into_bytes()
                     } else {
-                        let mut r = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).into_bytes();
+                        let mut r = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        )
+                        .into_bytes();
                         r.extend_from_slice(&body);
                         r
                     };
@@ -972,7 +1086,12 @@ mod tests {
         let body: Vec<u8> = (0..10_000u32).map(|i| (i % 253) as u8).collect();
         let base = head_server(body.clone()).await;
         let client = Client::new();
-        assert_eq!(remote_size(&client, &format!("{base}/x"), &AtomicBool::new(false)).await.unwrap(), body.len() as u64);
+        assert_eq!(
+            remote_size(&client, &format!("{base}/x"), &AtomicBool::new(false))
+                .await
+                .unwrap(),
+            body.len() as u64
+        );
     }
 
     #[tokio::test]
@@ -987,7 +1106,9 @@ mod tests {
         let body: Vec<u8> = (0..100_000u32).map(|i| (i % 7) as u8).collect();
         let base = no_head_server(body.clone()).await;
         let url = format!("{base}/after-cancel-{}.pg.parquet", std::process::id());
-        let out = portal_cache_views_impl(None, "second".into(), vec![url]).await.expect("second download");
+        let out = portal_cache_views_impl(None, "second".into(), vec![url])
+            .await
+            .expect("second download");
         let got = std::fs::read(&out[0].path).unwrap();
         std::fs::remove_file(&out[0].path).ok();
         assert_eq!(got, body);
@@ -999,7 +1120,11 @@ mod tests {
         let name = format!("cancel-test-{}.feature.parquet", std::process::id());
         let local = cache_root().unwrap().join(&name);
         let id = format!("test-cancel-{}", std::process::id());
-        let task = tokio::spawn(portal_cache_views_impl(None, id.clone(), vec![format!("{base}/{name}")]));
+        let task = tokio::spawn(portal_cache_views_impl(
+            None,
+            id.clone(),
+            vec![format!("{base}/{name}")],
+        ));
         let part = local.with_file_name(format!("{name}.part"));
         for _ in 0..100 {
             if part.exists() && std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0) > 0 {
@@ -1009,16 +1134,23 @@ mod tests {
         }
         assert!(part.exists(), "download should have started");
         assert!(xfers::cancel(&id));
-        let r = tokio::time::timeout(std::time::Duration::from_secs(5), task).await.expect("cancel is prompt").unwrap();
+        let r = tokio::time::timeout(std::time::Duration::from_secs(5), task)
+            .await
+            .expect("cancel is prompt")
+            .unwrap();
         assert_eq!(r.unwrap_err(), "cancelled");
-        assert!(!part.exists() && !local.exists(), "partial download must be removed");
+        assert!(
+            !part.exists() && !local.exists(),
+            "partial download must be removed"
+        );
     }
 
     #[tokio::test]
     async fn refuses_download_that_does_not_fit() {
         let base = slow_server(1 << 50).await; // 1 PB
         let name = format!("huge-test-{}.feature.parquet", std::process::id());
-        let r = portal_cache_views_impl(None, "test-huge".into(), vec![format!("{base}/{name}")]).await;
+        let r =
+            portal_cache_views_impl(None, "test-huge".into(), vec![format!("{base}/{name}")]).await;
         let e = r.unwrap_err();
         assert!(e.starts_with("Not enough disk space"), "{e}");
         let local = cache_root().unwrap().join(&name);
@@ -1026,7 +1158,13 @@ mod tests {
     }
 
     fn info(run: &str, at: i64, organism: &str, prefix: &str, psms: u64) -> RunInfo {
-        RunInfo { run: run.into(), committed_at: at, organism: organism.into(), prefix: prefix.into(), psms: Some(psms) }
+        RunInfo {
+            run: run.into(),
+            committed_at: at,
+            organism: organism.into(),
+            prefix: prefix.into(),
+            psms: Some(psms),
+        }
     }
 
     #[test]
@@ -1044,15 +1182,27 @@ mod tests {
                 info("lysc", 2, "Homo sapiens", "PXD009737-LysC", 428263),
             ]
         };
-        assert_eq!(choose_run(enzymes(), Some("homo sapiens"), Some(428263)).unwrap(), "lysc");
+        assert_eq!(
+            choose_run(enzymes(), Some("homo sapiens"), Some(428263)).unwrap(),
+            "lysc"
+        );
         assert!(choose_run(enzymes(), Some("homo sapiens"), None).is_err());
         let organisms = || {
             vec![
-                info("vp", 1, "Veillonella parvula", "PXD014877-Veillonella-parvula", 10),
+                info(
+                    "vp",
+                    1,
+                    "Veillonella parvula",
+                    "PXD014877-Veillonella-parvula",
+                    10,
+                ),
                 info("dr", 1, "Danio rerio", "PXD014877-Danio-rerio", 20),
             ]
         };
-        assert_eq!(choose_run(organisms(), Some("danio rerio"), Some(99)).unwrap(), "dr");
+        assert_eq!(
+            choose_run(organisms(), Some("danio rerio"), Some(99)).unwrap(),
+            "dr"
+        );
         assert!(choose_run(organisms(), Some("gallus gallus"), None).is_err());
     }
 
@@ -1068,7 +1218,11 @@ mod tests {
     #[tokio::test]
     async fn registry_lists_and_ref_resolves() {
         let rows = portal_registry(Some(100)).await.expect("registry");
-        assert!(rows.len() >= 80, "expected ~83 unique datasets, got {}", rows.len());
+        assert!(
+            rows.len() >= 80,
+            "expected ~83 unique datasets, got {}",
+            rows.len()
+        );
         let with_ref = rows
             .iter()
             .find(|r| r.dataset_ref.is_some())

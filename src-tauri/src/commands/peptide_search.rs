@@ -22,7 +22,10 @@ pub struct PsHit {
     pub collection: Option<String>,
     #[serde(default)]
     pub organism: Option<String>,
-    #[serde(default, rename(deserialize = "organism_part", serialize = "organismPart"))]
+    #[serde(
+        default,
+        rename(deserialize = "organism_part", serialize = "organismPart")
+    )]
     pub organism_part: Option<String>,
     #[serde(default)]
     pub disease: Option<String>,
@@ -32,13 +35,19 @@ pub struct PsHit {
     pub dataset_url: String,
     #[serde(default, rename(deserialize = "px_url", serialize = "pxUrl"))]
     pub px_url: Option<String>,
-    #[serde(default, rename(deserialize = "n_peptidoforms", serialize = "nPeptidoforms"))]
+    #[serde(
+        default,
+        rename(deserialize = "n_peptidoforms", serialize = "nPeptidoforms")
+    )]
     pub n_peptidoforms: u64,
     #[serde(default, rename(deserialize = "n_peptides", serialize = "nPeptides"))]
     pub n_peptides: u64,
     #[serde(default, rename(deserialize = "total_obs", serialize = "totalObs"))]
     pub total_obs: u64,
-    #[serde(default, rename(deserialize = "sample_peptidoforms", serialize = "samplePeptidoforms"))]
+    #[serde(
+        default,
+        rename(deserialize = "sample_peptidoforms", serialize = "samplePeptidoforms")
+    )]
     pub sample_peptidoforms: Vec<String>,
 }
 
@@ -80,7 +89,9 @@ pub struct PsModification {
 /// anything else is treated as a protein or gene identifier/name.
 fn looks_like_peptide(s: &str) -> bool {
     let t = s.trim();
-    t.len() >= 5 && t.chars().all(|c| c.is_ascii_alphabetic() && c.is_uppercase())
+    t.len() >= 5
+        && t.chars()
+            .all(|c| c.is_ascii_alphabetic() && c.is_uppercase())
 }
 
 fn non_empty(v: Option<&str>) -> Option<&str> {
@@ -119,7 +130,8 @@ pub async fn ps_search(
         }
     };
 
-    let mut url = reqwest::Url::parse(&format!("{BASE}/{path}")).map_err(|e| format!("bad URL: {e}"))?;
+    let mut url =
+        reqwest::Url::parse(&format!("{BASE}/{path}")).map_err(|e| format!("bad URL: {e}"))?;
     {
         let mut qp = url.query_pairs_mut();
         match kind.as_str() {

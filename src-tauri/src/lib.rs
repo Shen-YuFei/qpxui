@@ -1,7 +1,9 @@
 mod commands;
 mod qpx;
 
-pub use commands::s3stream::{register as stream_register, register_http as stream_register_http, stats as stream_stats};
+pub use commands::s3stream::{
+    register as stream_register, register_http as stream_register_http, stats as stream_stats,
+};
 
 pub fn run() {
     env_logger::init();

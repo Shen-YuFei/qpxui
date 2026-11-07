@@ -50,9 +50,7 @@ pub fn parse_filename(filename: &str) -> Option<(String, String, String)> {
             }
         }
     }
-    let mut it2 = rest.rsplitn(2, '.');
-    let view = it2.next()?;
-    let prefix = it2.next()?;
+    let (prefix, view) = rest.rsplit_once('.')?;
     if prefix.is_empty() || view.is_empty() {
         return None;
     }
@@ -163,10 +161,22 @@ mod tests {
     #[test]
     fn standard_and_msnet_names() {
         let t = |a: &str, b: &str, c: &str| Some((a.to_string(), b.to_string(), c.to_string()));
-        assert_eq!(p("PXD021013.feature.parquet"), t("PXD021013", "feature", "parquet"));
-        assert_eq!(p("PXD021013-MSNet.parquet"), t("PXD021013", "psm", "parquet"));
-        assert_eq!(p("PDC000219-MSNet.psm.parquet"), t("PDC000219", "psm", "parquet"));
-        assert_eq!(p("PXD019483-hCOV-MSNet.parquet"), t("PXD019483-hCOV", "psm", "parquet"));
+        assert_eq!(
+            p("PXD021013.feature.parquet"),
+            t("PXD021013", "feature", "parquet")
+        );
+        assert_eq!(
+            p("PXD021013-MSNet.parquet"),
+            t("PXD021013", "psm", "parquet")
+        );
+        assert_eq!(
+            p("PDC000219-MSNet.psm.parquet"),
+            t("PDC000219", "psm", "parquet")
+        );
+        assert_eq!(
+            p("PXD019483-hCOV-MSNet.parquet"),
+            t("PXD019483-hCOV", "psm", "parquet")
+        );
         assert_eq!(p("plain.parquet"), None);
     }
 }

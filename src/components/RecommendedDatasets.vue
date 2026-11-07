@@ -17,7 +17,6 @@ const viewBusy = ref(false);
 const downloading = ref(false);
 const downloadId = ref("");
 const cancelling = ref(false);
-const streamBusy = ref(false);
 
 function generateId(): string {
   return crypto?.randomUUID?.() ?? `r${Date.now()}-${Math.random().toString(36).slice(2)}`;

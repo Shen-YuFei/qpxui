@@ -37,7 +37,9 @@ pub fn scan_collection(path: String) -> Result<Vec<DatasetInfo>, String> {
     let root = PathBuf::from(&path);
     let datasets = qpx::collect_all(&root, "collection", 4);
     if datasets.is_empty() {
-        return Err("No QPX datasets (prefix.view.parquet files) found in this folder.".to_string());
+        return Err(
+            "No QPX datasets (prefix.view.parquet files) found in this folder.".to_string(),
+        );
     }
     Ok(datasets)
 }

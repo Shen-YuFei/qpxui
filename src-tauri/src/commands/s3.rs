@@ -58,7 +58,11 @@ pub(crate) async fn client_for_bucket(bucket: &str) -> Result<Client, String> {
     use std::sync::Mutex;
     static REGIONS: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
 
-    let cached = REGIONS.lock().unwrap().as_ref().and_then(|m| m.get(bucket).cloned());
+    let cached = REGIONS
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|m| m.get(bucket).cloned());
     if let Some(r) = cached {
         return client_in(Some(r)).await;
     }
@@ -72,7 +76,11 @@ pub(crate) async fn client_for_bucket(bucket: &str) -> Result<Client, String> {
     };
     match region {
         Some(r) if Some(r.as_str()) != base.config().region().map(|x| x.as_ref()) => {
-            REGIONS.lock().unwrap().get_or_insert_with(HashMap::new).insert(bucket.to_string(), r.clone());
+            REGIONS
+                .lock()
+                .unwrap()
+                .get_or_insert_with(HashMap::new)
+                .insert(bucket.to_string(), r.clone());
             client_in(Some(r)).await
         }
         _ => Ok(base),
@@ -169,14 +177,15 @@ pub async fn presign_s3_urls(
     let client = client().await?;
     let mut out = BTreeMap::new();
     for p in &paths {
-        let key = p
-            .trim_start_matches(&format!("s3://{bucket}/"))
-            .to_string();
+        let key = p.trim_start_matches(&format!("s3://{bucket}/")).to_string();
         let presigned = client
             .get_object()
             .bucket(&bucket)
             .key(&key)
-            .presigned(PresigningConfig::expires_in(Duration::from_secs(12 * 60 * 60)).map_err(|e| e.to_string())?)
+            .presigned(
+                PresigningConfig::expires_in(Duration::from_secs(12 * 60 * 60))
+                    .map_err(|e| e.to_string())?,
+            )
             .await
             .map_err(|e| format!("S3 presign {key}: {e}"))?;
         out.insert(p.clone(), presigned.uri().to_string());
@@ -211,9 +220,7 @@ pub async fn cache_s3_views(
             if xfers::is_cancelled(&token) {
                 return Err("cancelled".to_string());
             }
-            let key = p
-                .trim_start_matches(&format!("s3://{bucket}/"))
-                .to_string();
+            let key = p.trim_start_matches(&format!("s3://{bucket}/")).to_string();
             // Use the bucket as a top-level cache dir to avoid key collisions.
             let local = root.join(&bucket).join(key.replace('/', "_"));
             let size = if local.exists() {
@@ -245,9 +252,8 @@ pub async fn cache_s3_views(
                 return Err("cancelled".to_string());
             }
             let base = key.rsplit('/').next().unwrap_or(&key).to_string();
-            let (_, view, format) = qpx::parse_filename(&base).unwrap_or_else(|| {
-                (String::new(), String::new(), "parquet".to_string())
-            });
+            let (_, view, format) = qpx::parse_filename(&base)
+                .unwrap_or_else(|| (String::new(), String::new(), "parquet".to_string()));
             if let Some(parent) = local.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
             }
@@ -273,7 +279,9 @@ pub async fn cache_s3_views(
                 loop {
                     let next = match tokio::time::timeout(xfers::POLL, resp.body.try_next()).await {
                         Ok(n) => n.map_err(|e| e.to_string())?,
-                        Err(_) if xfers::is_cancelled(&token) => return Err("cancelled".to_string()),
+                        Err(_) if xfers::is_cancelled(&token) => {
+                            return Err("cancelled".to_string())
+                        }
                         Err(_) => continue,
                     };
                     if xfers::is_cancelled(&token) {
@@ -284,7 +292,10 @@ pub async fn cache_s3_views(
                     progress::chunk(&app, &base, part.written, head);
                 }
                 if head > 0 && part.written != head {
-                    return Err(format!("S3 get {key}: got {} of {} bytes", part.written, head));
+                    return Err(format!(
+                        "S3 get {key}: got {} of {} bytes",
+                        part.written, head
+                    ));
                 }
                 let done = part.finish().await?;
                 progress::done(&app, &base, done);
