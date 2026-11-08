@@ -62,7 +62,7 @@ Download the installer for your platform from the
 ## Quick start
 
 1. Launch QPX UI and pick a source:
-   - **🌍 Quantms portal**: pick a reanalysed dataset (for example `PXD014414`), then press **⚡ Stream**.
+   - **🌍 Quantms portal**: pick a reanalysed dataset (for example `PXD004452`), then press **⚡ Stream**.
    - **🔎 Discover quantms data**: search the portal's datasets, or find the datasets that contain a
      peptide, protein or gene; expand one to stream or download its views. The start page also
      lists a few recommended datasets.
@@ -348,7 +348,7 @@ pip install "qpx[all]"          # or convert your own search results to QPX
 qpxc convert diann --report-path report.tsv --sdrf-file data.sdrf.tsv --output-folder ./sample/PXD000000
 ```
 
-Many reanalysed datasets (e.g. `PXD014414`) can be opened directly with the **Quantms portal** source.
+Many reanalysed datasets (e.g. `PXD004452`) can be opened directly with the **Quantms portal** source.
 
 ---
 
