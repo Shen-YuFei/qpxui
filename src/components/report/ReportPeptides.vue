@@ -13,6 +13,7 @@ import { modificationCounts } from "../../lib/queries/ptms";
 import { fmtBytes, listText } from "../../lib/format";
 import { openProtein, state } from "../../store";
 import { COL } from "../../lib/qpx";
+import { isCancelled } from "../../lib/errors";
 
 const props = defineProps<{ ds: DatasetInfo; t: DatasetTables; fileBase: string; accession?: string }>();
 
@@ -35,6 +36,7 @@ const sorted = computed(() => {
 const waiting = ref(false);
 const modsLoaded = ref(false);
 const modsBusy = ref(false);
+const modsError = ref("");
 const minCharge = ref<number | null>(null);
 const busy = ref(false);
 const error = ref("");
@@ -141,11 +143,12 @@ watch(
 async function loadMods() {
   if (!ev || modsLoaded.value || modsBusy.value || !ev.cols.has(COL.modifications)) return;
   modsBusy.value = true;
+  modsError.value = "";
   try {
     modNames.value = (await modificationCounts(props.ds, ev)).map((m) => String(m.name)).filter((x) => x && x !== "null");
     modsLoaded.value = true;
-  } catch {
-    /* optional filter */
+  } catch (e: any) {
+    if (!isCancelled(e)) modsError.value = String(e?.message ?? e);
   } finally {
     modsBusy.value = false;
   }
@@ -204,6 +207,7 @@ onMounted(async () => {
         <option value="">{{ modsBusy ? "loading modifications…" : "any modification" }}</option>
         <option v-for="m in modNames" :key="m" :value="m">{{ m }}</option>
       </select>
+      <span v-if="modsError" class="error">Modifications: {{ modsError }}</span>
       <input v-model.number="minCharge" type="number" min="1" max="9" placeholder="z ≥" class="z" title="Minimum charge" />
       <button class="primary" type="submit" :disabled="busy">Search</button>
       <button class="xs" type="button" :disabled="!rows.length" @click="table?.exportCsv()">CSV</button>

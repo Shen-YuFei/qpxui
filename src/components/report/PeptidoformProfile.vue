@@ -14,6 +14,7 @@ import { PROFILE_MAX_FEATURES as MAX_FEATURES, peptidoformProfile, profileSource
 import { sampleMeta } from "../../lib/queries/quant";
 import { settings } from "../../lib/settings";
 import { COL } from "../../lib/qpx";
+import { isCancelled } from "../../lib/errors";
 
 const props = defineProps<{ ds: DatasetInfo; t: DatasetTables; peptidoform: string; fileBase: string }>();
 
@@ -23,6 +24,7 @@ const srcLabel = computed(() => (src.value === props.t.feature ? "features" : "P
 
 const busy = ref(false);
 const error = ref("");
+const contextError = ref("");
 const medError = ref("");
 const features = ref<Feature[]>([]);
 const channels = ref<Channel[]>([]);
@@ -41,10 +43,13 @@ async function load() {
   const id = ++seq;
   busy.value = true;
   error.value = "";
+  contextError.value = "";
   features.value = [];
   channels.value = [];
   try {
-    const [r] = await Promise.all([peptidoformProfile(props.t, S, props.peptidoform), loadContext().catch(() => {})]);
+    const [r] = await Promise.all([peptidoformProfile(props.t, S, props.peptidoform), loadContext().catch((e: unknown) => {
+      if (id === seq && !isCancelled(e)) contextError.value = String((e as any)?.message ?? e);
+    })]);
     if (id !== seq) return;
     truncated.value = r.truncated;
     features.value = r.features;
@@ -202,6 +207,7 @@ const base = computed(() => `${props.fileBase}_${props.peptidoform.replace(/[^A-
         <div v-if="stats.cv != null"><b>{{ stats.cv.toFixed(0) }}%</b><span>intensity CV</span></div>
       </div>
       <div class="ctl">
+        <span v-if="contextError" class="error">Sample / run context: {{ contextError }}</span>
         <label v-if="groupOptions.length">
           Group by
           <select v-model="groupBy">

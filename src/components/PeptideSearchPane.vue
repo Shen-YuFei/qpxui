@@ -14,6 +14,7 @@ const matchMode = ref("exact");
 const organism = ref("");
 const mod = ref("");
 const mods = ref<PsModification[]>([]);
+const modsError = ref("");
 
 const result = ref<PsSearchResult | null>(null);
 const busy = ref(false);
@@ -76,8 +77,8 @@ function toggleHit(h: PsHit) {
 onMounted(async () => {
   try {
     mods.value = await api.psModifications();
-  } catch {
-    /* non-fatal */
+  } catch (e: any) {
+    modsError.value = String(e?.message ?? e);
   }
 });
 </script>
@@ -123,6 +124,8 @@ onMounted(async () => {
         </option>
       </select>
     </div>
+
+    <div v-if="modsError" class="error">Modifications: {{ modsError }}</div>
 
     <p class="muted hint">
       Finds which quantms datasets contain the searched peptide, protein or gene across

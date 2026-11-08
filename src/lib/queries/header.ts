@@ -49,14 +49,10 @@ export function kpiSources(t: DatasetTables): KpiSource[] {
   return out;
 }
 
-/** A count's value; null when the query fails (the header shows "–"). */
-export async function countValue(ds: DatasetInfo, s: KpiSource): Promise<number | null> {
-  try {
-    const r = await cachedSql(ds, s.cacheKey, s.sql);
-    return Number(r.rows[0]?.[0] ?? 0);
-  } catch {
-    return null;
-  }
+/** A count's value; failures are shown beside that count in the header. */
+export async function countValue(ds: DatasetInfo, s: KpiSource): Promise<number> {
+  const r = await cachedSql(ds, s.cacheKey, s.sql);
+  return Number(r.rows[0]?.[0] ?? 0);
 }
 
 /** Instruments and enzymes across the runs. */

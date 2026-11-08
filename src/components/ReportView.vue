@@ -15,6 +15,7 @@ import ReportProteins from "./report/ReportProteins.vue";
 import ReportPeptides from "./report/ReportPeptides.vue";
 import ReportQuant from "./report/ReportQuant.vue";
 import { COL } from "../lib/qpx";
+import { isCancelled } from "../lib/errors";
 
 const props = defineProps<{ ds: DatasetInfo }>();
 
@@ -22,6 +23,9 @@ const tables = ref<DatasetTables | null>(null);
 const error = ref("");
 const loading = ref(true);
 const meta = ref<Record<string, any>>({});
+const metaError = ref("");
+const runError = ref("");
+const organismError = ref("");
 const runMeta = ref<{ instruments: string[]; enzymes: string[]; organisms: string[] }>({ instruments: [], enzymes: [], organisms: [] });
 
 interface Kpi {
@@ -32,6 +36,7 @@ interface Kpi {
   /** Deferred whole-file count on a large streamed view. */
   defer?: () => Promise<number | null>;
   busy?: boolean;
+  error?: string;
 }
 const kpis = ref<Kpi[]>([]);
 
@@ -69,21 +74,27 @@ watch(tabs, (list) => {
 const accession = computed(() => String(meta.value.project_accession && meta.value.project_accession !== "unknown" ? meta.value.project_accession : props.ds.prefix));
 const fileBase = computed(() => props.ds.prefix);
 
+let loadSeq = 0;
 async function load() {
+  const id = ++loadSeq;
   loading.value = true;
   error.value = "";
   tables.value = null;
   meta.value = {};
+  metaError.value = runError.value = organismError.value = "";
   kpis.value = [];
   runMeta.value = { instruments: [], enzymes: [], organisms: [] };
   try {
     const t = await datasetTables(props.ds);
+    if (id !== loadSeq) return;
     tables.value = t;
     loading.value = false;
-    await loadHeader(t);
+    await loadHeader(t, id);
   } catch (e: any) {
-    error.value = String(e?.message ?? e);
-    loading.value = false;
+    if (id === loadSeq) {
+      error.value = String(e?.message ?? e);
+      loading.value = false;
+    }
   }
 }
 
@@ -103,21 +114,26 @@ async function compute(k: Kpi) {
   k.value = null;
   k.title = undefined;
   k.busy = true;
+  k.error = "";
   kpis.value = [...kpis.value];
   try {
     k.value = await f();
+  } catch (e: any) {
+    if (!isCancelled(e)) k.error = String(e?.message ?? e);
   } finally {
     k.busy = false;
     kpis.value = [...kpis.value];
   }
 }
 
-async function loadHeader(t: DatasetTables) {
+async function loadHeader(t: DatasetTables, id: number) {
+  const ds = props.ds;
   if (t.dataset) {
     try {
-      meta.value = await datasetMeta(props.ds, t.dataset);
-    } catch {
-      /* optional */
+      const value = await datasetMeta(ds, t.dataset);
+      if (id === loadSeq) meta.value = value;
+    } catch (e: any) {
+      if (id === loadSeq && !isCancelled(e)) metaError.value = String(e?.message ?? e);
     }
   }
   const list: Kpi[] = [];
@@ -129,24 +145,37 @@ async function loadHeader(t: DatasetTables) {
   // for a click. Plain row counts come from the parquet footer.
   for (const s of kpiSources(t)) {
     const k = { key: s.key, label: s.label, ...(s.title ? { title: s.title } : {}) };
-    const run = () => countValue(props.ds, s);
-    if (s.kind === "count") push({ ...k, value: await run() });
-    else if (s.kind === "rows") push({ ...k, value: (await isLarge(s.ref)) ? await footerRows(s.ref) : await run() });
-    else if (await isLarge(s.ref)) push({ ...k, value: null, defer: run, title: "Large streamed view: click to count (reads a whole column)" });
-    else push({ ...k, value: await run() });
+    const run = () => countValue(ds, s);
+    let value: Kpi;
+    try {
+      if (s.kind === "count") value = { ...k, value: await run() };
+      else if (s.kind === "rows") value = { ...k, value: (await isLarge(s.ref)) ? await footerRows(s.ref) : await run() };
+      else if (await isLarge(s.ref)) value = { ...k, value: null, defer: run, title: "Large streamed view: click to count (reads a whole column)" };
+      else value = { ...k, value: await run() };
+    } catch (e: any) {
+      value = { ...k, value: null, error: isCancelled(e) ? "" : String(e?.message ?? e) };
+    }
+    if (id !== loadSeq) return;
+    push(value);
   }
 
   try {
     if (t.run) {
-      const r = await runInstrumentsEnzymes(props.ds, t.run);
+      const r = await runInstrumentsEnzymes(ds, t.run);
+      if (id !== loadSeq) return;
       runMeta.value.instruments = r.instruments;
       runMeta.value.enzymes = r.enzymes;
     }
-    if (t.sample?.cols.has(COL.organism)) {
-      runMeta.value.organisms = await sampleOrganisms(props.ds, t.sample);
+  } catch (e: any) {
+    if (id === loadSeq && !isCancelled(e)) runError.value = String(e?.message ?? e);
+  }
+  if (t.sample?.cols.has(COL.organism)) {
+    try {
+      const organisms = await sampleOrganisms(ds, t.sample);
+      if (id === loadSeq) runMeta.value.organisms = organisms;
+    } catch (e: any) {
+      if (id === loadSeq && !isCancelled(e)) organismError.value = String(e?.message ?? e);
     }
-  } catch {
-    /* optional */
   }
 }
 
@@ -197,8 +226,11 @@ const descOpen = ref(false);
         <div class="ident">
           <div class="acc mono">{{ accession }}<span v-if="accession !== ds.prefix" class="muted"> · {{ ds.prefix }}</span></div>
           <h2>{{ meta.project_title || "QPX dataset report" }}</h2>
+          <div v-if="metaError" class="error">Dataset metadata: {{ metaError }}</div>
           <p v-if="meta.project_description" class="desc muted" :class="{ open: descOpen }" @click="descOpen = !descOpen">{{ meta.project_description }}</p>
           <div class="facts">
+            <span v-if="runError" class="error">Run metadata: {{ runError }}</span>
+            <span v-if="organismError" class="error">Organisms: {{ organismError }}</span>
             <span v-if="runMeta.organisms.length"><b>Organisms</b> {{ runMeta.organisms.join(", ") }}</span>
             <span v-if="runMeta.instruments.length"><b>Instruments</b> {{ runMeta.instruments.join(", ") }}</span>
             <span v-if="runMeta.enzymes.length"><b>Enzymes</b> {{ runMeta.enzymes.join(", ") }}</span>
@@ -224,6 +256,7 @@ const descOpen = ref(false);
             <div v-else-if="k.busy" class="kv"><span class="spinner"></span></div>
             <div v-else class="kv">{{ k.value === null ? "–" : fmtShort(k.value) }}</div>
             <div class="kl">{{ k.label }}</div>
+            <div v-if="k.error" class="error">{{ k.error }}</div>
           </div>
           <div v-if="!kpis.length" class="muted"><span class="spinner"></span></div>
         </div>

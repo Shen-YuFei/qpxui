@@ -16,6 +16,7 @@ const tab = ref<Tab>("datasets");
 const PAGE_SIZE = 50;
 
 const facets = ref<PortalFacets>({ organisms: [], instruments: [], collections: [] });
+const facetsError = ref("");
 const results = ref<PortalSearchResult>({ datasets: [], total: 0, page: 1, totalPages: 1, sort: "" });
 const q = ref("");
 const organism = ref("");
@@ -111,7 +112,7 @@ function doiUrl(doi: string): string {
 }
 
 onMounted(() => {
-  api.portalFacets().then((f) => (facets.value = f)).catch(() => { /* non-fatal */ });
+  api.portalFacets().then((f) => (facets.value = f)).catch((e) => (facetsError.value = String(e?.message ?? e)));
   load();
 });
 
@@ -173,6 +174,7 @@ const hasNext = computed(() => page.value < results.value.totalPages);
       <button class="ghost" @click="clearFilters">Reset</button>
     </div>
 
+    <div v-if="facetsError" class="error">Filters: {{ facetsError }}</div>
     <div v-if="error" class="error">{{ error }}</div>
     <div v-if="busy && !results.datasets.length" class="muted">
       Searching… <span class="spinner"></span>

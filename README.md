@@ -107,6 +107,8 @@ portal's Dataset Explorer, but runs locally on any QPX data. You can also reach 
   links. **Cite this data** copies a citation or saves it as BibTeX or RIS.
 - **Headline counts**: protein groups, peptides, features, PSMs, runs and samples.
 
+A count or header query that fails shows its error in place; the rest of the report still loads.
+
 The report has these tabs. A tab only appears when the dataset has the data for it:
 
 | Tab | Contents |
