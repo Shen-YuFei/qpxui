@@ -135,7 +135,7 @@ async function download() {
         <span class="muted">{{ fmtSize(v.sizeBytes, "0 B") }}</span>
       </label>
     </div>
-    <div v-else-if="listing || disabled" class="muted">Loading views… <span class="spinner"></span></div>
+    <div v-else-if="listing" class="muted">Loading views… <span class="spinner"></span></div>
     <div v-else class="muted">No QPX views listed for this dataset.</div>
   </div>
 </template>

@@ -140,7 +140,7 @@ onMounted(async () => {
     <template v-if="result">
       <div class="meta muted">
         {{ result.totalDatasets.toLocaleString() }} dataset(s)
-        <template v-if="expanded || !result.unmapped"> · sorted by number of peptides</template>
+        <template v-if="!result.unmapped"> · sorted by number of peptides</template>
       </div>
       <div v-if="result.unmapped" class="note">
         Query didn't map cleanly to a known protein; showing the closest matches.

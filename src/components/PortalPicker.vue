@@ -15,6 +15,7 @@ const selected = ref<PortalDataset | null>(null);
 const views = ref<ViewInfo[]>([]);
 const checked = ref<Record<string, boolean>>({});
 const busy = ref(false);
+const listing = ref(false);
 const error = ref("");
 const downloading = ref(false);
 const { id: downloadId, cancelling, files: downloadFiles, cancel, run: runDownload, unmounted } = useDownload();
@@ -44,7 +45,9 @@ async function selectDataset(ds: PortalDataset | null) {
   selected.value = ds;
   views.value = [];
   checked.value = {};
+  listing.value = false;
   if (!ds) return;
+  listing.value = true;
   busy.value = true;
   error.value = "";
   try {
@@ -54,7 +57,10 @@ async function selectDataset(ds: PortalDataset | null) {
   } catch (e: any) {
     if (selected.value === ds) error.value = String(e);
   } finally {
-    if (selected.value === ds) busy.value = false;
+    if (selected.value === ds) {
+      busy.value = false;
+      listing.value = false;
+    }
   }
 }
 
@@ -180,7 +186,7 @@ onMounted(loadRegistry);
               <span class="muted">{{ fmtSize(v.sizeBytes, "0 B") }}</span>
             </label>
           </div>
-          <div v-else-if="busy" class="muted">Loading views… <span class="spinner"></span></div>
+          <div v-else-if="listing" class="muted">Loading views… <span class="spinner"></span></div>
           <div v-else class="muted">No QPX views listed for this dataset.</div>
         </template>
         <div v-else class="muted">Select a dataset from the registry.</div>
