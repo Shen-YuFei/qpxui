@@ -48,7 +48,7 @@ export function overviewCharts(
   async function hist(key: string, expr: string, where: string, xName: string, yName = evName, robust = false): Promise<ChartSpec | null> {
     const r = await cachedSql(ds, key, histogramSql(ev.table, expr, where, 40, robust));
     const h = histogramData(r);
-    return { kind: "bar", labels: h.labels, series: [{ name: yName, values: h.values }], xName };
+    return { kind: "bar", labels: h.labels, series: [{ name: yName, values: h.values }], notes: h.ranges.map((range) => `Range: ${range}`), xName };
   }
 
   return {

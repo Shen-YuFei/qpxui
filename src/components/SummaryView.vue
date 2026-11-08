@@ -31,10 +31,18 @@ const numericCols = computed(() =>
   cols.value.filter((c) => isNumericScalar(c.type))
 );
 
-function barOption(labels: string[], values: number[], title: string) {
+function barOption(labels: string[], values: number[], title: string, ranges?: string[]) {
   return {
     title: { text: title, textStyle: { color: chartTheme().text, fontSize: 13 } },
-    tooltip: { trigger: "axis" },
+    tooltip: {
+      trigger: "axis",
+      ...(ranges && {
+        formatter: (params: any[]) => {
+          const i = params[0].dataIndex;
+          return `${ranges[i]}<br/>Count: ${values[i].toLocaleString()}`;
+        },
+      }),
+    },
     grid: { left: 50, right: 16, top: 44, bottom: 30 },
     xAxis: {
       type: "category",
@@ -64,11 +72,11 @@ async function buildHistogram() {
   hist.value = null;
   histError.value = "";
   try {
-    const r = await columnHistogram(table.value, col);
-    hist.value = barOption(r.labels, r.values, `Histogram of ${col}`);
+    const r = await columnHistogram(table.value, col, cols.value.find((c) => c.name === col)?.type);
+    hist.value = barOption(r.labels, r.values, `Histogram of ${col}`, r.ranges);
   } catch (e: any) {
-    // A numeric column can still fail to histogram (e.g. infinite values):
-    // say why in its place and keep the other charts.
+    // A failed histogram query says why in its place and keeps the other
+    // charts.
     histError.value = String(e?.message ?? e);
   }
 }

@@ -1,7 +1,7 @@
 // The Summary view of one table: counts by charge, protein, run, score and
 // missed cleavages, and a histogram of one numeric column.
 import { runSql } from "../duck";
-import { ident } from "../report";
+import { histogramData, ident } from "../report";
 import { COL } from "../qpx";
 
 /** Whether a column of this DuckDB type can be binned. Only types whose
@@ -59,21 +59,27 @@ export async function summaryCounts(table: string, names: Set<string>, unit: str
   return list;
 }
 
-/** Counts of a numeric column in 30 equal-width bins (labels are bin
- * indices). */
-export async function columnHistogram(table: string, col: string): Promise<{ labels: string[]; values: number[] }> {
+/** Up to 30 equal-width bins, with whole-number boundaries for integer columns. */
+export async function columnHistogram(table: string, col: string, type = "DOUBLE") {
   const t = ident(table);
   // In DOUBLE: max - min of 64-bit ids overflows BIGINT.
   const x = `${ident(col)}::DOUBLE`;
+  const integer = /^u?(tinyint|smallint|integer|bigint|hugeint)$/i.test(type);
+  const width = integer ? "greatest(1, ceil((mx - mn + 1) / 30.0))" : "coalesce(nullif((mx - mn)/30.0, 0), 1)";
+  const bins = integer ? "least(30, floor((mx - mn) / w) + 1)::INT" : "CASE WHEN mx = mn THEN 1 ELSE 30 END";
   const q = `
     WITH stats AS (
-      SELECT min(${x}) AS mn, (max(${x}) - min(${x}))/30.0 AS w
-      FROM ${t} WHERE ${ident(col)} IS NOT NULL
+      SELECT min(${x}) AS mn, max(${x}) AS mx
+      FROM ${t} WHERE isfinite(${x})
+    ), widths AS (
+      SELECT mn, mx, ${width} AS w FROM stats
+    ), bounds AS (
+      SELECT mn, w, ${bins} AS bins FROM widths
     )
-    SELECT (floor((${x} - (SELECT mn FROM stats)) / NULLIF((SELECT w FROM stats),0)))::INT AS bin,
-           COUNT(*) AS n
-    FROM ${t} WHERE ${ident(col)} IS NOT NULL
+    SELECT least(bins - 1, floor((${x} - mn) / w))::INT AS bin,
+           COUNT(*) AS n, any_value(mn) AS lo, any_value(mn + w * bins) AS hi, any_value(bins) AS bins
+    FROM ${t}, bounds WHERE isfinite(${x})
     GROUP BY 1 ORDER BY 1`;
   const r = await runSql(q);
-  return { labels: r.rows.map((row) => String(row[0] ?? "")), values: r.rows.map((row) => Number(row[1] ?? 0)) };
+  return histogramData(r, Number(r.rows[0]?.[4] ?? 30), integer);
 }

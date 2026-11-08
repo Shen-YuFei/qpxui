@@ -50,9 +50,21 @@ describe("schema-dependent expressions", () => {
 });
 
 describe("histogramData", () => {
-  it("places counts at bin centres", () => {
+  it("places counts at bin starts and includes intervals", () => {
     const r: QueryResult = { columns: ["bin", "n", "lo", "hi"], rows: [[0, 3, 0, 4], [3, 1, 0, 4]], rowCount: 2, truncated: false };
-    expect(histogramData(r, 4)).toEqual({ labels: ["0.50", "1.50", "2.50", "3.50"], values: [3, 0, 0, 1] });
+    expect(histogramData(r, 4)).toEqual({ labels: ["0", "1", "2", "3"], values: [3, 0, 0, 1], ranges: ["[0, 1)", "[1, 2)", "[2, 3)", "[3, 4]"] });
+  });
+  it("uses one bin for a constant column and keeps 64-bit id bounds readable", () => {
+    const result = (rows: number[][]): QueryResult => ({ columns: ["bin", "n", "lo", "hi"], rows, rowCount: rows.length, truncated: false });
+    expect(histogramData(result([[0, 5, 7, 7]]))).toEqual({ labels: ["7"], values: [5], ranges: ["[7, 7]"] });
+    const ids = histogramData(result([[0, 2, -9e18, 9e18], [3, 1, -9e18, 9e18]]), 4);
+    expect(ids.labels[0]).toBe((-9e18).toLocaleString());
+    expect(ids.labels[2]).toBe("0");
+    expect(ids.ranges.join(" ")).not.toMatch(/NaN|Infinity/);
+  });
+  it("ends an integer column's last bin at the last whole number it holds", () => {
+    const r: QueryResult = { columns: ["bin", "n", "lo", "hi"], rows: [[0, 5, 7, 8]], rowCount: 1, truncated: false };
+    expect(histogramData(r, 1, true).ranges).toEqual(["[7, 7]"]);
   });
 });
 

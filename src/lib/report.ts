@@ -4,7 +4,7 @@
 
 import type { DatasetInfo, ViewInfo } from "./api";
 import { describeTable, ensureViewReady, runSql, type QueryResult } from "./duck";
-import { fmtNum } from "./format";
+import { fmtNum, scalarText } from "./format";
 import { COL, SORT_ORDER_KEY, VIEW_KINDS, type ViewKind } from "./qpx";
 
 export interface TableRef {
@@ -304,19 +304,24 @@ SELECT bin, count(*)::BIGINT AS n, any_value(lo) AS lo, any_value(hi) AS hi FROM
 ) GROUP BY bin ORDER BY bin`;
 }
 
-/** Turn a histogramSql result into bin-centre labels and counts. */
-export function histogramData(r: QueryResult, bins = 40): { labels: string[]; values: number[] } {
-  if (!r.rows.length) return { labels: [], values: [] };
+/** Turn histogram bounds into bin-start labels, counts and tooltip intervals. */
+export function histogramData(r: QueryResult, bins = 40, integer = false): { labels: string[]; values: number[]; ranges: string[] } {
+  if (!r.rows.length) return { labels: [], values: [], ranges: [] };
   const lo = Number(r.rows[0][2]);
   const hi = Number(r.rows[0][3]);
+  if (lo === hi) bins = 1;
   const w = (hi - lo) / bins || 1;
   const counts = new Array(bins).fill(0);
   for (const row of r.rows) {
     const b = Number(row[0]);
     if (b >= 0 && b < bins) counts[b] = Number(row[1]);
   }
-  const labels = counts.map((_, i) => fmtNum(lo + (i + 0.5) * w));
-  return { labels, values: counts };
+  const fmt = (x: number) => Number.isInteger(x) ? scalarText(x) : fmtNum(x);
+  const labels = counts.map((_, i) => fmt(lo + i * w));
+  // Integer bins hold whole numbers, so the last one ends one below `hi`.
+  const last = integer ? hi - 1 : hi;
+  const ranges = counts.map((_, i) => `[${fmt(lo + i * w)}, ${fmt(i === bins - 1 ? last : lo + (i + 1) * w)}${i === bins - 1 ? "]" : ")"}`);
+  return { labels, values: counts, ranges };
 }
 
 

@@ -122,6 +122,7 @@ The report has these tabs. A tab only appears when the dataset has the data for 
 
 Statistics are computed over target rows only (decoys left out). Histograms show the central 99%
 of values, and the mass-error histogram also drops extreme outliers such as isotope-error matches.
+Bars are labelled with the start of their bin; hover a bar for its range.
 Results are cached, so switching tabs is instant.
 
 ![QC tab: identifications, median intensity and mass error per run, intensity per sample](docs/screenshots/report-qc.png)
@@ -204,7 +205,9 @@ Click a view in the sidebar to work with its rows directly:
 - **Browse**: a table showing 500 rows per page, with column sorting and a live SQL `WHERE` filter;
   the row count follows the filter.
   Nested cells (lists and structs) can be expanded.
-- **Summary**: automatic charts per column, and a histogram for any numeric column.
+- **Summary**: automatic charts per column, and a histogram of any numeric column. It has up to 30
+  bins (whole-number bins for integer columns) labelled with their start value, and leaves out
+  infinite and NaN values. Hover a bar for its range and count.
 - **Query**: SQL (DuckDB dialect, the same engine as `qpxc query sql`) against the registered
   views, with example queries to start from.
 
