@@ -20,12 +20,13 @@ const selectedCount = computed(() => selection().length);
 const selectedBytes = computed(() => totalBytes(selection().map((s) => s.view)));
 
 async function list() {
+  if (!bucket.value.trim()) return;
   busy.value = true;
   error.value = "";
   listing.value = null;
   checked.value = {};
   try {
-    listing.value = await api.listS3(bucket.value.trim() || "qpx-test", prefix.value.trim() || undefined);
+    listing.value = await api.listS3(bucket.value.trim(), prefix.value.trim() || undefined);
     if (!listing.value.datasets.length) {
       error.value = "No QPX datasets (prefix.view.parquet) found under this prefix.";
     }
@@ -115,7 +116,7 @@ const streamHint =
     <div class="row">
       <input v-model="bucket" placeholder="bucket (e.g. qpx-test)" @keyup.enter="list" />
       <input v-model="prefix" placeholder="prefix (optional)" @keyup.enter="list" />
-      <button class="primary" @click="list" :disabled="busy">
+      <button class="primary" @click="list" :disabled="busy || !bucket.trim()">
         {{ busy ? "Listing…" : "List" }}
       </button>
     </div>
