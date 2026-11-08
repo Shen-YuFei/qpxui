@@ -105,7 +105,7 @@ onMounted(async () => {
         @keydown.enter="runSearch"
       />
       <button class="primary" @click="runSearch" :disabled="busy || viewsDownloading || !query.trim()">
-        {{ busy || viewsDownloading ? "Searching…" : "Search" }}
+        {{ busy ? "Searching…" : "Search" }}
       </button>
     </div>
 
