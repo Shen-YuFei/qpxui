@@ -1,5 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { open } from "@tauri-apps/plugin-dialog";
+
+export interface ExportFilter {
+  name: string;
+  extensions: string[];
+}
 
 export interface ViewInfo {
   name: string;
@@ -161,11 +166,9 @@ export const api = {
   cacheFreeSpace: (kind: "portal" | "s3") =>
     invoke<{ free: number; reserve: number }>("cache_free_space", { kind }),
 
-  writeFileBytes: (path: string, base64: string) =>
-    invoke<void>("write_file_bytes", { path, base64 }),
-  /** Native save dialog; resolves to null when cancelled. */
-  chooseSavePath: (defaultPath: string, name: string, extensions: string[]) =>
-    save({ defaultPath, filters: [{ name, extensions }] }) as Promise<string | null>,
+  /** Rust chooses the path in a native save dialog and writes the export. */
+  saveExport: (defaultName: string, filters: ExportFilter[], base64: string) =>
+    invoke<string | null>("save_export", { defaultName, filters, base64 }),
 
   // ---- quantms portal (public example source over HTTPS) ----
   portalRegistry: (pageSize?: number) =>

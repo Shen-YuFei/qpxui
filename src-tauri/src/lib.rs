@@ -13,7 +13,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::sources::open_file,
             commands::sources::scan_collection,
-            commands::io::write_file_bytes,
+            commands::io::save_export,
             commands::s3::list_s3,
             commands::s3::cache_s3_views,
             commands::stream::register::stream_s3_urls,

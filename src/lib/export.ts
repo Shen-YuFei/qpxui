@@ -15,16 +15,10 @@ export function safeFileName(s: string): string {
 
 /** Save text (CSV, BibTeX, …) through the native save dialog. Returns the path or null. */
 export async function saveText(name: string, text: string, ext = "csv"): Promise<string | null> {
-  const path = await api.chooseSavePath(`${safeFileName(name)}.${ext}`, ext.toUpperCase(), [ext]);
-  if (!path) return null;
-  await api.writeFileBytes(path, utf8ToBase64(text));
-  return path;
+  return api.saveExport(`${safeFileName(name)}.${ext}`, [{ name: ext.toUpperCase(), extensions: [ext] }], utf8ToBase64(text));
 }
 
 /** Save a `data:image/png;base64,…` URL as a PNG file. */
 export async function savePng(name: string, dataUrl: string): Promise<string | null> {
-  const path = await api.chooseSavePath(`${safeFileName(name)}.png`, "PNG image", ["png"]);
-  if (!path) return null;
-  await api.writeFileBytes(path, dataUrl.slice(dataUrl.indexOf(",") + 1));
-  return path;
+  return api.saveExport(`${safeFileName(name)}.png`, [{ name: "PNG image", extensions: ["png"] }], dataUrl.slice(dataUrl.indexOf(",") + 1));
 }

@@ -352,7 +352,7 @@ Many reanalysed datasets (e.g. `PXD014414`) can be opened directly with the **Qu
 ┌──────────────▼─────────────────────────────────▼──────────────────┐
 │ Rust backend                                                      │
 │  sources.rs     QPX discovery (file / folder / collection)        │
-│  io.rs          write exports                                     │
+│  io.rs          native save dialog and export writes              │
 │  s3.rs          list / download S3 objects (aws-sdk-s3, rustls)   │
 │  portal/        catalogue.rs  registry, search, facets            │
 │                 listing.rs    a dataset's runs and views          │
@@ -385,6 +385,11 @@ Koina and two PROXI/USI endpoints used by spectrum mirrors. Portal and S3 reques
 and do not need external WebView permissions. CSP supplements the native IPC capabilities.
 Development loads Vite directly at `http://localhost:1420`, which does not serve this CSP;
 verify the policy in a release build.
+
+Exports go through `api.saveExport` to the Rust `save_export` command, which opens the native
+save dialog and writes only to its selected destination. Cancelling returns `null` without a
+write. The frontend has no arbitrary-path write command or dialog save permission; its dialog
+permissions cover only opening files/folders and showing messages or confirmations.
 
 QPX names live in `src/lib/qpx.ts`: the views the viewer reads and `COL`, every view column it
 reads, checked against the QPX schemas. Queries select only the columns they need and adapt to
@@ -421,7 +426,7 @@ qpxui/
 │   │   ├── mirror.ts              # Koina predictions, PROXI/USI, spectrum similarity
 │   │   ├── downloads.ts           # free-space check, confirm, cancel
 │   │   ├── progress.ts            # download progress from backend events
-│   │   ├── export.ts              # save dialog helpers (PNG / CSV / BibTeX)
+│   │   ├── export.ts              # export encoding + Rust save command (PNG / CSV / BibTeX)
 │   │   ├── format.ts              # number, size and cell formatting
 │   │   ├── ptm.ts, settings.ts    # PTM parsing/colours, theme + settings
 │   │   ├── useSlots.ts            # sequential chart loading with progress
