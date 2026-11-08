@@ -458,7 +458,7 @@ qpxui/
 │       ├── PeptideSeq.vue, PTMSegs.vue, PTMBadges.vue, PTMTip.vue  # PTM-coloured cells
 │       ├── SourcePicker.vue, PortalPicker.vue, S3Picker.vue, DownloadProgress.vue
 │       ├── DiscoverView.vue, PeptideSearchPane.vue, RecommendedDatasets.vue
-│       ├── PortalViews.vue        # a portal dataset's views: stream or download
+│       ├── PortalViews.vue        # a portal dataset's views: stream or download (every portal list)
 │       ├── DatasetExplorer.vue    # sidebar: search, datasets, views
 │       ├── ViewPanel.vue, DataTable.vue, SummaryView.vue, QueryView.vue
 │       └── SettingsPanel.vue, StructuredView.vue
