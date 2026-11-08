@@ -15,9 +15,7 @@ const props = defineProps<{
   datasetRef: string;
   organism?: string | null;
   psmCount?: number | null;
-  /** The recommended strip: with no view ticked, Stream and Download take
-   * them all; its toolbar is smaller, Stream has no tooltip and the streamed
-   * source is labelled like a download. */
+  /** The recommended strip: with no view ticked, actions take all views. */
   featured?: boolean;
   /** The parent list is searching: hold the actions until it is done. */
   disabled?: boolean;
@@ -66,7 +64,7 @@ function open(list: ViewInfo[], label: string) {
 
 function stream() {
   error.value = "";
-  open(chosen.value.map((v) => ({ ...v })), `portal | ${props.accession}${props.featured ? "" : " (stream)"}`);
+  open(chosen.value.map((v) => ({ ...v })), `portal | ${props.accession} (stream)`);
 }
 
 async function download() {
@@ -95,7 +93,7 @@ async function download() {
 
 <template>
   <div class="loadbox">
-    <div class="toolbar" :class="{ small: featured }">
+    <div class="toolbar">
       <span class="muted">
         {{ views.length }} view(s) · {{ ticked.length }} selected<template v-if="ticked.length"> · {{ fmtSize(totalBytes(ticked), "0 B") }}</template>
       </span>
@@ -103,7 +101,7 @@ async function download() {
         <button
           @click="stream"
           :disabled="disabled || downloading || !chosen.length"
-          :title="featured ? undefined : 'Query the files in place — each query fetches only the byte ranges it needs'"
+          title="Query the files in place — each query fetches only the byte ranges it needs"
         >
           ⚡ Stream (lazy)
         </button>
@@ -154,9 +152,6 @@ async function download() {
   flex-wrap: wrap;
   font-size: 13px;
   margin-bottom: 8px;
-}
-.toolbar.small {
-  font-size: 12px;
 }
 .actions {
   display: flex;

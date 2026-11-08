@@ -9,8 +9,7 @@ const props = defineProps<{
   cancelling: boolean;
   /** Status shown while files are transferring. */
   label: string;
-  /** The portal lists' box: tighter, on the panel colour, with a shorter
-   * Cancel label. */
+  /** The portal lists' box: tighter and on the panel colour. */
   compact?: boolean;
 }>();
 defineEmits<{ cancel: [] }>();
@@ -30,7 +29,7 @@ function pct(n: number): string {
       <span class="right">
         <span class="muted">{{ overallPct !== null ? pct(overallPct) : "" }}</span>
         <button class="cancel" @click="$emit('cancel')" :disabled="cancelling">
-          {{ compact ? "Cancel" : "Cancel download" }}
+          Cancel
         </button>
       </span>
     </div>

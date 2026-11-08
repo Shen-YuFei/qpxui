@@ -152,7 +152,7 @@ onMounted(loadRegistry);
                 :disabled="busy || !selectedCount"
                 title="Query the files in place — each query fetches only the byte ranges it needs"
               >
-                ⚡ Stream (lazy, no download)
+                ⚡ Stream (lazy)
               </button>
               <button class="primary" @click="loadSelection" :disabled="busy || !selectedCount">
                 {{ downloading ? "Downloading…" : "Download to cache" }}

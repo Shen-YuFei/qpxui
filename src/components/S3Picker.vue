@@ -128,7 +128,7 @@ const streamHint =
         <span class="muted">{{ remoteDatasets.length }} dataset(s) found<template v-if="selectedCount"> · {{ selectedCount }} selected · {{ fmtSize(selectedBytes, "0 B") }}</template></span>
         <div class="actions">
           <button @click="streamSelection" :disabled="busy || !selectedCount" :title="streamHint">
-            ⚡ Stream (lazy, no download)
+            ⚡ Stream (lazy)
           </button>
           <button class="primary" @click="loadSelection" :disabled="busy || !selectedCount">
             {{ busy ? "Loading…" : "Download to cache" }}
@@ -142,7 +142,7 @@ const streamHint =
         class="download"
         :files="downloadFiles"
         :cancelling="cancelling"
-        label="Downloading…"
+        label="Transferring to cache…"
         @cancel="cancel"
       />
 
@@ -196,6 +196,7 @@ h3 {
   margin: 18px 0 8px;
   gap: 10px;
   flex-wrap: wrap;
+  font-size: 13px;
 }
 .actions {
   display: flex;
