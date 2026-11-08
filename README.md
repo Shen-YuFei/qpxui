@@ -211,7 +211,8 @@ Click a view in the sidebar to work with its rows directly:
 ### PTMs, settings & export
 
 - Peptides and peptidoforms are colour-coded by modification, with short codes and tooltips
-  (name, CV accession, residue, position).
+  (name, CV accession, residue, position). A modification takes the colour of its CV accession, or
+  else of the longest known keyword in its name, so *Dimethyl* is not coloured as *Methyl*.
 - **⚙ Settings**: dark or light theme, and a colour for each PTM, which every table and chart uses.
 - **Export**: every chart can be saved as PNG or CSV, and every table as CSV, through the system
   save dialog.

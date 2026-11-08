@@ -51,6 +51,21 @@ describe("fragment masses", () => {
     expect(ions.filter((x) => x.type === "b")).toHaveLength(6);
   });
 
+  it("includes Guanidinyl and Dethiomethyl shifts only in ions carrying the modified residue", () => {
+    for (const [name, id, shift] of [["Guanidinyl", 52, 42.021798], ["Dethiomethyl", 526, -48.003371]] as const) {
+      expect(modMass(`UNIMOD:${id}`)).toBe(shift);
+      expect(modMass(name)).toBe(shift);
+      expect(modUnimodId(name)).toBe(id);
+      const base = fragmentIons(parsePeptidoform("KMPEPTIDE"), 2, false);
+      const modified = fragmentIons(parsePeptidoform(id === 52 ? "K[UNIMOD:52]MPEPTIDE" : "KM[UNIMOD:526]PEPTIDE"), 2, false);
+      for (const [label, delta] of [["b2", shift], ["b2++", shift / 2], ["y1", 0]] as const) {
+        const before = base.find((ion) => ion.label === label)!;
+        const after = modified.find((ion) => ion.label === label)!;
+        expect(after.mz - before.mz, `${name} ${label}`).toBeCloseTo(delta, 6);
+      }
+    }
+  });
+
   it("annotates peaks within the tolerance only", () => {
     const ions = fragmentIons(p, 1, false);
     const [hit, miss] = annotatePeaks([227.1027, 300], [10, 5], ions, { value: 20, unit: "ppm" });

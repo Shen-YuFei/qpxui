@@ -93,7 +93,7 @@ export function resetPtmColor(id: string) {
 
 /**
  * Resolve the colour shown for a modification, honouring user overrides.
- * 1) match by CV accession, 2) match by name keyword, 3) unknown fallback.
+ * 1) match by CV accession, 2) longest name keyword, 3) unknown fallback.
  */
 export function resolvePtmColor(name?: string, accession?: string): string {
   const acc = (accession || "").toUpperCase();
@@ -101,7 +101,16 @@ export function resolvePtmColor(name?: string, accession?: string): string {
   if (byAcc) return effectivePtmColor(byAcc.id);
   const n = (name || "").toLowerCase();
   if (n.trim()) {
-    const byKw = PTM_PALETTE.find((e) => e.keywords.some((k) => n.includes(k)));
+    let byKw: PTMEntry | undefined;
+    let longest = 0;
+    for (const entry of PTM_PALETTE) {
+      for (const keyword of entry.keywords) {
+        if (keyword.length > longest && n.includes(keyword)) {
+          byKw = entry;
+          longest = keyword.length;
+        }
+      }
+    }
     if (byKw) return effectivePtmColor(byKw.id);
   }
   return effectivePtmColor("unknown");
