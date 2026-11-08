@@ -38,7 +38,8 @@ async function openFolder() {
   await run(async () => {
     const path = await api.chooseFolder();
     if (!path) return;
-    loadDatasets(await api.scanCollection(path), "collection");
+    const scan = await api.scanCollection(path);
+    loadDatasets(scan.datasets, "collection", scan.skipped);
   });
 }
 </script>

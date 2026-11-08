@@ -27,6 +27,18 @@ pub struct DatasetInfo {
     pub views: Vec<ViewInfo>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct SkippedFolder {
+    pub path: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct CollectionScan {
+    pub datasets: Vec<DatasetInfo>,
+    pub skipped: Vec<SkippedFolder>,
+}
+
 /// Split a QPX filename into `(prefix, view, format)`.
 ///
 /// `PXD021013.feature.parquet` -> `("PXD021013", "feature", "parquet")`.
@@ -116,14 +128,14 @@ pub fn discover_dir(dir: &Path) -> Result<Vec<DatasetInfo>, String> {
 /// collections (one dataset per subdirectory). An error reading `root` is
 /// returned; an unreadable sub-folder (a protected system folder in a large
 /// tree, say) is skipped so that the rest of the tree still opens.
-pub fn collect_all(root: &Path, max_depth: u32) -> Result<Vec<DatasetInfo>, String> {
-    let mut out = Vec::new();
+pub fn collect_all(root: &Path, max_depth: u32) -> Result<CollectionScan, String> {
+    let mut out = CollectionScan::default();
     walk(root, max_depth, &mut out)?;
     Ok(out)
 }
 
-fn walk(dir: &Path, depth_left: u32, out: &mut Vec<DatasetInfo>) -> Result<(), String> {
-    out.extend(discover_dir(dir)?);
+fn walk(dir: &Path, depth_left: u32, out: &mut CollectionScan) -> Result<(), String> {
+    out.datasets.extend(discover_dir(dir)?);
     if depth_left == 0 {
         return Ok(());
     }
@@ -131,8 +143,12 @@ fn walk(dir: &Path, depth_left: u32, out: &mut Vec<DatasetInfo>) -> Result<(), S
     for entry in std::fs::read_dir(dir).map_err(fail)? {
         let path = entry.map_err(fail)?.path();
         if path.is_dir() {
-            // Skips only this sub-folder (see `collect_all`).
-            let _ = walk(&path, depth_left - 1, out);
+            if let Err(reason) = walk(&path, depth_left - 1, out) {
+                out.skipped.push(SkippedFolder {
+                    path: path.to_string_lossy().to_string(),
+                    reason,
+                });
+            }
         }
     }
     Ok(())
@@ -215,7 +231,7 @@ mod tests {
         std::fs::write(deep.join("Y.pg.parquet"), b"y").unwrap();
         let prefixes = |depth| -> Vec<String> {
             let found = collect_all(tmp.path(), depth).unwrap();
-            found.into_iter().map(|d| d.prefix).collect()
+            found.datasets.into_iter().map(|d| d.prefix).collect()
         };
         assert_eq!(prefixes(1), ["X"]);
         assert_eq!(prefixes(2), ["X", "Y"]);

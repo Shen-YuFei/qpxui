@@ -84,6 +84,10 @@ const viewIcon: Record<string, string> = {
       </div>
     </form>
 
+    <div v-if="state.scanWarnings.length" class="scan-warning error">
+      Skipped unreadable folders:
+      <div v-for="folder in state.scanWarnings" :key="folder.path" :title="folder.reason">{{ folder.path }}</div>
+    </div>
     <div class="tree-title">Datasets</div>
 
     <div v-for="d in datasets" :key="d.path + d.prefix" class="ds">
@@ -132,6 +136,11 @@ const viewIcon: Record<string, string> = {
 <style scoped>
 .tree {
   padding: 14px;
+}
+.scan-warning {
+  margin-bottom: 12px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 .tree-title {
   font-size: 12px;

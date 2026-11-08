@@ -1,6 +1,6 @@
 import { reactive } from "vue";
 import { cancelAllDownloads } from "./lib/downloads";
-import type { DatasetInfo, ViewInfo } from "./lib/api";
+import type { DatasetInfo, SkippedFolder, ViewInfo } from "./lib/api";
 import { clearReportCache } from "./lib/report";
 import { abandonQueries, forgetTables } from "./lib/duck";
 import { REPORT_VIEWS } from "./lib/qpx";
@@ -8,6 +8,7 @@ import { REPORT_VIEWS } from "./lib/qpx";
 // Simple reactive store (no Pinia needed for this scale).
 export const state = reactive({
   datasets: [] as DatasetInfo[],
+  scanWarnings: [] as SkippedFolder[],
   /** Source badge in the top bar: "single-file", "collection", "s3" or "portal | <accession>". */
   sourceKind: "none" as string,
   selectedDataset: null as DatasetInfo | null,
@@ -55,6 +56,7 @@ export function reset() {
   stopQueries();
   clearReportCache();
   state.datasets = [];
+  state.scanWarnings = [];
   state.sourceKind = "none";
   state.selectedDataset = null;
   state.selectedView = null;
@@ -66,10 +68,11 @@ export function reset() {
   state.proteinFocus = null;
 }
 
-export function loadDatasets(datasets: DatasetInfo[], kind: string) {
+export function loadDatasets(datasets: DatasetInfo[], kind: string, skipped: SkippedFolder[] = []) {
   stopQueries();
   clearReportCache();
   state.datasets = datasets;
+  state.scanWarnings = skipped;
   state.sourceKind = kind;
   state.selectedDataset = datasets[0] ?? null;
   state.selectedView = datasets[0]?.views[0] ?? null;

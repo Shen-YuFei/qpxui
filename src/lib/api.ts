@@ -20,6 +20,16 @@ export interface DatasetInfo {
   views: ViewInfo[];
 }
 
+export interface SkippedFolder {
+  path: string;
+  reason: string;
+}
+
+export interface CollectionScan {
+  datasets: DatasetInfo[];
+  skipped: SkippedFolder[];
+}
+
 export interface S3Object {
   key: string;
   sizeBytes: number;
@@ -140,7 +150,7 @@ export const api = {
 
   openFile: (path: string) => invoke<DatasetInfo>("open_file", { path }),
 
-  scanCollection: (path: string) => invoke<DatasetInfo[]>("scan_collection", { path }),
+  scanCollection: (path: string) => invoke<CollectionScan>("scan_collection", { path }),
 
   listS3: (bucket: string, prefix?: string) =>
     invoke<S3Listing>("list_s3", { bucket, prefix }),
