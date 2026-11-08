@@ -292,9 +292,9 @@ export function log10Expr(expr: string): string {
 export function histogramSql(table: string, expr: string, where: string, bins = 40, robust = false): string {
   const range = robust
     ? `SELECT greatest(p_lo, q1 - 3 * (q3 - q1)) AS lo, least(p_hi, q3 + 3 * (q3 - q1)) AS hi FROM (
-         SELECT quantile_cont(x, 0.005) AS p_lo, quantile_cont(x, 0.995) AS p_hi,
-                quantile_cont(x, 0.25) AS q1, quantile_cont(x, 0.75) AS q3 FROM v WHERE isfinite(x))`
-    : `SELECT quantile_cont(x, 0.005) AS lo, quantile_cont(x, 0.995) AS hi FROM v WHERE isfinite(x)`;
+         SELECT quantile_disc(x, 0.005) AS p_lo, quantile_disc(x, 0.995) AS p_hi,
+                quantile_disc(x, 0.25) AS q1, quantile_disc(x, 0.75) AS q3 FROM v WHERE isfinite(x))`
+    : `SELECT quantile_disc(x, 0.005) AS lo, quantile_disc(x, 0.995) AS hi FROM v WHERE isfinite(x)`;
   return `
 WITH v AS MATERIALIZED (SELECT (${expr})::DOUBLE AS x FROM ${ident(table)} WHERE ${where}),
 b AS (${range})
