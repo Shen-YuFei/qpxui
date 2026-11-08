@@ -171,7 +171,7 @@ export function viewScale(ref: Pick<TableRef, "view" | "table">): Promise<ViewSc
         colBytes[String(c)] = Number(n);
         total += Number(n);
       }
-      const bytes = Math.max(ref.view.sizeBytes, total);
+      const bytes = Math.max(ref.view.sizeBytes ?? 0, total);
       const kv = await runSql(
         `SELECT decode(value) FROM parquet_kv_metadata(${file}) WHERE decode(key) = ${lit(SORT_ORDER_KEY)} LIMIT 1`,
         1

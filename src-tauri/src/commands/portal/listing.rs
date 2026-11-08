@@ -54,7 +54,7 @@ fn extract_links(html: &str) -> Vec<(String, String)> {
 }
 
 /// Parse a human-friendly size string like `5,794,378 B`, `4.5 MB`, `1.2 GB`.
-fn parse_size(raw: &str) -> u64 {
+fn parse_size(raw: &str) -> Option<u64> {
     // Strip any HTML tags (e.g. `<small>` around the number) and `&nbsp;`.
     let mut clean = String::new();
     let mut in_tag = false;
@@ -87,13 +87,12 @@ fn parse_size(raw: &str) -> u64 {
     let n: f64 = num_part
         .split_whitespace()
         .next()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0.0);
-    (n * mult as f64) as u64
+        .and_then(|s| s.parse().ok())?;
+    Some((n * mult as f64) as u64)
 }
 
 /// `(<link text>, <size bytes>)` for the parquet links on a listing page.
-fn parquet_entries(html: &str) -> Vec<(String, u64)> {
+fn parquet_entries(html: &str) -> Vec<(String, Option<u64>)> {
     let mut out = Vec::new();
     let mut rest = html;
     while let Some(rel) = rest.find("<a href=\"") {
@@ -376,10 +375,14 @@ mod tests {
 
     #[test]
     fn size_parser_strips_tags_and_nbsp() {
-        assert_eq!(parse_size(" &nbsp;<small>5,794,378 B</small>"), 5_794_378);
-        assert_eq!(parse_size("<small>4.5 MB</small>"), 4_718_592);
-        assert_eq!(parse_size("<small>1.2 GB</small>"), 1288490188);
-        assert_eq!(parse_size(" 1,032 B "), 1032);
+        assert_eq!(
+            parse_size(" &nbsp;<small>5,794,378 B</small>"),
+            Some(5_794_378)
+        );
+        assert_eq!(parse_size("<small>4.5 MB</small>"), Some(4_718_592));
+        assert_eq!(parse_size("<small>1.2 GB</small>"), Some(1288490188));
+        assert_eq!(parse_size(" 1,032 B "), Some(1032));
+        assert_eq!(parse_size("unknown"), None);
     }
 
     /// Answers every request with `status` and an empty body.

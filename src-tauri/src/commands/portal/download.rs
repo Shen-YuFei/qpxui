@@ -192,7 +192,7 @@ pub(super) async fn portal_cache_views_impl(
             view,
             format,
             path: local.to_string_lossy().to_string(),
-            size_bytes,
+            size_bytes: Some(size_bytes),
         });
     }
     Ok(out)

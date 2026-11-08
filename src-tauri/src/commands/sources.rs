@@ -117,7 +117,7 @@ mod tests {
         let found = &scan.datasets;
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].path, good.to_string_lossy());
-        assert_eq!(found[0].views[0].size_bytes, 1);
+        assert_eq!(found[0].views[0].size_bytes, Some(1));
         assert_eq!(scan.skipped.len(), 1);
         assert_eq!(scan.skipped[0].path, locked.to_string_lossy());
         assert!(scan.skipped[0].reason.contains("Permission denied"));

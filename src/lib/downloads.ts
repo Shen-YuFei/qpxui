@@ -74,13 +74,20 @@ export function useDownload() {
 /** Ask for confirmation above this size. */
 export const CONFIRM_BYTES = 2 * 1024 ** 3;
 
-export function totalBytes(views: ViewInfo[]): number {
-  return views.reduce((s, v) => s + v.sizeBytes, 0);
+/** Sum of the views' sizes, or null when any of them is unknown. */
+export function totalBytes(views: ViewInfo[]): number | null {
+  let total = 0;
+  for (const view of views) {
+    if (view.sizeBytes === null) return null;
+    total += view.sizeBytes;
+  }
+  return total;
 }
 
 /** True when the download may start. Shows an alert or a confirm otherwise. */
 export async function confirmDownload(views: ViewInfo[], kind: "portal" | "s3"): Promise<boolean> {
-  const need = totalBytes(views);
+  // An unknown size counts as 0: the checks use the sizes that are known.
+  const need = views.reduce((s, v) => s + (v.sizeBytes ?? 0), 0);
   const { free, reserve } = await api.cacheFreeSpace(kind);
   if (need + reserve > free) {
     await message(

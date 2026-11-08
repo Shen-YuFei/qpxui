@@ -47,7 +47,9 @@ mod tests {
             .expect("list views");
         assert!(!views.is_empty(), "expected views for {ds}");
         assert!(
-            views.iter().any(|v| v.size_bytes > 0),
+            views
+                .iter()
+                .any(|v| v.size_bytes.is_some_and(|size| size > 0)),
             "sizes should be > 0"
         );
 
@@ -67,7 +69,7 @@ mod tests {
         .await
         .expect("cache");
         assert_eq!(cached.len(), 1);
-        assert!(cached[0].size_bytes > 0);
+        assert!(cached[0].size_bytes.is_some_and(|size| size > 0));
         assert!(std::path::Path::new(&cached[0].path).exists());
     }
 
@@ -104,6 +106,8 @@ mod tests {
         .await
         .expect("list views from ref");
         assert!(!views.is_empty());
-        assert!(views.iter().any(|v| v.size_bytes > 0));
+        assert!(views
+            .iter()
+            .any(|v| v.size_bytes.is_some_and(|size| size > 0)));
     }
 }

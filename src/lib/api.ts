@@ -11,7 +11,7 @@ export interface ViewInfo {
   view: string;
   format: string;
   path: string;
-  sizeBytes: number;
+  sizeBytes: number | null;
 }
 
 export interface DatasetInfo {
@@ -32,7 +32,7 @@ export interface CollectionScan {
 
 export interface S3Object {
   key: string;
-  sizeBytes: number;
+  sizeBytes: number | null;
   lastModified: string | null;
 }
 

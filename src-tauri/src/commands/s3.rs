@@ -13,7 +13,7 @@ use tokio::sync::OnceCell;
 #[serde(rename_all = "camelCase")]
 pub struct S3Object {
     pub key: String,
-    pub size_bytes: u64,
+    pub size_bytes: Option<u64>,
     pub last_modified: Option<String>,
 }
 
@@ -119,7 +119,7 @@ pub async fn list_s3(bucket: String, prefix: Option<String>) -> Result<S3Listing
             if let Some(key) = o.key() {
                 objects.push(S3Object {
                     key: key.to_string(),
-                    size_bytes: o.size().unwrap_or(0) as u64,
+                    size_bytes: o.size().map(|size| size as u64),
                     last_modified: o.last_modified().map(|d| d.to_string()),
                 });
             }
@@ -337,7 +337,7 @@ async fn cache_s3_views_impl(
             view,
             format,
             path: local.to_string_lossy().to_string(),
-            size_bytes,
+            size_bytes: Some(size_bytes),
         });
     }
     Ok(out)
@@ -512,7 +512,7 @@ mod tests {
         // Opening the same views again is served from the cache.
         let again = open("s3-second").await.unwrap();
         assert_eq!(count(&requests, "GET"), 2);
-        assert_eq!(again[1].size_bytes, b.len() as u64);
+        assert_eq!(again[1].size_bytes, Some(b.len() as u64));
     }
 
     #[test]

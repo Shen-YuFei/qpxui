@@ -91,8 +91,10 @@ Download the installer for your platform from the
 Downloads show progress and can be cancelled at any point, even in the middle of a file; partial
 files are removed. Before a download starts, the app checks the free space on the cache disk: it
 refuses a download that would leave less than 1 GB free, and asks before downloading more than
-2 GB. Choosing **New source** or another dataset cancels a running download and stops the previous
-dataset's queries.
+2 GB. A size that the portal listing or S3 does not report is shown as —; such a file counts as
+0 in these checks, and a selection that includes one shows its total as —. Choosing
+**New source** or another dataset cancels a running download and stops the previous dataset's
+queries.
 
 While you stream, the sidebar shows how much of each file has actually been fetched (for example
 `⚡ 16 MB / 170 MB`).

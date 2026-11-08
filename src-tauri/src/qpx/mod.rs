@@ -14,7 +14,7 @@ pub struct ViewInfo {
     pub format: String,
     /// Local absolute path, or an `s3://bucket/key` locator for remote views.
     pub path: String,
-    pub size_bytes: u64,
+    pub size_bytes: Option<u64>,
 }
 
 /// All views belonging to one dataset prefix.
@@ -116,7 +116,7 @@ pub fn discover_dir(dir: &Path) -> Result<Vec<DatasetInfo>, String> {
             view,
             format,
             path: path.to_string_lossy().to_string(),
-            size_bytes: meta.len(),
+            size_bytes: Some(meta.len()),
         });
     }
     Ok(into_datasets(by_prefix, dir.to_string_lossy().to_string()))
@@ -212,7 +212,7 @@ mod tests {
                 (ds.prefix, views)
             })
             .collect();
-        let view = |v: &str, n: u64| (v.to_string(), n);
+        let view = |v: &str, n: u64| (v.to_string(), Some(n));
         assert_eq!(
             found,
             [
