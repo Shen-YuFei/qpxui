@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
-import { countRows, describeTable, ensureViewReady, type QueryResult } from "../lib/duck";
+import { describeTable, ensureViewReady, type QueryResult } from "../lib/duck";
 import { isStructured, toJson } from "../lib/format";
 import type { ViewInfo } from "../lib/api";
 import type { TableRef } from "../lib/report";
 import { viewScale } from "../lib/report";
-import { cellFilter, isPeakColumn, tablePage } from "../lib/queries/table";
+import { cellFilter, isPeakColumn, tableCount, tablePage } from "../lib/queries/table";
 import { state } from "../store";
 import ResultCell from "./table/ResultCell.vue";
 import CellMenu from "./table/CellMenu.vue";
@@ -61,7 +61,7 @@ async function load() {
         }
       }
     }
-    const n = await countRows(table.value);
+    const n = await tableCount(table.value, where.value);
     if (id !== loadSeq) return;
     total.value = n;
 

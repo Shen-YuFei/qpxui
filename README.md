@@ -199,7 +199,8 @@ has spectra is decided from the parquet footer statistics. π-MSNet file names
 
 Click a view in the sidebar to work with its rows directly:
 
-- **Browse**: a table showing 500 rows per page, with column sorting and a live SQL `WHERE` filter.
+- **Browse**: a table showing 500 rows per page, with column sorting and a live SQL `WHERE` filter;
+  the row count follows the filter.
   Nested cells (lists and structs) can be expanded.
 - **Summary**: automatic charts per column, and a histogram for any numeric column.
 - **Query**: SQL (DuckDB dialect, the same engine as `qpxc query sql`) against the registered

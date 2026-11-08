@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cellFilter, pageSql, selectList } from "./table";
+import { cellFilter, countSql, pageSql, selectList } from "./table";
 
 describe("selectList", () => {
   const cols = ["psm_id", "mz_array", "charge", "Intensity_Array"];
@@ -39,5 +39,12 @@ describe("cellFilter", () => {
   it("compares other values as text", () => {
     expect(cellFilter("decoy", true)).toBe(`CAST("decoy" AS VARCHAR) = 'true'`);
     expect(cellFilter("x", Infinity)).toBe(`CAST("x" AS VARCHAR) = 'Infinity'`);
+  });
+});
+
+describe("countSql", () => {
+  it("counts the same filtered rows as the page query", () => {
+    expect(countSql('a"b', " score >= 3 ")).toBe('SELECT count(*) FROM "a""b" WHERE score >= 3');
+    expect(countSql("pg", "  ")).toBe('SELECT count(*) FROM "pg"');
   });
 });

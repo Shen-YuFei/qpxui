@@ -30,10 +30,23 @@ export interface PageRequest {
   pageSize: number;
 }
 
+function whereClause(where: string): string {
+  return where.trim() ? ` WHERE ${where.trim()}` : "";
+}
+
+export function countSql(table: string, where: string): string {
+  return `SELECT count(*) FROM ${ident(table)}${whereClause(where)}`;
+}
+
+/** Rows that match the browse filter. */
+export async function tableCount(table: string, where: string): Promise<number> {
+  const r = await runSql(countSql(table, where));
+  return Number(r.rows[0][0]);
+}
+
 export function pageSql(r: PageRequest): string {
-  const whereClause = r.where.trim() ? ` WHERE ${r.where.trim()}` : "";
   const orderClause = r.sort ? ` ORDER BY ${ident(r.sort.col)} ${r.sort.dir}` : "";
-  return `SELECT ${selectList(r.cols, r.peaks)} FROM ${ident(r.table)}${whereClause}${orderClause} LIMIT ${r.pageSize} OFFSET ${r.page * r.pageSize}`;
+  return `SELECT ${selectList(r.cols, r.peaks)} FROM ${ident(r.table)}${whereClause(r.where)}${orderClause} LIMIT ${r.pageSize} OFFSET ${r.page * r.pageSize}`;
 }
 
 /** One page of rows. */
