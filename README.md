@@ -261,7 +261,10 @@ may handle certificate configuration differently. HTTPS certificate verification
 
 **Download to cache** instead fetches whole files once (with progress and cancel), for fully
 offline use. Cached files are kept in the OS cache folder (`~/Library/Caches/qpxui/` on macOS,
-`~/.cache/qpxui/` on Linux, `%LOCALAPPDATA%\qpxui\` on Windows).
+`~/.cache/qpxui/` on Linux, `%LOCALAPPDATA%\qpxui\` on Windows). S3 downloads go to its `s3-cache/`
+folder. The first S3 download after the app starts deletes the files that older versions left
+there in their bucket/key layout. If one cannot be deleted, that download fails with its path and
+the reason, and the next S3 download tries again.
 
 The engine, workers and signed Parquet extensions are bundled with the app. Local and cached
 Parquet files can be queried on a first launch without an internet connection. Portal discovery,

@@ -191,6 +191,38 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     })
 }
 
+/// Remove what the old `<bucket>/<flattened key>` layout left in the cache:
+/// every top-level entry not named like a [`cache_path`] folder. Symlinks are
+/// removed, not followed.
+fn cleanup_legacy_cache(root: &std::path::Path) -> Result<(), String> {
+    let entries = match std::fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(format!("{}: {e}", root.display())),
+    };
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("{}: {e}", root.display()))?;
+        let name = entry.file_name();
+        if name.to_str().is_some_and(|s| {
+            s.len() == 16
+                && s.bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        }) {
+            continue;
+        }
+        let path = entry.path();
+        let remove = || -> std::io::Result<()> {
+            if entry.file_type()?.is_dir() {
+                std::fs::remove_dir_all(&path)
+            } else {
+                std::fs::remove_file(&path)
+            }
+        };
+        remove().map_err(|e| format!("{}: {e}", path.display()))?;
+    }
+    Ok(())
+}
+
 /// Download the given `s3://bucket/key` parquet views to the local cache so
 /// the rest of the app can query them as ordinary local files. Reports live
 /// progress over the `download-progress` event for each file.
@@ -203,6 +235,15 @@ pub async fn cache_s3_views(
 ) -> Result<Vec<ViewInfo>, String> {
     let client = client_for_bucket(&bucket).await;
     let root = CacheKind::S3.root()?;
+    // Once per run; a failed cleanup is reported and tried again next time.
+    static CLEANED: Mutex<bool> = Mutex::new(false);
+    {
+        let mut cleaned = CLEANED.lock().unwrap();
+        if !*cleaned {
+            cleanup_legacy_cache(&root)?;
+            *cleaned = true;
+        }
+    }
     cache_s3_views_impl(Some(&app), &client, &root, cancel_id, bucket, paths).await
 }
 
@@ -308,6 +349,29 @@ mod tests {
     use std::collections::HashMap;
     use std::path::{Component, Path};
     use std::sync::Arc;
+
+    #[cfg(unix)]
+    #[test]
+    fn legacy_cache_entries_are_removed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("s3-cache");
+        for dir in ["bucket", "ABCDEF0123456789", "0123456789abcdef"] {
+            std::fs::create_dir_all(root.join(dir)).unwrap();
+            std::fs::write(root.join(dir).join("A.pg.parquet"), b"x").unwrap();
+        }
+        std::fs::write(root.join("bucket_A.pg.parquet"), b"x").unwrap();
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(outside.join("keep"), b"x").unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("link")).unwrap();
+        cleanup_legacy_cache(&root).unwrap();
+        let left: Vec<_> = std::fs::read_dir(&root)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(left, ["0123456789abcdef"]);
+        assert!(outside.join("keep").exists());
+    }
 
     type Requests = Arc<Mutex<Vec<String>>>;
 
