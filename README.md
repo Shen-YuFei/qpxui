@@ -377,6 +377,15 @@ The front end has three layers, kept apart by ESLint import rules (`eslint.confi
 - `src/store.ts` holds the app state and imports only `lib`.
 - Components render and handle input; they reach the backend and run SQL only through `lib`.
 
+The release WebView CSP allows bundled assets, WASM, local DuckDB workers, Tauri IPC and the
+Rust range proxy on `127.0.0.1` with a dynamic port. Images can use `data:`/`blob:` and chart
+tooltips can use inline style attributes; scripts cannot use `unsafe-eval` or inline handlers.
+Charts use `vue-echarts/csp` with bundled CSS. The only allowed external connections are the
+Koina and two PROXI/USI endpoints used by spectrum mirrors. Portal and S3 requests run in Rust
+and do not need external WebView permissions. CSP supplements the native IPC capabilities.
+Development loads Vite directly at `http://localhost:1420`, which does not serve this CSP;
+verify the policy in a release build.
+
 QPX names live in `src/lib/qpx.ts`: the views the viewer reads and `COL`, every view column it
 reads, checked against the QPX schemas. Queries select only the columns they need and adapt to
 each dataset's schema: `anchor_protein` vs `protein_accessions`, a struct- or list-typed

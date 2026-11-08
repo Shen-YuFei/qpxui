@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import VChart from "vue-echarts";
+import VChart from "vue-echarts/csp";
 import { ensureViewReady, describeTable, countRows, type ColumnInfo } from "../lib/duck";
 import type { ViewInfo } from "../lib/api";
 import { scanBytes, viewScale, type ViewScale } from "../lib/report";
