@@ -2,7 +2,7 @@
 // The portal picker's heading for the selected dataset: accession, title,
 // organism and instrument, and its size and counts.
 import type { PortalDataset } from "../../lib/api";
-import { fmtSize } from "../../lib/format";
+import { fmtBytes } from "../../lib/format";
 
 defineProps<{ ds: PortalDataset }>();
 </script>
@@ -17,7 +17,7 @@ defineProps<{ ds: PortalDataset }>();
       <span v-if="ds.samples"> · {{ ds.samples }} samples</span>
     </div>
     <div class="stats">
-      <div><b>{{ fmtSize(ds.totalSize) }}</b><span class="muted">size</span></div>
+      <div><b>{{ fmtBytes(ds.totalSize) }}</b><span class="muted">size</span></div>
       <div><b>{{ ds.peptides?.toLocaleString() ?? "—" }}</b><span class="muted">peptides</span></div>
       <div><b>{{ ds.psmCount?.toLocaleString() ?? "—" }}</b><span class="muted">PSMs</span></div>
       <div><b>{{ ds.proteins?.toLocaleString() ?? "—" }}</b><span class="muted">proteins</span></div>

@@ -6,7 +6,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { api, type DatasetInfo, type ViewInfo } from "../lib/api";
 import { loadDatasets } from "../store";
 import { confirmDownload, totalBytes, useDownload } from "../lib/downloads";
-import { fmtSize } from "../lib/format";
+import { fmtBytes } from "../lib/format";
 import DownloadProgress from "./DownloadProgress.vue";
 
 const props = defineProps<{
@@ -95,7 +95,7 @@ async function download() {
   <div class="loadbox">
     <div class="toolbar">
       <span class="muted">
-        {{ views.length }} view(s) · {{ ticked.length }} selected<template v-if="ticked.length"> · {{ fmtSize(totalBytes(ticked), "0 B") }}</template>
+        {{ views.length }} view(s) · {{ ticked.length }} selected<template v-if="ticked.length"> · {{ fmtBytes(totalBytes(ticked)) }}</template>
       </span>
       <div class="actions">
         <button
@@ -130,7 +130,7 @@ async function download() {
       <label v-for="v in views" :key="v.path" class="view">
         <input v-model="checked[v.path]" type="checkbox" />
         <span class="mono view-name">{{ v.name }}</span>
-        <span class="muted">{{ fmtSize(v.sizeBytes, "0 B") }}</span>
+        <span class="muted">{{ fmtBytes(v.sizeBytes) }}</span>
       </label>
     </div>
     <div v-else-if="listing" class="muted">Loading views… <span class="spinner"></span></div>

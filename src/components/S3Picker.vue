@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 import { api, type DatasetInfo, type S3Listing, type ViewInfo } from "../lib/api";
 import { loadDatasets } from "../store";
 import { confirmDownload, totalBytes, useDownload } from "../lib/downloads";
-import { fmtSize } from "../lib/format";
+import { fmtBytes } from "../lib/format";
 import DownloadProgress from "./DownloadProgress.vue";
 
 const bucket = ref("");
@@ -125,7 +125,7 @@ const streamHint =
 
     <template v-if="listing">
       <div class="toolbar">
-        <span class="muted">{{ remoteDatasets.length }} dataset(s) found<template v-if="selectedCount"> · {{ selectedCount }} selected · {{ fmtSize(selectedBytes, "0 B") }}</template></span>
+        <span class="muted">{{ remoteDatasets.length }} dataset(s) found<template v-if="selectedCount"> · {{ selectedCount }} selected · {{ fmtBytes(selectedBytes) }}</template></span>
         <div class="actions">
           <button @click="streamSelection" :disabled="busy || !selectedCount" :title="streamHint">
             ⚡ Stream (lazy)
@@ -162,7 +162,7 @@ const streamHint =
             <label v-for="v in ds.views" :key="v.path" class="view">
               <input v-model="checked[v.path]" type="checkbox" />
               <span class="mono view-name">{{ v.name }}</span>
-              <span class="muted">{{ fmtSize(v.sizeBytes, "0 B") }}</span>
+              <span class="muted">{{ fmtBytes(v.sizeBytes) }}</span>
             </label>
           </div>
         </div>

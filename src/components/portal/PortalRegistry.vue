@@ -2,7 +2,7 @@
 // The portal picker's searchable, sortable list of registry datasets.
 import { computed, ref } from "vue";
 import { portalRef, type PortalDataset } from "../../lib/api";
-import { fmtCount, fmtSize } from "../../lib/format";
+import { fmtCount, fmtBytes } from "../../lib/format";
 import { REGISTRY_SORTS as SORTS, filterRegistry, nextSort, type RegistrySort } from "../../lib/registry";
 
 const props = defineProps<{ rows: PortalDataset[]; selected: PortalDataset | null }>();
@@ -55,7 +55,7 @@ const filtered = computed(() => filterRegistry(props.rows, query.value, sortKey.
       >
         <div class="row-top">
           <span class="mono acc">{{ r.accession }}</span>
-          <span class="muted size" v-if="r.totalSize">{{ fmtSize(r.totalSize) }}</span>
+          <span class="muted size" v-if="r.totalSize != null">{{ fmtBytes(r.totalSize) }}</span>
         </div>
         <div class="title">{{ r.title || "—" }}</div>
         <div class="muted sub" v-if="r.organism || r.instrument">

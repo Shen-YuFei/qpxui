@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { hasReport, openReport, searchFor, state, stopQueries } from "../store";
 import { api, type StreamStat, type ViewInfo } from "../lib/api";
 import { registered } from "../lib/duck";
-import { fmtSize } from "../lib/format";
+import { fmtBytes } from "../lib/format";
 
 const datasets = computed(() => state.datasets);
 
@@ -27,7 +27,7 @@ function isStreamed(v: ViewInfo): boolean {
 function streamTitle(v: ViewInfo): string {
   const s = streamStats.value[v.path];
   if (!s) return "Streamed (lazy) — not read yet";
-  return `Streamed (lazy): ${fmtSize(s.fetchedBytes, "0 B")} of ${fmtSize(s.sizeBytes, "0 B")} fetched in ${s.requests} range request(s)`;
+  return `Streamed (lazy): ${fmtBytes(s.fetchedBytes)} of ${fmtBytes(s.sizeBytes)} fetched in ${s.requests} range request(s)`;
 }
 
 
@@ -118,14 +118,14 @@ const viewIcon: Record<string, string> = {
           class="view"
           :class="{ active: state.page === 'view' && state.selectedView?.path === v.path }"
           @click="selectView(v)"
-          :title="`${v.name} · ${fmtSize(v.sizeBytes, '0 B')}`"
+          :title="`${v.name} · ${fmtBytes(v.sizeBytes)}`"
         >
           <span class="vi">{{ viewIcon[v.view] ?? '📦' }}</span>
           <span class="vname mono">{{ v.view }}</span>
           <span v-if="isStreamed(v)" class="stream muted" :title="streamTitle(v)">
-            ⚡ {{ fmtSize(streamStats[v.path]?.fetchedBytes ?? 0, "0 B") }} /
+            ⚡ {{ fmtBytes(streamStats[v.path]?.fetchedBytes ?? 0) }} /
           </span>
-          <span class="vsize muted">{{ fmtSize(v.sizeBytes, "0 B") }}</span>
+          <span class="vsize muted">{{ fmtBytes(v.sizeBytes) }}</span>
           <span v-if="registered.has(v.path)" class="ok" title="Loaded in DuckDB">✓</span>
         </div>
       </div>

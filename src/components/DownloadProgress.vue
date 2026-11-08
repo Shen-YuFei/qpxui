@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { DownloadProgress } from "../lib/api";
-import { fmtSize } from "../lib/format";
+import { fmtBytes } from "../lib/format";
 import { overall } from "../lib/progress";
 
 const props = defineProps<{
@@ -37,7 +37,7 @@ function pct(n: number): string {
     <div v-for="b in active" :key="b.file" class="file-bar">
       <div class="file-row">
         <span class="mono file-name">{{ b.file }}</span>
-        <span class="muted">{{ fmtSize(b.done, "0 B") }} / {{ b.total ? fmtSize(b.total, "0 B") : "…" }} · {{ pct(b.percent) }}</span>
+        <span class="muted">{{ fmtBytes(b.done) }} / {{ b.total ? fmtBytes(b.total) : "…" }} · {{ pct(b.percent) }}</span>
       </div>
       <div class="bar"><div class="fill" :style="{ width: pct(b.percent) }"></div></div>
     </div>
