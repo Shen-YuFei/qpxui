@@ -1,6 +1,7 @@
 # Node
 node_modules/
 dist/
+public/duckdb-extensions/
 
 # Tauri / Rust
 src-tauri/target/

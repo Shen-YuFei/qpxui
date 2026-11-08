@@ -188,7 +188,8 @@ PSMs, and clicking one opens an annotated spectrum in the style of the PRIDE USI
 
 ![Spectrum viewer: annotated PSM mirrored against a Prosit prediction (cosine 0.71)](docs/screenshots/spectrum-mirror.png)
 
-Predictions and USI lookups need internet access; everything else is local.
+Predictions and USI lookups need internet access. Annotation and scoring run locally;
+reading a streamed PSM also needs access to its remote source.
 
 Only the selected PSM's row is read, so this also works on large streamed files. Whether a file
 has spectra is decided from the parquet footer statistics. π-MSNet file names
@@ -258,6 +259,10 @@ may handle certificate configuration differently. HTTPS certificate verification
 offline use. Cached files are kept in the OS cache folder (`~/Library/Caches/qpxui/` on macOS,
 `~/.cache/qpxui/` on Linux, `%LOCALAPPDATA%\qpxui\` on Windows).
 
+The engine, workers and signed Parquet extensions are bundled with the app. Local and cached
+Parquet files can be queried on a first launch without an internet connection. Portal discovery,
+remote streaming, Koina predictions and USI retrieval still need a connection.
+
 ### Large streamed files
 
 Opening a streamed file of 1 GB or more reads only its parquet footer, so it opens in seconds
@@ -294,6 +299,17 @@ npm install
 npm run tauri dev      # run the app with hot reload (also compiles the Rust backend)
 npm run tauri build    # installers for this platform → src-tauri/target/release/bundle/
 ```
+
+`npm run dev` and `npm run build` first run `scripts/fetch-duckdb-extensions.mjs`; Tauri's
+dev/build hooks and the CI frontend build use these scripts too. The first build downloads the
+signed Parquet extension for both WASM bundles into the ignored `public/duckdb-extensions/`
+directory. Later builds verify SHA-256 and reuse these files without a download. A mismatched
+hash fails the build; remove the affected file before downloading it again. The application
+loads extensions from its own assets, with signature verification enabled and no online fallback.
+
+When upgrading `@duckdb/duckdb-wasm`, update `VERSION` and both `SHA256` entries in that script
+from the matching official Parquet extension downloads. The script reads the embedded engine's
+version through the installed package's Node bindings and fails if it differs from the pin.
 
 **Checks** (the same ones CI runs on every PR):
 
@@ -422,7 +438,7 @@ qpxui/
 │   ├── tauri.conf.json, Cargo.toml, capabilities/
 │   ├── examples/stream_proxy.rs   # manual check of the stream proxy against S3 or the portal
 │   └── src/{lib.rs, qpx/, commands/}
-├── scripts/                       # fetch-sample.mjs, make-icon.py
+├── scripts/                       # fetch-duckdb-extensions.mjs, fetch-sample.mjs, make-icon.py
 └── .github/workflows/             # ci.yml (PR checks), release.yml (installers)
 ```
 </details>

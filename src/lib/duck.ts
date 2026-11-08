@@ -3,8 +3,8 @@ import { reactive } from "vue";
 import { api, type ViewInfo } from "./api";
 import { CANCELLED, engineErrorText } from "./errors";
 
-// Bundle the DuckDB WASM + worker assets locally (no CDN), so the desktop
-// app keeps working offline. Vite turns these imports into static asset URLs.
+// Bundle the engine and workers here; predev/prebuild also fetch the signed
+// Parquet extension into public/, so local queries need no runtime downloads.
 // No `coi` (threads) bundle: it needs a cross-origin isolated page, which the
 // app never is, so selectBundle would never pick it.
 import duckdb_wasm_mvp from "@duckdb/duckdb-wasm/dist/duckdb-mvp.wasm?url";
@@ -89,6 +89,8 @@ async function doInit() {
     filesystem: { reliableHeadRequests: true, allowFullHTTPReads: false, forceFullHTTPReads: false },
   });
   conn = await d.connect();
+  const repository = new URL("/duckdb-extensions", window.location.href).href;
+  await conn.query(`SET custom_extension_repository = '${repository}'`);
   // Prefetch whole column chunks of a row group in one go instead of many
   // small reads: far fewer round trips for streamed (remote) parquet files.
   await conn.query("SET prefetch_all_parquet_files = true");
