@@ -70,19 +70,38 @@ pub async fn portal_registry(page_size: Option<usize>) -> Result<Vec<PortalDatas
     registry(&portal_http::client()?, page_size).await
 }
 
-/// GET a JSON document from the portal's API, trying up to three times.
+/// GET JSON, retrying transport and server failures after 0.5 s and 1 s.
 async fn get_json<T: serde::de::DeserializeOwned>(client: &Client, url: &str) -> Result<T, String> {
     let mut last = "no attempt".to_string();
-    for _ in 0..3 {
+    for attempt in 0..3 {
+        if attempt > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(500 * attempt)).await;
+        }
         match client.get(url).send().await {
-            Ok(resp) => match resp.error_for_status() {
-                Ok(resp) => match resp.json::<T>().await {
-                    Ok(v) => return Ok(v),
-                    Err(e) => last = format!("parse: {e}"),
-                },
-                Err(e) => last = format!("http: {e}"),
-            },
-            Err(e) => last = format!("request: {e:?}"),
+            Ok(resp) => {
+                if let Err(e) = resp.error_for_status_ref() {
+                    last = format!("http: {e}");
+                    if resp.status().is_server_error() {
+                        continue;
+                    }
+                    break;
+                }
+                match resp.bytes().await {
+                    Ok(body) => {
+                        return serde_json::from_slice(&body)
+                            .map_err(|e| format!("{url}: parse: {e}"))
+                    }
+                    Err(e) => last = format!("body: {e}"),
+                }
+            }
+            Err(e) => {
+                last = format!("request: {e:?}");
+                // Connect, timeout and transport errors are request errors;
+                // builder and redirect errors would fail the same way again.
+                if !e.is_request() {
+                    break;
+                }
+            }
         }
     }
     Err(format!("{url}: {last}"))
@@ -268,6 +287,87 @@ pub async fn portal_facets() -> Result<PortalFacets, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn json_case(
+        responses: Vec<(&str, &str)>,
+    ) -> (Result<serde_json::Value, String>, Vec<std::time::Instant>) {
+        use std::sync::{Arc, Mutex};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/fixture", listener.local_addr().unwrap());
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let seen = requests.clone();
+        let responses: Vec<_> = responses
+            .into_iter()
+            .map(|(s, b)| (s.to_string(), b.to_string()))
+            .collect();
+        let server = tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut buf = [0u8; 4096];
+                let _ = socket.read(&mut buf).await;
+                let index = {
+                    let mut seen = seen.lock().unwrap();
+                    seen.push(std::time::Instant::now());
+                    seen.len() - 1
+                };
+                let (status, body) = &responses[index.min(responses.len() - 1)];
+                if status == "disconnect" {
+                    continue;
+                }
+                let length = body.len() + if status == "short body" { 10 } else { 0 };
+                let status = if status == "short body" {
+                    "200 OK"
+                } else {
+                    status
+                };
+                let reply = format!("HTTP/1.1 {status}\r\nContent-Length: {length}\r\nConnection: close\r\n\r\n{body}");
+                socket.write_all(reply.as_bytes()).await.unwrap();
+            }
+        });
+        let result = get_json(&Client::builder().no_proxy().build().unwrap(), &url).await;
+        server.abort();
+        if let Err(e) = &result {
+            assert!(e.starts_with(&format!("{url}: ")), "{e}");
+        }
+        let seen = requests.lock().unwrap().clone();
+        (result, seen)
+    }
+
+    #[tokio::test]
+    async fn json_does_not_retry_client_errors_or_invalid_json() {
+        for reply in [("404 Not Found", "missing"), ("200 OK", "invalid json")] {
+            let (result, seen) = json_case(vec![reply]).await;
+            assert!(result.is_err());
+            assert_eq!(seen.len(), 1, "{reply:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn json_retries_server_errors_with_backoff() {
+        for status in ["500 Internal Server Error", "503 Service Unavailable"] {
+            let (result, seen) = json_case(vec![(status, "unavailable")]).await;
+            assert!(result
+                .unwrap_err()
+                .contains(status.split_whitespace().next().unwrap()));
+            assert_eq!(seen.len(), 3);
+            assert!(seen[1].duration_since(seen[0]) >= std::time::Duration::from_millis(450));
+            assert!(seen[2].duration_since(seen[1]) >= std::time::Duration::from_millis(900));
+        }
+    }
+
+    #[tokio::test]
+    async fn json_recovers_on_second_attempt() {
+        for first in [
+            ("503 Service Unavailable", "unavailable"),
+            ("short body", "{"),
+            ("disconnect", ""),
+        ] {
+            let (result, seen) = json_case(vec![first, ("200 OK", "{\"ok\":true}")]).await;
+            assert_eq!(result.unwrap(), serde_json::json!({"ok": true}));
+            assert_eq!(seen.len(), 2, "{first:?}");
+        }
+    }
 
     #[test]
     fn search_results_read_snake_case_and_send_camel_case() {

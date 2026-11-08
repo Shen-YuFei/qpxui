@@ -234,6 +234,10 @@ Click a view in the sidebar to work with its rows directly:
 - **Portal**: the proxy follows the portal's redirect to a short-lived signed storage URL, and gets
   a new one when it expires.
 
+Registry and filter requests to the portal API are retried twice, after 0.5 s and then 1 s, when
+the connection fails or the server answers with a 5xx error. Other errors, such as a 404 or an
+invalid reply, are reported at once.
+
 Portal HTTPS requests use the operating system's certificate verifier and trust store, including
 system-provided intermediates on macOS and Windows. If your company installs its CA in the system
 store, no extra configuration should be needed.
