@@ -141,7 +141,7 @@ export const api = {
   chooseFile: (): Promise<string | null> =>
     open({
       multiple: false,
-      filters: [{ name: "QPX", extensions: ["parquet", "tsv"] }],
+      filters: [{ name: "QPX", extensions: ["parquet"] }],
     }) as Promise<string | null>,
 
   /** Native folder picker. */
