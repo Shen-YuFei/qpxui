@@ -64,13 +64,11 @@ pub struct PsModification {
     pub n_datasets: usize,
 }
 
-/// A pure-uppercase amino-acid run (>= 5 letters) is read as a peptide sequence;
+/// A standard uppercase amino-acid run (>= 8 residues) is read as a peptide sequence;
 /// anything else is treated as a protein or gene identifier/name.
 fn looks_like_peptide(s: &str) -> bool {
     let t = s.trim();
-    t.len() >= 5
-        && t.chars()
-            .all(|c| c.is_ascii_alphabetic() && c.is_uppercase())
+    t.len() >= 8 && t.bytes().all(|c| b"ACDEFGHIKLMNPQRSTVWY".contains(&c))
 }
 
 fn non_empty(v: Option<&str>) -> Option<&str> {
@@ -218,6 +216,25 @@ mod tests {
             url("ACTB", Some("peptide")),
             format!("{BASE}/search/peptide?sequence=ACTB&match=exact&limit=50")
         );
+    }
+
+    #[test]
+    fn auto_requires_eight_standard_uppercase_residues() {
+        for query in [
+            "GAPDH",
+            "PEPTIDE",
+            "peptidek",
+            "PEPTIDEB",
+            "PEPTIDEX",
+            "PEPTIDEÜ",
+        ] {
+            let url = search_url(query, Some("auto"), None, None, None, None).unwrap();
+            assert_eq!(url.path(), "/peptide-search/search/protein", "{query}");
+        }
+        for query in ["PEPTIDEK", " PEPTIDEK ", "ACDEFGHIKLMNPQRSTVWY"] {
+            let url = search_url(query, Some("auto"), None, None, None, None).unwrap();
+            assert_eq!(url.path(), "/peptide-search/search/peptide", "{query}");
+        }
     }
 
     #[test]

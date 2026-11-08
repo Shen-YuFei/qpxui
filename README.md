@@ -86,7 +86,7 @@ Download the installer for your platform from the
 | **Folder / collection** | Opens one QPX dataset folder, or a folder tree holding many projects. |
 | **S3 bucket** | Lists datasets under a bucket/prefix using your AWS credentials. You can stream the files lazily or download them to a local cache. S3-compatible stores (MinIO, Ceph) work too. |
 | **Quantms portal** | Searchable list of the datasets on [portal.quantms.org](https://portal.quantms.org) (title, organism, instrument, counts). You can stream a dataset lazily or download it to a local cache. No account needed. |
-| **Discover quantms data** | Searches the portal's datasets by text, organism, instrument and collection, and finds the datasets that contain a peptide, protein or gene. Expand a result to stream or download its views. |
+| **Discover quantms data** | Searches the portal's datasets by text, organism, instrument and collection, and finds the datasets that contain a peptide, protein or gene. In **Auto** mode, an upper-case string of 8 or more standard amino acids is searched as a peptide, as in the sidebar search box, and anything else as a protein or gene. Expand a result to stream or download its views. |
 
 Downloads show progress and can be cancelled at any point, even in the middle of a file; partial
 files are removed. Before a download starts, the app checks the free space on the cache disk: it
