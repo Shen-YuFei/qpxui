@@ -62,13 +62,13 @@ Download the installer for your platform from the
 ## Quick start
 
 1. Launch QPX UI and pick a source:
-   - **🌍 Quantms portal**: pick a reanalysed dataset (for example `PXD004452`), then press **⚡ Stream**.
-   - **🔎 Discover quantms data**: search the portal's datasets, or find the datasets that contain a
+   - **Quantms portal**: pick a reanalysed dataset (for example `PXD004452`), then press **Stream**.
+   - **Discover quantms data**: search the portal's datasets, or find the datasets that contain a
      peptide, protein or gene; expand one to stream or download its views. The start page also
      lists a few recommended datasets.
-   - **🗂️ Folder / collection**: a folder with one dataset, or with many `PXD*/` dataset folders.
-   - **📄 Single file**: one `*.parquet` view; the files next to it are picked up too.
-   - **☁️ S3 bucket**: a bucket/prefix, read with your AWS credentials.
+   - **Folder / collection**: a folder with one dataset, or with many `PXD*/` dataset folders.
+   - **Single file**: one `*.parquet` view; the files next to it are picked up too.
+   - **S3 bucket**: a bucket/prefix, read with your AWS credentials.
 2. The **dataset report** opens. Browse the tabs, or type a protein, gene or peptide into the
    search box in the sidebar.
 3. Click any view in the sidebar (`feature`, `psm`, `pg`, …) to browse its rows, chart its columns,
@@ -97,13 +97,13 @@ refuses a download that would leave less than 1 GB free, and asks before downloa
 queries.
 
 While you stream, the sidebar shows how much of each file has actually been fetched (for example
-`⚡ 16 MB / 170 MB`).
+`16 MB / 170 MB`).
 
 ### Dataset report
 
 Selecting a dataset that has a `feature`, `psm` or `pg` view opens its report. It works like the
 portal's Dataset Explorer, but runs locally on any QPX data. You can also reach it from
-**📈 Report & search** in the sidebar.
+**Report & search** in the sidebar.
 
 - **Header**: title, description, organisms, instruments, enzymes, software, and PRIDE/PubMed
   links. **Cite this data** copies a citation or saves it as BibTeX or RIS.
@@ -118,13 +118,14 @@ The report has these tabs. A tab only appears when the dataset has the data for 
 | **Overview** | Identifications per run. Distributions of precursor charge, peptide length, missed cleavages, peptides per protein group, precursor mass error (ppm), retention time, intensity, posterior error probability and peptide q-value. |
 | **QC** | Identifications per run (features, peptides, proteins, protein groups). Median intensity and median mass error per run, to spot loading or calibration drift. Intensity distribution per sample (TMT channels are matched to samples through the run view). A per-run table with sample, fraction and instrument. |
 | **PTMs** | How often each modification occurs (counted by peptidoforms, peptides or features), drawn in your PTM colours. Modified sites by residue, modifications per peptide, and a table; click a modification to list its peptides. |
-| **Samples** | Charts of the sample metadata (organism, tissue, disease, cell line, sex, …) and a filterable sample table showing which runs and channels each sample was measured in. |
+| **Samples** | Charts of the sample metadata (organism, tissue, disease, cell line, sex, …), coloured by biological group (see below), and a filterable sample table showing which runs and channels each sample was measured in. |
 | **Proteins / Peptidoforms** | Search; see below. |
 | **Quantification** | Protein × sample abundance matrix, sample correlation, PCA and per-protein profiles; see below. |
 
 Statistics are computed over target rows only (decoys left out). Histograms show the central 99%
 of values, and the mass-error histogram also drops extreme outliers such as isotope-error matches.
-Bars are labelled with the start of their bin; hover a bar for its range.
+Continuous distributions are drawn as a filled line and counts as bars; points and bars are
+labelled with the start of their bin, and hovering one shows its range.
 Results are cached, so switching tabs is instant.
 
 ![QC tab: identifications, median intensity and mass error per run, intensity per sample](docs/screenshots/report-qc.png)
@@ -144,6 +145,12 @@ The **Quantification** tab appears when the `pg` view (or, failing that, the `fe
   variance explained.
 - **Abundance profile**: pick a protein from the table to see its abundance in every sample,
   coloured by group, with group means.
+- **Colours**: samples are coloured as on the portal. Tissues and cell types take the colour of
+  their organ system (looked up in UBERON through the EBI Ontology Lookup Service), organisms of
+  their taxonomic group (UniProt taxonomy), and diseases of their class (healthy, cancer, other);
+  the values of one group take lighter and darker shades of its colour. Developmental stages
+  take a ramp from youngest to oldest, and other attributes the palette by sample count. The
+  lookups are kept between sessions; without a connection, values take the palette by count.
 - **Export**: every chart as PNG/CSV, and the whole log2 matrix as CSV (**Matrix CSV**).
 
 ![Quantification tab: sample correlation, PCA coloured by disease and a protein abundance profile](docs/screenshots/quantification.png)
@@ -215,10 +222,13 @@ Click a view in the sidebar to work with its rows directly:
 
 ### PTMs, settings & export
 
-- Peptides and peptidoforms are colour-coded by modification, with short codes and tooltips
-  (name, CV accession, residue, position). A modification takes the colour of its CV accession, or
-  else of the longest known keyword in its name, so *Dimethyl* is not coloured as *Methyl*.
-- **⚙ Settings**: dark or light theme, and a colour for each PTM, which every table and chart uses.
+- Peptides and peptidoforms are colour-coded by modification: a modified residue is tinted and
+  underlined in its modification's colour, with a short code and a tooltip (name, CV accession,
+  residue, position). A modification takes the colour of its CV accession, or else of the longest
+  known keyword in its name, so *Dimethyl* is not coloured as *Methyl*. The default colours follow
+  the portal: biological modifications (phosphorylation, oxidation, acetylation, …) take distinct
+  colours, and fixed or chemical ones such as carbamidomethylation are grey.
+- **Settings**: light or dark theme, and a colour for each PTM, which every table and chart uses.
 - **Export**: every chart can be saved as PNG or CSV, and every table as CSV, through the system
   save dialog.
 
@@ -226,7 +236,7 @@ Click a view in the sidebar to work with its rows directly:
 
 ## Streaming from S3 and the portal
 
-**⚡ Stream** queries files where they are stored, without downloading them:
+**Stream** queries files where they are stored, without downloading them:
 
 - The Rust backend runs a local HTTP range proxy on `127.0.0.1` (`src-tauri/src/commands/stream/`).
 - DuckDB reads only the parquet footer plus the column chunks and row groups each query touches.
@@ -277,7 +287,8 @@ the reason, and the next S3 download tries again.
 
 The engine, workers and signed Parquet extensions are bundled with the app. Local and cached
 Parquet files can be queried on a first launch without an internet connection. Portal discovery,
-remote streaming, Koina predictions and USI retrieval still need a connection.
+remote streaming, Koina predictions, USI retrieval and the organ-system and taxon lookups behind
+the sample colours still need a connection.
 
 ### Large streamed files
 
@@ -396,8 +407,10 @@ The front end has three layers, kept apart by ESLint import rules (`eslint.confi
 The release WebView CSP allows bundled assets, WASM, local DuckDB workers, Tauri IPC and the
 Rust range proxy on `127.0.0.1` with a dynamic port. Images can use `data:`/`blob:` and chart
 tooltips can use inline style attributes; scripts cannot use `unsafe-eval` or inline handlers.
-Charts use `vue-echarts/csp` with bundled CSS. The only allowed external connections are the
-Koina and two PROXI/USI endpoints used by spectrum mirrors. Portal and S3 requests run in Rust
+Charts use `vue-echarts/csp` with bundled CSS, and the IBM Plex fonts are bundled too. The only
+allowed external connections are the Koina and two PROXI/USI endpoints used by spectrum mirrors,
+and the UniProt taxonomy search and EBI OLS ontology endpoints used to colour samples by
+biological group. Portal and S3 requests run in Rust
 and do not need external WebView permissions. CSP supplements the native IPC capabilities.
 Development loads Vite directly at `http://localhost:1420`, which does not serve this CSP;
 verify the policy in a release build.
@@ -432,6 +445,8 @@ qpxui/
 │   │   ├── report.ts              # shared SQL helpers, dataset tables, query cache, search
 │   │   ├── registry.ts            # portal registry search and sort
 │   │   ├── charts.ts              # ECharts setup and option builders, CSV export
+│   │   ├── colours.ts             # OKLab shades, ramps and mixes; sequential and diverging scales
+│   │   ├── sampleColours.ts       # sample colours by biological group (UBERON, UniProt, disease)
 │   │   ├── quantCharts.ts         # Quantification tab charts: correlation, PCA, profile
 │   │   ├── peptidoformCharts.ts   # peptidoform profile charts: samples, distribution, RT
 │   │   ├── spectrumChart.ts       # annotated spectrum chart (PRIDE USI viewer style)
@@ -450,8 +465,8 @@ qpxui/
 │   │   └── *.test.ts              # Vitest unit tests
 │   └── components/
 │       ├── ReportView.vue         # report header, counts, citation, tabs
-│       ├── report/                # Overview, QC, PTMs, Samples, Proteins, Quant (+ protein
-│       │                          #   profile), Peptides (+ peptidoform profile), LargeGate
+│       ├── report/                # Overview, QC, PTMs, Samples (+ SampleFacet), Proteins, Quant
+│       │                          #   (+ protein profile), Peptides (+ peptidoform profile), LargeGate
 │       ├── SpectrumViewer.vue     # annotated spectrum + mirror
 │       ├── spectrum/              # CoverageMap, FragmentIonTable, MirrorControls
 │       ├── table/                 # ResultCell (Browse and Query cells), CellMenu, HScroll
