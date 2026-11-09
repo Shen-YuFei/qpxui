@@ -28,11 +28,12 @@ defineProps<{ ds: PortalDataset }>();
 
 <style scoped>
 .acc {
-  font-weight: 600;
+  font-family: var(--mono);
+  font-weight: 500;
   color: var(--accent);
 }
 .title {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text);
   line-height: 1.3;
   display: -webkit-box;
@@ -48,11 +49,19 @@ defineProps<{ ds: PortalDataset }>();
 }
 .stats div {
   display: flex;
-  flex-direction: column;
-  font-size: 13px;
+  flex-direction: column-reverse;
+  font-size: 16px;
+  font-weight: 600;
+  padding-left: 10px;
+  border-left: 1px solid var(--rule);
+}
+.stats div:first-child {
+  padding-left: 0;
+  border-left: none;
 }
 .stats span {
-  font-size: 11px;
+  font-size: 12px;
+  font-weight: 400;
 }
 .detail-head {
   padding-bottom: 10px;
@@ -60,7 +69,8 @@ defineProps<{ ds: PortalDataset }>();
   margin-bottom: 10px;
 }
 .detail-head .title {
-  font-size: 14px;
+  font-size: 15px;
+  font-weight: 600;
   -webkit-line-clamp: 3;
   margin: 4px 0;
 }

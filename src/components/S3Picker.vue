@@ -105,7 +105,7 @@ const streamHint =
 
 <template>
   <div class="s3">
-    <h3>S3 source</h3>
+    <h2 class="section-title">S3 source</h2>
     <p class="muted">
       Uses your default AWS credential chain (env vars, <span class="mono">~/.aws/credentials</span>, or an
       IAM role). Pick the parquet views you want, then either <b>download them to cache</b>
@@ -128,7 +128,7 @@ const streamHint =
         <span class="muted">{{ remoteDatasets.length }} dataset(s) found<template v-if="selectedCount"> · {{ selectedCount }} selected · {{ fmtBytes(selectedBytes) }}</template></span>
         <div class="actions">
           <button @click="streamSelection" :disabled="busy || !selectedCount" :title="streamHint">
-            ⚡ Stream (lazy)
+            Stream
           </button>
           <button class="primary" @click="loadSelection" :disabled="busy || !selectedCount">
             {{ busy ? "Loading…" : "Download to cache" }}
@@ -172,15 +172,7 @@ const streamHint =
 </template>
 
 <style scoped>
-.s3 {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 18px;
-  background: var(--bg-panel);
-}
-h3 {
-  margin: 0 0 6px;
-}
+
 .row {
   display: flex;
   gap: 10px;
@@ -205,18 +197,18 @@ h3 {
   flex-wrap: wrap;
 }
 .mode-hint {
-  font-size: 11px;
+  font-size: 12px;
   margin: -2px 0 10px;
 }
 .download {
   margin-bottom: 12px;
 }
 .ds {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  margin-bottom: 10px;
-  padding: 10px 12px;
-  background: var(--bg-soft);
+  border-bottom: 1px solid var(--rule);
+  padding: 9px 8px;
+}
+.ds:first-of-type {
+  border-top: 1px solid var(--border);
 }
 .ds-head {
   display: flex;
@@ -225,7 +217,8 @@ h3 {
   cursor: pointer;
 }
 .ds-name {
-  font-weight: 700;
+  font-family: var(--mono);
+  font-weight: 500;
 }
 .views {
   margin-top: 8px;
@@ -238,7 +231,7 @@ h3 {
   align-items: center;
   gap: 10px;
   padding-left: 26px;
-  font-size: 12px;
+  font-size: 13px;
 }
 .view-name {
   flex: 1;

@@ -110,9 +110,9 @@ async function build() {
 <template>
   <div>
     <div v-if="!ev || !ev.cols.has(COL.modifications)" class="muted pad">No `modifications` column in this dataset's feature/PSM view.</div>
-    <div v-else-if="error" class="error pad">⚠ {{ error }}</div>
+    <div v-else-if="error" class="error pad">{{ error }}</div>
     <LargeGate v-else-if="gate.blocked" :bytes="gate.bytes" :size="gate.size" what="Counting modifications" @go="release" />
-    <div v-else-if="gate.error" class="error pad">⚠ {{ gate.error }}</div>
+    <div v-else-if="gate.error" class="error pad">{{ gate.error }}</div>
     <div v-else-if="gate.checking" class="muted pad"><span class="spinner"></span></div>
     <template v-else>
       <p class="muted note">
@@ -178,17 +178,12 @@ async function build() {
 }
 h3 {
   margin: 0;
-  font-size: 14px;
-}
-button.xs {
-  padding: 2px 8px;
-  font-size: 11px;
-  border-radius: 6px;
+  font-size: 15px;
 }
 select.mini {
-  padding: 1px 4px;
-  font-size: 11px;
-  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 12px;
+  border-radius: 4px;
 }
 .mod {
   display: inline-flex;
@@ -203,7 +198,7 @@ select.mini {
   background: var(--ptm);
 }
 .code {
-  font-size: 10px;
+  font-size: 11px;
 }
 .pad {
   padding: 18px;

@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { ChartTheme } from "./charts";
+import { CATEGORICAL, type ChartTheme } from "./charts";
 import { distributionChart, retentionChart, sampleChart, shorten, type Feature, type PerSample, type ProfileStyle } from "./peptidoformCharts";
 
-const theme: ChartTheme = { text: "#text", dim: "#dim", border: "#border", accent: "#accent", accent2: "#accent2", bg: "#bg" };
+const theme: ChartTheme = {
+  text: "#text", dim: "#dim", border: "#border", accent: "#accent", bg: "#bg", grid: "#grid", axis: "#axis",
+  pooled: "#pooled", other: "#other", cat: CATEGORICAL, font: "font",
+};
 const groupOf: Record<string, string> = { s1: "A", s2: "A", s3: "B" };
 
 function style(groupBy = ""): ProfileStyle {
@@ -12,7 +15,7 @@ function style(groupBy = ""): ProfileStyle {
     groupBy,
     groups: groupBy ? ["A", "B"] : [],
     groupOf: (s) => (groupBy ? groupOf[s] : ""),
-    groupColor: (g) => colors[g] ?? theme.accent,
+    groupColor: (g) => colors[g] ?? theme.pooled,
     yLabel: "log2 intensity",
   };
 }
@@ -35,9 +38,9 @@ describe("sampleChart", () => {
     const o: any = sampleChart(["s1", "s2", "s3"], perSample, "features", style());
     expect(o.series.map((s: any) => s.name)).toEqual(["intensity"]);
     expect(o.series[0].data).toEqual([
-      { value: 20.1235, itemStyle: { color: "#accent" } },
-      { value: null, itemStyle: { color: "#accent" } },
-      { value: 22, itemStyle: { color: "#accent" } },
+      { value: 20.1235, itemStyle: { color: "#pooled" } },
+      { value: null, itemStyle: { color: "#pooled" } },
+      { value: 22, itemStyle: { color: "#pooled" } },
     ]);
     expect(o.legend).toBeUndefined();
     expect(o.dataZoom).toBeUndefined();

@@ -51,8 +51,17 @@ export interface ChartTheme {
   dim: string;
   border: string;
   accent: string;
-  accent2: string;
   bg: string;
+  /** Gridlines and the axis line. */
+  grid: string;
+  axis: string;
+  /** One series over the whole dataset (navy, outside the categorical palette). */
+  pooled: string;
+  /** "Other" and unknown groups. */
+  other: string;
+  /** The categorical palette, in its checked order. */
+  cat: string[];
+  font: string;
 }
 
 /** How grouped charts colour samples: by one sample attribute, or not at all. */
@@ -65,25 +74,32 @@ export interface GroupStyle {
   groupColor: (group: string) => string;
 }
 
+/** The categorical palette of the light theme (styles.css --cat-1..8); the
+ * chart theme reads the current theme's steps from the stylesheet. */
+export const CATEGORICAL = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"];
+
 export function chartTheme(): ChartTheme {
   const s = getComputedStyle(document.documentElement);
   const v = (n: string) => s.getPropertyValue(n).trim();
   return {
     text: v("--text"),
-    dim: v("--text-dim"),
+    dim: v("--muted"),
     border: v("--border"),
     accent: v("--accent"),
-    accent2: v("--accent-2"),
     bg: v("--bg-panel"),
+    grid: v("--chart-grid"),
+    axis: v("--chart-axis"),
+    pooled: v("--data-pooled"),
+    other: v("--data-other"),
+    cat: CATEGORICAL.map((_, i) => v(`--cat-${i + 1}`)),
+    font: v("--font"),
   };
 }
 
-export const SERIES_COLORS = ["#22d3ee", "#818cf8", "#f472b6", "#fbbf24", "#34d399", "#f87171", "#a3e635", "#fb923c"];
-
 /** The colour of `key` by its place in `keys`, cycling through the series
  * colours (a key not in `keys` takes the first). */
-export function seriesColor<T>(keys: T[], key: T): string {
-  return SERIES_COLORS[Math.max(0, keys.indexOf(key)) % SERIES_COLORS.length];
+export function seriesColor<T>(keys: T[], key: T, t: ChartTheme = chartTheme()): string {
+  return t.cat[Math.max(0, keys.indexOf(key)) % t.cat.length];
 }
 
 export function buildOption(spec: ChartSpec, t: ChartTheme): any {
@@ -102,8 +118,8 @@ export function buildOption(spec: ChartSpec, t: ChartTheme): any {
     nameLocation: "middle",
     nameGap: spec.hideLabels ? 10 : 26,
     nameTextStyle: { color: t.dim },
-    axisLine: { lineStyle: { color: t.border } },
-    axisTick: { show: !spec.hideLabels },
+    axisLine: { lineStyle: { color: t.axis } },
+    axisTick: { show: !spec.hideLabels, lineStyle: { color: t.axis } },
     axisLabel: {
       show: !spec.hideLabels,
       color: t.dim,
@@ -123,16 +139,21 @@ export function buildOption(spec: ChartSpec, t: ChartTheme): any {
     name: horizontal || spec.series.length > 1 ? undefined : spec.yName,
     nameTextStyle: { color: t.dim },
     axisLabel: { color: t.dim },
-    splitLine: { lineStyle: { color: t.border, opacity: 0.5 } },
+    splitLine: { lineStyle: { color: t.grid } },
   };
+  // One series covers the whole dataset (navy); several take the categorical
+  // slots in order.
+  const single = spec.series.length === 1;
+  // Bars end in a 4px rounded cap at the data end, square at the baseline.
+  const cap = horizontal ? [0, 4, 4, 0] : [4, 4, 0, 0];
   const series = spec.series.map((s, i) => {
-    const color = s.color ?? (i === 0 ? t.accent : SERIES_COLORS[i % SERIES_COLORS.length]);
+    const color = s.color ?? (single ? t.pooled : t.cat[i % t.cat.length]);
     if (spec.kind === "box") {
       return {
         name: s.name,
         type: "boxplot",
         data: s.values,
-        itemStyle: { color: `${color}33`, borderColor: color },
+        itemStyle: { color: `${color}24`, borderColor: color, borderWidth: 1.2 },
       };
     }
     if (spec.kind === "line") {
@@ -140,33 +161,36 @@ export function buildOption(spec: ChartSpec, t: ChartTheme): any {
         name: s.name,
         type: "line",
         data: s.values,
-        showSymbol: spec.labels.length <= 60,
-        lineStyle: { color },
-        itemStyle: { color },
-        areaStyle: spec.series.length === 1 ? { color: `${color}22` } : undefined,
+        // A single filled line needs no markers; separate series get 8px dots
+        // with a surface ring where there are few points.
+        showSymbol: !single && spec.labels.length <= 60,
+        symbolSize: 8,
+        lineStyle: { color, width: 2 },
+        itemStyle: { color, borderColor: t.bg, borderWidth: 2 },
+        areaStyle: single ? { color: `${color}1f` } : undefined,
       };
     }
     return {
       name: s.name,
       type: "bar",
       data:
-        spec.colors && spec.series.length === 1
+        spec.colors && single
           ? s.values.map((v, j) => ({ value: v, itemStyle: { color: spec.colors![j] ?? color } }))
           : s.values,
       stack: spec.stacked ? "all" : undefined,
-      itemStyle: { color },
-      barMaxWidth: 26,
+      itemStyle: { color, borderRadius: spec.stacked ? 0 : cap },
+      barMaxWidth: 24,
     };
   });
   return {
     animation: false,
     backgroundColor: "transparent",
-    textStyle: { color: t.text },
-    legend: spec.series.length > 1 && spec.kind !== "box" ? { top: 0, type: "scroll", textStyle: { color: t.dim }, pageTextStyle: { color: t.dim } } : undefined,
+    textStyle: { color: t.text, fontFamily: t.font },
+    legend: spec.series.length > 1 && spec.kind !== "box" ? legendStyle(t) : undefined,
     tooltip: {
+      ...tooltipStyle(t),
       trigger: spec.kind === "box" ? "item" : "axis",
-      confine: true,
-      axisPointer: { type: spec.kind === "line" ? "line" : "shadow" },
+      axisPointer: spec.kind === "line" ? { type: "line", lineStyle: { color: t.axis } } : { type: "shadow", shadowStyle: { color: `${t.axis}33` } },
       formatter: spec.kind === "box" ? boxTooltip(spec) : axisTooltip(spec),
     },
     grid: {
@@ -176,10 +200,56 @@ export function buildOption(spec: ChartSpec, t: ChartTheme): any {
       bottom: (many && !horizontal && !spec.hideLabels ? 30 : 4) + (showXName ? 22 : 0),
       containLabel: true,
     },
-    dataZoom: many && !horizontal && !spec.hideLabels ? [{ type: "inside" }, { type: "slider", height: 14, bottom: 4 }] : undefined,
+    dataZoom: many && !horizontal && !spec.hideLabels ? [{ type: "inside" }, sliderStyle(t)] : undefined,
     xAxis: horizontal ? value : category,
     yAxis: horizontal ? category : value,
     series,
+  };
+}
+
+/** Legend in muted ink with small rounded swatches, scrolling when long. */
+export function legendStyle(t: ChartTheme): any {
+  return {
+    top: 0,
+    type: "scroll",
+    icon: "roundRect",
+    itemWidth: 10,
+    itemHeight: 10,
+    itemGap: 14,
+    textStyle: { color: t.dim, fontFamily: t.font },
+    pageTextStyle: { color: t.dim },
+    pageIconColor: t.dim,
+    pageIconInactiveColor: t.border,
+  };
+}
+
+/** Tooltip on the card surface, in the text ink. */
+export function tooltipStyle(t: ChartTheme): any {
+  return {
+    confine: true,
+    backgroundColor: t.bg,
+    borderColor: t.border,
+    borderWidth: 1,
+    padding: [6, 10],
+    textStyle: { color: t.text, fontSize: 12, fontFamily: t.font },
+    extraCssText: "box-shadow: 0 2px 8px rgba(8, 43, 79, 0.12); border-radius: 6px;",
+  };
+}
+
+/** The zoom slider under long category axes. */
+export function sliderStyle(t: ChartTheme): any {
+  return {
+    type: "slider",
+    height: 14,
+    bottom: 4,
+    borderColor: t.border,
+    backgroundColor: "transparent",
+    fillerColor: `${t.pooled}1f`,
+    dataBackground: { lineStyle: { color: t.axis }, areaStyle: { color: t.grid } },
+    selectedDataBackground: { lineStyle: { color: t.pooled }, areaStyle: { color: `${t.pooled}33` } },
+    handleStyle: { color: t.bg, borderColor: t.axis },
+    moveHandleStyle: { color: t.axis },
+    textStyle: { color: t.dim },
   };
 }
 

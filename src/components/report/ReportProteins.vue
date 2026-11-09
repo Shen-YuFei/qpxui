@@ -203,7 +203,7 @@ const accessionLinks = computed(() => {
           · {{ (elapsed / 1000).toFixed(2) }} s · from {{ pg ? "protein groups (pg)" : evName }} · click a protein for its peptidoforms and per-run evidence
         </span>
       </div>
-      <div v-if="error" class="error">⚠ {{ error }}</div>
+      <div v-if="error" class="error">{{ error }}</div>
       <ReportTable
         v-else
         ref="listTable"
@@ -238,7 +238,7 @@ const accessionLinks = computed(() => {
         </div>
         <button class="xs" title="Close" @click="focus = null; state.proteinFocus = null">✕</button>
       </div>
-      <div v-if="dError" class="error">⚠ {{ dError }}</div>
+      <div v-if="dError" class="error">{{ dError }}</div>
       <div v-else-if="dBusy" class="muted"><span class="spinner"></span> Loading evidence…</div>
       <template v-else>
         <div class="kpis">
@@ -299,8 +299,8 @@ const accessionLinks = computed(() => {
 .right {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--bg-soft);
-  padding: 12px;
+  background: var(--bg-panel);
+  padding: 14px 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -312,7 +312,8 @@ const accessionLinks = computed(() => {
   gap: 8px;
 }
 .dtitle {
-  font-weight: 700;
+  font-family: var(--mono);
+  font-weight: 500;
   font-size: 15px;
   word-break: break-all;
 }
@@ -324,30 +325,38 @@ const accessionLinks = computed(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 10px;
-  font-size: 11px;
+  font-size: 12px;
   margin-top: 4px;
 }
 .links a {
   color: var(--accent);
   text-decoration: none;
 }
+/* A stat strip: value over a sentence-case label, hairlines between. */
 .kpis {
   display: flex;
-  gap: 18px;
   flex-wrap: wrap;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  padding: 8px 0;
 }
 .kpis div {
   display: flex;
   flex-direction: column;
+  padding: 0 18px;
+  border-left: 1px solid var(--rule);
+}
+.kpis div:first-child {
+  padding-left: 0;
+  border-left: none;
 }
 .kpis b {
   font-size: 18px;
+  font-weight: 600;
 }
 .kpis span {
-  font-size: 11px;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
+  font-size: 12px;
+  color: var(--muted);
 }
 .sec-head {
   display: flex;
@@ -357,12 +366,7 @@ const accessionLinks = computed(() => {
 }
 h3 {
   margin: 0;
-  font-size: 13px;
-}
-button.xs {
-  padding: 2px 8px;
-  font-size: 11px;
-  border-radius: 6px;
+  font-size: 15px;
 }
 .pad {
   padding: 18px;

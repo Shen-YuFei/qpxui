@@ -225,7 +225,7 @@ onMounted(async () => {
         · {{ (elapsed / 1000).toFixed(2) }} s · target {{ evName }} · click a peptidoform for its intensity and RT profile across samples and runs, and its {{ spectra ? "PSMs and spectra" : evDetail }}, a protein to open it
       </span>
     </div>
-    <div v-if="error" class="error">⚠ {{ error }}</div>
+    <div v-if="error" class="error">{{ error }}</div>
     <div v-else class="split" :class="{ open: !!focus, wide: !!focus && pane === 'profile' }">
       <ReportTable
         ref="table"
@@ -317,20 +317,35 @@ onMounted(async () => {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+/* A segmented control. */
 .tabs {
-  display: flex;
-  gap: 4px;
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  align-self: flex-start;
 }
-.tabs button.on {
+.tabs button {
+  border: none;
+  border-radius: 0;
+  padding: 4px 12px;
+  font-size: 13px;
+  background: var(--bg-panel);
+  color: var(--text-dim);
+}
+.tabs button + button {
+  border-left: 1px solid var(--border);
+}
+.tabs button.on,
+.tabs button.on:hover:not(:disabled) {
   background: var(--accent);
-  color: var(--bg);
-  border-color: var(--accent);
+  color: var(--on-accent);
 }
 .detail {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--bg-soft);
-  padding: 10px;
+  background: var(--bg-panel);
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -348,15 +363,10 @@ onMounted(async () => {
   color: var(--accent);
   text-decoration: none;
 }
-button.xs {
-  padding: 2px 8px;
-  font-size: 11px;
-  border-radius: 6px;
-}
 .pad {
   padding: 18px;
 }
 .hint {
-  font-size: 11px;
+  font-size: 12px;
 }
 </style>

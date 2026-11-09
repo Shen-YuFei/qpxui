@@ -47,15 +47,15 @@ function pct(n: number): string {
 <style scoped>
 .progress-box {
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px;
-  background: var(--bg-soft);
+  border-radius: 6px;
+  padding: 12px 14px;
+  background: var(--bg-panel);
 }
 .overall,
 .file-row {
   display: flex;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: 13px;
   margin-bottom: 4px;
 }
 .right {
@@ -66,8 +66,8 @@ function pct(n: number): string {
 .cancel {
   padding: 3px 12px;
   font-size: 12px;
-  border-color: #d33;
-  color: #d33;
+  border-color: var(--err);
+  color: var(--err);
 }
 .file-name {
   max-width: 60%;
@@ -76,16 +76,16 @@ function pct(n: number): string {
   white-space: nowrap;
 }
 .bar {
-  height: 8px;
-  background: var(--border);
-  border-radius: 6px;
+  height: 6px;
+  background: var(--rule);
+  border-radius: 3px;
   overflow: hidden;
   margin-bottom: 10px;
 }
 .fill {
   height: 100%;
   background: var(--accent);
-  border-radius: 6px;
+  border-radius: 3px;
   transition: width 0.15s linear;
 }
 .progress-box.compact {

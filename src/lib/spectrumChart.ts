@@ -1,12 +1,12 @@
 // The annotated spectrum's ECharts option (PRIDE USI viewer style): sticks
 // coloured by ion type with labels at their tips, an optional reference
 // spectrum mirrored below, and the fragment mass errors underneath.
-import { escapeHtml } from "./charts";
+import { escapeHtml, sliderStyle, tooltipStyle, type ChartTheme } from "./charts";
 import type { Peak, Tolerance } from "./fragments";
 import type { MirrorSpectrum } from "./mirror";
 
-export const B_COLOR = "#3b82f6";
-export const Y_COLOR = "#ef4444";
+export const B_COLOR = "#2a78d6";
+export const Y_COLOR = "#e34948";
 
 /** A matched peak's colour: b blue, y red, lighter with a neutral loss. */
 export function ionColor(p: Peak): string {
@@ -25,12 +25,12 @@ export interface SpectrumChart {
   /** Unit of the mass errors, and the error the error axis spans at least. */
   unit: Tolerance["unit"];
   tolerance: number;
-  /** Axis text, grid lines and unmatched peaks. */
-  colors: { dim: string; border: string; grey: string };
+  /** Axis text, grid lines, unmatched peaks, the tooltip and the zoom slider. */
+  colors: ChartTheme;
 }
 
 export function spectrumOption(c: SpectrumChart) {
-  const { dim, border, grey } = c.colors;
+  const { dim, grid, axis, other: grey } = c.colors;
   const mi = c.peaks.reduce((m, p) => Math.max(m, p.intensity), 0) || 1;
   const pts = c.peaks.map((p, i) => ({ p, i, rel: (p.intensity / mi) * 100 }));
   const mir = c.mirror?.peaks ?? [];
@@ -82,9 +82,10 @@ export function spectrumOption(c: SpectrumChart) {
   return {
     animation: false,
     backgroundColor: "transparent",
+    textStyle: { fontFamily: c.colors.font },
     tooltip: {
+      ...tooltipStyle(c.colors),
       trigger: "item",
-      confine: true,
       formatter: (prm: any) => {
         const isM = !!prm.data?.mirror;
         const pk = isM ? mir[prm.data?.idx] : c.peaks[prm.data?.idx];
@@ -110,21 +111,21 @@ export function spectrumOption(c: SpectrumChart) {
       { left: 56, right: 18, top: "76%", bottom: 58 },
     ],
     xAxis: [
-      { type: "value", min: 0, max: Math.ceil(xMax), gridIndex: 0, axisLabel: { show: false }, axisLine: { lineStyle: { color: border } }, splitLine: { show: false } },
-      { type: "value", min: 0, max: Math.ceil(xMax), gridIndex: 1, name: "m/z", nameLocation: "middle", nameGap: 22, nameTextStyle: { color: dim }, axisLabel: { color: dim, showMaxLabel: false }, axisLine: { lineStyle: { color: border } }, splitLine: { show: false } },
+      { type: "value", min: 0, max: Math.ceil(xMax), gridIndex: 0, axisLabel: { show: false }, axisLine: { lineStyle: { color: axis } }, splitLine: { show: false } },
+      { type: "value", min: 0, max: Math.ceil(xMax), gridIndex: 1, name: "m/z", nameLocation: "middle", nameGap: 22, nameTextStyle: { color: dim }, axisLabel: { color: dim, showMaxLabel: false }, axisLine: { lineStyle: { color: axis } }, splitLine: { show: false } },
     ],
     yAxis: [
       {
         type: "value", min: hasMirror ? -125 : 0, max: hasMirror ? 125 : 112, interval: hasMirror ? 25 : undefined, gridIndex: 0,
         name: "Relative intensity (%)", nameLocation: "middle", nameGap: 38, nameTextStyle: { color: dim },
         axisLabel: { color: dim, formatter: (v: number) => (Math.abs(v) > 100 || (hasMirror && v % 50 !== 0) ? "" : String(Math.abs(v))) },
-        splitLine: { lineStyle: { color: border, opacity: 0.4 } },
+        splitLine: { lineStyle: { color: grid } },
       },
-      { type: "value", gridIndex: 1, min: -errMax, max: errMax, name: c.unit, nameLocation: "middle", nameGap: 38, nameTextStyle: { color: dim }, axisLabel: { color: dim, formatter: (v: number) => (Math.abs(v) < 1e-9 ? "0" : v.toPrecision(2)) }, splitNumber: 2, splitLine: { lineStyle: { color: border, opacity: 0.4 } } },
+      { type: "value", gridIndex: 1, min: -errMax, max: errMax, name: c.unit, nameLocation: "middle", nameGap: 38, nameTextStyle: { color: dim }, axisLabel: { color: dim, formatter: (v: number) => (Math.abs(v) < 1e-9 ? "0" : v.toPrecision(2)) }, splitNumber: 2, splitLine: { lineStyle: { color: grid } } },
     ],
     dataZoom: [
       { type: "inside", xAxisIndex: [0, 1], filterMode: "none" },
-      { type: "slider", xAxisIndex: [0, 1], height: 12, bottom: 2, filterMode: "none", showDetail: false },
+      { ...sliderStyle(c.colors), xAxisIndex: [0, 1], height: 12, bottom: 2, filterMode: "none", showDetail: false },
     ],
     series: [
       stick("unmatched", grey, un),
@@ -146,7 +147,7 @@ export function spectrumOption(c: SpectrumChart) {
               label: { position: "bottom", fontSize: 10, distance: 2 },
               labelLayout: { hideOverlap: true },
               data: mtips,
-              markLine: { silent: true, symbol: "none", lineStyle: { color: border, width: 1 }, label: { show: false }, data: [{ yAxis: 0 }] },
+              markLine: { silent: true, symbol: "none", lineStyle: { color: axis, width: 1 }, label: { show: false }, data: [{ yAxis: 0 }] },
             },
           ]
         : []),

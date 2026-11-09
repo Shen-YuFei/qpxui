@@ -34,7 +34,7 @@ onMounted(loadRegistry);
 
 <template>
   <div class="portal">
-    <h3>Quantms portal — dataset registry</h3>
+    <h2 class="section-title">Quantms portal: dataset registry</h2>
     <p class="muted">
       Browse, search, and open reanalysed datasets published on the
       <a href="https://portal.quantms.org" target="_blank" rel="noopener">quantms portal</a>.
@@ -72,17 +72,10 @@ onMounted(loadRegistry);
 </template>
 
 <style scoped>
-.portal {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 18px;
-  background: var(--bg-panel);
-}
-h3 {
-  margin: 0 0 6px;
-}
-a {
-  color: var(--accent);
+.portal > p {
+  margin: 0;
+  max-width: 900px;
+  font-size: 14px;
 }
 .layout {
   display: grid;
@@ -92,8 +85,8 @@ a {
 }
 .detail {
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px;
+  border-radius: 6px;
+  padding: 14px 16px;
   min-height: 360px;
   height: max(360px, calc(100vh - 430px));
   overflow-y: auto;

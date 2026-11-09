@@ -88,7 +88,7 @@ const protCols: Column[] = [
 }
 h3 {
   margin: 0;
-  font-size: 14px;
+  font-size: 15px;
 }
 .filter {
   padding: 4px 8px;
@@ -96,6 +96,6 @@ h3 {
   width: 200px;
 }
 .acc {
-  font-size: 11px;
+  font-size: 12px;
 }
 </style>

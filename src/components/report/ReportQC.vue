@@ -112,7 +112,7 @@ onMounted(() => {
   <div>
     <div v-if="!ev" class="muted pad">No feature or PSM view in this dataset.</div>
     <LargeGate v-else-if="gate.blocked" :bytes="gate.bytes" :size="gate.size" what="Per-run QC" @go="release" />
-    <div v-else-if="gate.error" class="error pad">⚠ {{ gate.error }}</div>
+    <div v-else-if="gate.error" class="error pad">{{ gate.error }}</div>
     <div v-else-if="gate.checking" class="muted pad"><span class="spinner"></span></div>
     <template v-else>
       <p class="muted note">
@@ -131,7 +131,7 @@ onMounted(() => {
           <h3>Runs <span class="muted">({{ runRows.length.toLocaleString() }})</span></h3>
           <button class="xs" :disabled="!runRows.length" @click="table?.exportCsv()">CSV</button>
         </div>
-        <div v-if="runError" class="error">⚠ {{ runError }}</div>
+        <div v-if="runError" class="error">{{ runError }}</div>
         <div v-else-if="runBusy" class="muted"><span class="spinner"></span></div>
         <ReportTable v-else ref="table" :columns="runCols" :rows="runRows" :file-name="`${fileBase}_runs_qc`" max-height="480px" />
       </div>
@@ -160,12 +160,7 @@ onMounted(() => {
 }
 h3 {
   margin: 0;
-  font-size: 14px;
-}
-button.xs {
-  padding: 2px 8px;
-  font-size: 11px;
-  border-radius: 6px;
+  font-size: 15px;
 }
 .pad {
   padding: 18px;

@@ -122,7 +122,7 @@ const groups = computed(() => {
   if (!m || !groupBy.value) return [] as string[];
   return [...new Set(m.samples.map(groupOf))].sort(natural);
 });
-const groupColor = (g: string) => (g ? seriesColor(groups.value, g) : chartTheme().accent);
+const groupColor = (g: string) => (g ? seriesColor(groups.value, g) : chartTheme().pooled);
 
 /** Samples ordered by group, then name. */
 const order = computed(() => {
@@ -261,7 +261,7 @@ const sourceText = computed(() => {
       : "run channels mapped to samples via the run view (fractions summed)"
     : "one column per run (and channel)";
   const skip = unmapped.value ? ` ${unmapped.value} run channels without a sample in the run view were left out.` : "";
-  const cut = truncated.value ? " ⚠ The matrix is too large and was truncated at 5 million values; some proteins/samples are incomplete." : "";
+  const cut = truncated.value ? " The matrix is too large and was truncated at 5 million values; some proteins/samples are incomplete." : "";
   return `${what}; ${cols}; log2${normalise.value ? ", median-normalised" : ""}.${skip}${cut}`;
 });
 </script>
@@ -269,8 +269,8 @@ const sourceText = computed(() => {
 <template>
   <div>
     <div v-if="!src" class="muted pad">This dataset has no quantitative intensities (pg or feature view with <code>intensities</code>).</div>
-    <div v-else-if="error" class="error pad">⚠ {{ error }}</div>
-    <div v-else-if="gate.error" class="error pad">⚠ {{ gate.error }}</div>
+    <div v-else-if="error" class="error pad">{{ error }}</div>
+    <div v-else-if="gate.error" class="error pad">{{ gate.error }}</div>
     <div v-else-if="gate.checking" class="muted pad"><span class="spinner"></span></div>
     <LargeGate v-else-if="gate.blocked" :bytes="gate.bytes" :size="gate.size" what="Building the protein × sample matrix" @go="release" />
     <div v-else-if="busy" class="muted pad">Building the protein × sample matrix… <span class="spinner"></span></div>
@@ -362,7 +362,7 @@ const sourceText = computed(() => {
   justify-content: space-between;
   gap: 8px 16px;
   margin-bottom: 12px;
-  font-size: 12px;
+  font-size: 13px;
 }
 .ctl {
   display: flex;
@@ -377,8 +377,8 @@ const sourceText = computed(() => {
 }
 .ctl select,
 select.pc {
-  font-size: 11px;
-  padding: 1px 4px;
+  font-size: 12px;
+  padding: 2px 6px;
 }
 .grid {
   display: grid;
@@ -393,12 +393,7 @@ select.pc {
 }
 .note {
   padding: 18px;
-  font-size: 12px;
-}
-button.xs {
-  padding: 2px 8px;
-  font-size: 11px;
-  border-radius: 6px;
+  font-size: 13px;
 }
 .pad {
   padding: 18px;

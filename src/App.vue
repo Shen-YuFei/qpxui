@@ -13,6 +13,12 @@ const ViewPanel = defineAsyncComponent(() => import("./components/ViewPanel.vue"
 const ReportView = defineAsyncComponent(() => import("./components/ReportView.vue"));
 
 const hasData = computed(() => state.datasets.length > 0);
+/** Short names of the source kinds; a portal source carries its own label. */
+const SOURCE_LABELS: Record<string, string> = {
+  "single-file": "Single file",
+  collection: "Folder",
+  s3: "S3",
+};
 const settingsOpen = ref(false);
 
 onMounted(() => {
@@ -32,13 +38,13 @@ function newSource() {
     <header class="topbar">
       <div class="brand">
         <span class="logo">QPX</span>
-        <span class="title">Quantitative Proteomics eXchange · Viewer</span>
+        <span class="title">data viewer</span>
       </div>
       <div class="actions">
-        <span v-if="state.status" class="muted status">{{ state.status }}</span>
-        <span v-if="state.sourceKind !== 'none'" class="badge">{{ state.sourceKind }}</span>
+        <span v-if="state.status" class="status">{{ state.status }}</span>
+        <span v-if="state.sourceKind !== 'none'" class="source">{{ SOURCE_LABELS[state.sourceKind] ?? state.sourceKind }}</span>
         <button v-if="hasData" @click="newSource">New source</button>
-        <button class="gear" title="Settings" @click="settingsOpen = true">⚙ Settings</button>
+        <button title="Settings" @click="settingsOpen = true">Settings</button>
       </div>
     </header>
 
@@ -73,9 +79,11 @@ function newSource() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 18px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-panel);
+  height: 52px;
+  padding: 0 18px;
+  background: var(--brand-ink);
+  color: var(--on-dark);
+  flex-shrink: 0;
 }
 .brand {
   display: flex;
@@ -83,34 +91,41 @@ function newSource() {
   gap: 10px;
 }
 .logo {
-  font-weight: 800;
-  color: var(--accent);
-  border: 1px solid var(--accent);
-  border-radius: 6px;
-  padding: 2px 8px;
-  font-size: 13px;
-  letter-spacing: 1px;
+  font-weight: 700;
+  font-size: 18px;
+  color: #ffffff;
+  letter-spacing: 0.02em;
 }
 .title {
-  font-weight: 500;
+  padding-left: 10px;
+  border-left: 1px solid var(--on-dark-rule);
+  color: var(--on-dark-muted);
+  font-size: 15px;
 }
 .actions {
   display: flex;
   align-items: center;
   gap: 10px;
 }
-.status {
-  font-size: 12px;
+.status,
+.source {
+  font-size: 13px;
+  color: var(--on-dark-muted);
 }
-.badge {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  background: var(--accent-2);
-  color: #10142b;
-  border-radius: 999px;
-  padding: 3px 10px;
-  font-weight: 700;
+.source {
+  padding-left: 10px;
+  border-left: 1px solid var(--on-dark-rule);
+}
+.actions button {
+  background: transparent;
+  border-color: var(--on-dark-rule);
+  color: #ffffff;
+  padding: 5px 12px;
+}
+.actions button:hover:not(:disabled) {
+  border-color: var(--on-dark-muted);
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
 }
 .body {
   flex: 1;
@@ -118,10 +133,10 @@ function newSource() {
   min-height: 0;
 }
 .sidebar {
-  width: 300px;
-  min-width: 300px;
+  width: 288px;
+  min-width: 288px;
   border-right: 1px solid var(--border);
-  background: var(--bg-soft);
+  background: var(--bg-alt);
   overflow: auto;
 }
 .content {

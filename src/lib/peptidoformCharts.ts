@@ -1,7 +1,7 @@
 // ECharts options for a peptidoform's profile on the Peptidoforms tab: its
 // intensity per sample, the intensity distribution per sample group and its
 // retention time in each run.
-import { commonPrefix, escapeHtml, seriesColor, type ChartTheme, type GroupStyle } from "./charts";
+import { commonPrefix, escapeHtml, legendStyle, seriesColor, sliderStyle, tooltipStyle, type ChartTheme, type GroupStyle } from "./charts";
 import { quantile } from "./quant";
 
 /** One feature (or PSM) of the peptidoform. */
@@ -35,7 +35,7 @@ function categoryAxis(labels: string[], t: ChartTheme) {
     type: "category",
     data: labels,
     axisLabel: { show: labels.length <= 80, color: t.dim, rotate: labels.length > 8 ? 45 : 0, fontSize: 10, formatter: shorten(p), hideOverlap: true },
-    axisLine: { lineStyle: { color: t.border } },
+    axisLine: { lineStyle: { color: t.axis } },
   };
 }
 function valueAxis(name: string, t: ChartTheme) {
@@ -47,13 +47,13 @@ function valueAxis(name: string, t: ChartTheme) {
     nameGap: 36,
     nameTextStyle: { color: t.dim },
     axisLabel: { color: t.dim },
-    splitLine: { lineStyle: { color: t.border, opacity: 0.5 } },
+    splitLine: { lineStyle: { color: t.grid } },
   };
 }
 function groupLegend(st: ProfileStyle) {
   const t = st.theme;
   return st.groupBy
-    ? { top: 0, type: "scroll", data: st.groups.map((g) => ({ name: g, itemStyle: { color: st.groupColor(g) } })), textStyle: { color: t.dim }, pageTextStyle: { color: t.dim } }
+    ? { ...legendStyle(t), data: st.groups.map((g) => ({ name: g, itemStyle: { color: st.groupColor(g) } })) }
     : undefined;
 }
 
@@ -67,11 +67,12 @@ export function sampleChart(labels: string[], perSample: PerSample, evidence: st
   return {
     animation: false,
     backgroundColor: "transparent",
+    textStyle: { fontFamily: st.theme.font },
     legend: groupLegend(st),
     tooltip: {
+      ...tooltipStyle(st.theme),
       trigger: "axis",
-      confine: true,
-      axisPointer: { type: "shadow" },
+      axisPointer: { type: "shadow", shadowStyle: { color: `${st.theme.axis}33` } },
       formatter: (ps: any) => {
         const p = (Array.isArray(ps) ? ps : [ps]).find((x: any) => x.seriesType === "bar");
         if (!p) return "";
@@ -83,11 +84,11 @@ export function sampleChart(labels: string[], perSample: PerSample, evidence: st
       },
     },
     grid: { left: 26, right: 18, top: st.groupBy ? 32 : 14, bottom: 4, containLabel: true },
-    dataZoom: labels.length > 80 ? [{ type: "inside" }, { type: "slider", height: 14, bottom: 0 }] : undefined,
+    dataZoom: labels.length > 80 ? [{ type: "inside" }, { ...sliderStyle(st.theme), bottom: 0 }] : undefined,
     xAxis: categoryAxis(labels, st.theme),
     yAxis: valueAxis(st.yLabel, st.theme),
     series: [
-      { name: "intensity", type: "bar", data, barMaxWidth: 26 },
+      { name: "intensity", type: "bar", data, barMaxWidth: 24, itemStyle: { borderRadius: [4, 4, 0, 0] } },
       ...st.groups.map((g) => ({ name: g, type: "line", data: [], itemStyle: { color: st.groupColor(g) } })),
     ],
   };
@@ -116,8 +117,9 @@ export function distributionChart(labels: string[], perSample: PerSample, unit: 
   return {
     animation: false,
     backgroundColor: "transparent",
+    textStyle: { fontFamily: t.font },
     tooltip: {
-      confine: true,
+      ...tooltipStyle(t),
       formatter: (p: any) => {
         if (p.seriesType === "boxplot") {
           const q = (p.value as number[]).slice(-5);
@@ -140,7 +142,7 @@ export function distributionChart(labels: string[], perSample: PerSample, unit: 
     },
     yAxis: valueAxis(st.yLabel, t),
     series: [
-      { name: "distribution", type: "boxplot", data: boxes, itemStyle: { color: `${t.accent}22`, borderColor: t.dim } },
+      { name: "distribution", type: "boxplot", data: boxes, itemStyle: { color: `${t.pooled}1f`, borderColor: t.dim } },
       { name: "samples", type: "scatter", symbolSize: 7, data: points, xAxisIndex: 0, z: 3 },
     ],
   };
@@ -156,9 +158,10 @@ export function retentionChart(features: Feature[], runs: string[], charges: (nu
   return {
     animation: false,
     backgroundColor: "transparent",
-    legend: charges.length > 1 ? { top: 0, textStyle: { color: t.dim } } : undefined,
+    textStyle: { fontFamily: t.font },
+    legend: charges.length > 1 ? legendStyle(t) : undefined,
     tooltip: {
-      confine: true,
+      ...tooltipStyle(t),
       formatter: (p: any) => {
         const f: Feature | undefined = p.data?.f;
         if (!f) return "";
@@ -168,7 +171,7 @@ export function retentionChart(features: Feature[], runs: string[], charges: (nu
       },
     },
     grid: { left: 26, right: 18, top: charges.length > 1 ? 32 : 14, bottom: 4, containLabel: true },
-    dataZoom: labels.length > 80 ? [{ type: "inside" }, { type: "slider", height: 14, bottom: 0 }] : undefined,
+    dataZoom: labels.length > 80 ? [{ type: "inside" }, { ...sliderStyle(t), bottom: 0 }] : undefined,
     xAxis: categoryAxis(labels, t),
     yAxis: valueAxis("RT (min)", t),
     series: [
@@ -189,7 +192,7 @@ export function retentionChart(features: Feature[], runs: string[], charges: (nu
         name: z == null ? "z ?" : `z ${z}`,
         type: "scatter",
         symbolSize: 8,
-        itemStyle: { color: seriesColor(charges, z), borderColor: t.bg, borderWidth: 1 },
+        itemStyle: { color: seriesColor(charges, z, t), borderColor: t.bg, borderWidth: 2 },
         data: withRt.filter((f) => f.charge === z).map((f) => ({ value: [idx.get(f.run), +f.rt!.toFixed(3)], f })),
         markLine:
           k === 0 && med != null

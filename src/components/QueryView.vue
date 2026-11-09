@@ -81,7 +81,7 @@ function isModsCell(j: number): boolean {
     <div class="meta">
       <span v-if="lastSql" class="muted">{{ results.rowCount.toLocaleString() }} row(s) <span v-if="results.truncated">(capped at {{ results.rowCount.toLocaleString() }})</span></span>
       <span v-else class="muted">Results appear here. Quick examples are numbered above.</span>
-      <span v-if="error" class="error">⚠ {{ error }}</span>
+      <span v-if="error" class="error">{{ error }}</span>
     </div>
 
     <div class="scroll" v-if="results.columns.length">
@@ -125,8 +125,9 @@ function isModsCell(j: number): boolean {
   flex-wrap: wrap;
 }
 .examples button {
-  padding: 4px 10px;
-  font-size: 12px;
+  padding: 3px 10px;
+  font-size: 12.5px;
+  font-weight: 400;
 }
 .editor {
   width: 100%;
@@ -137,14 +138,14 @@ function isModsCell(j: number): boolean {
   background: var(--bg-panel);
 }
 .meta {
-  font-size: 12px;
+  font-size: 13px;
   min-height: 18px;
 }
 .scroll {
   flex: 1;
   overflow: auto;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 6px;
 }
 table {
   border-collapse: collapse;
@@ -155,14 +156,16 @@ th,
 td {
   text-align: left;
   padding: 6px 12px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--rule);
   white-space: nowrap;
-  font-size: 12px;
+  font-size: 12.5px;
 }
 th {
   position: sticky;
   top: 0;
-  background: var(--bg-soft);
+  background: var(--bg-alt);
+  border-bottom-color: var(--border);
+  font-weight: 500;
   z-index: 1;
 }
 </style>

@@ -110,7 +110,7 @@ function scorePairs(m: Record<string, unknown>): Array<[string, unknown]> {
 
     <!-- Modifications: one colour-coded card each -->
     <div v-else-if="isMods(value)" class="sv-mods">
-      <div v-for="(m, i) in value" :key="i" class="sv-mod">
+      <div v-for="(m, i) in value" :key="i" class="sv-mod" :style="{ '--ptm': ptmColor(modName(m), modAcc(m)) }">
         <span class="sv-mod-head">
           <span class="ptm-badge" :style="{ '--ptm': ptmColor(modName(m), modAcc(m)) }">
             <span class="ptm-badge-dot"></span>{{ shortCode(modName(m), modAcc(m)) }}
@@ -156,8 +156,8 @@ function scorePairs(m: Record<string, unknown>): Array<[string, unknown]> {
 
 <style scoped>
 .sv {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px;
+  font-family: var(--mono);
+  font-size: 12px;
   line-height: 1.5;
   color: var(--text);
 }
@@ -170,23 +170,20 @@ function scorePairs(m: Record<string, unknown>): Array<[string, unknown]> {
   border-bottom: 1px solid var(--border);
 }
 .sv-kind-chip {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
-  padding: 2px 8px;
-  border-radius: 999px;
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  padding-left: 8px;
+  border-left: 3px solid var(--accent);
 }
 .sv-kind-hint {
-  font-size: 10px;
-  color: var(--muted, #94a3b8);
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 12px;
+  color: var(--muted);
+  font-family: var(--font);
 }
 .sv-muted {
-  color: var(--muted, #94a3b8);
+  color: var(--muted);
 }
 .sv-inline {
   word-break: break-all;
@@ -205,8 +202,8 @@ function scorePairs(m: Record<string, unknown>): Array<[string, unknown]> {
   flex-wrap: wrap;
 }
 .sv-score-label {
-  font-weight: 700;
-  color: var(--accent);
+  font-weight: 500;
+  color: var(--text-dim);
   min-width: 120px;
 }
 .sv-pair {
@@ -215,9 +212,8 @@ function scorePairs(m: Record<string, unknown>): Array<[string, unknown]> {
   align-items: baseline;
 }
 .sv-hb {
-  font-size: 9px;
-  color: var(--ptm, var(--accent));
-  opacity: 0.8;
+  font-size: 10px;
+  color: var(--muted);
 }
 
 /* modifications */
@@ -231,9 +227,9 @@ function scorePairs(m: Record<string, unknown>): Array<[string, unknown]> {
   flex-direction: column;
   gap: 6px;
   padding: 7px 9px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--bg-soft);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--ptm, var(--border));
+  border-radius: 0 4px 4px 0;
 }
 .sv-mod-head {
   display: flex;
@@ -242,12 +238,12 @@ function scorePairs(m: Record<string, unknown>): Array<[string, unknown]> {
   flex-wrap: wrap;
 }
 .sv-mod-name {
-  font-weight: 700;
+  font-weight: 600;
 }
 .sv-mod-acc,
 .sv-mod-mass {
-  color: var(--muted, #94a3b8);
-  font-size: 10px;
+  color: var(--muted);
+  font-size: 11px;
 }
 .sv-mod-pos {
   display: flex;
@@ -255,35 +251,36 @@ function scorePairs(m: Record<string, unknown>): Array<[string, unknown]> {
   gap: 5px;
 }
 .sv-mod-pos-chip {
-  padding: 1px 6px;
-  border-radius: 6px;
-  font-weight: 700;
-  background: rgba(148, 163, 184, 0.15);
-  border: 1px solid rgba(148, 163, 184, 0.25);
+  padding: 0 6px;
+  border-radius: 3px;
+  font-weight: 500;
+  background: var(--bg-alt);
+  border: 1px solid var(--rule);
 }
 .sv-mod-pos-chip sub {
   font-size: 8px;
   margin-left: 1px;
-  opacity: 0.7;
+  color: var(--muted);
 }
 
 /* colour-coded modification pills (shared look with the browse tables) */
 .ptm-badge {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  font-size: 10px;
-  font-weight: 700;
+  gap: 4px;
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 500;
   padding: 0 6px;
-  border-radius: 999px;
-  color: var(--ptm);
-  background: color-mix(in srgb, var(--ptm) 18%, transparent);
-  border: 1px solid color-mix(in srgb, var(--ptm) 45%, transparent);
-  line-height: 1.4;
+  border-radius: 3px;
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--ptm) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ptm) 35%, transparent);
+  line-height: 1.5;
 }
 .ptm-badge-dot {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--ptm);
 }
@@ -299,7 +296,7 @@ function scorePairs(m: Record<string, unknown>): Array<[string, unknown]> {
   gap: 8px;
 }
 .sv-idx {
-  color: var(--muted, #94a3b8);
+  color: var(--muted);
   min-width: 22px;
   text-align: right;
   user-select: none;
@@ -317,7 +314,7 @@ function scorePairs(m: Record<string, unknown>): Array<[string, unknown]> {
   align-items: baseline;
 }
 .sv-key {
-  color: var(--muted, #94a3b8);
+  color: var(--muted);
   min-width: 90px;
   text-align: right;
 }

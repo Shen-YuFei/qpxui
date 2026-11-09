@@ -39,7 +39,7 @@ const canFilter = computed(() => props.value == null || !isStructured(props.valu
       :title="spectrumBlock || 'Open the annotated spectrum of this PSM'"
       @click="emit('spectrum')"
     >
-      <span class="mi">📈</span> View spectrum
+      <span class="mi" aria-hidden="true"></span> View spectrum
       <span v-if="spectrumBlock" class="why">{{ spectrumBlock }}</span>
     </button>
     <button v-if="structured" role="menuitem" @click="emit('expand')">
@@ -66,10 +66,10 @@ const canFilter = computed(() => props.value == null || !isStructured(props.valu
   min-width: 200px;
   max-width: 320px;
   padding: 4px;
-  background: var(--bg-soft);
+  background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
 }
@@ -82,14 +82,16 @@ const canFilter = computed(() => props.value == null || !isStructured(props.valu
   border: none;
   background: transparent;
   padding: 6px 10px;
-  border-radius: 5px;
-  font-size: 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 400;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .menu button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  background: var(--hover);
+  color: var(--text);
 }
 .menu button:disabled {
   opacity: 0.55;
@@ -102,7 +104,7 @@ const canFilter = computed(() => props.value == null || !isStructured(props.valu
 .menu .why {
   flex-basis: 100%;
   padding-left: 22px;
-  font-size: 10px;
-  color: var(--muted, var(--text));
+  font-size: 11.5px;
+  color: var(--muted);
 }
 </style>

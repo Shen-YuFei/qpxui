@@ -1,36 +1,113 @@
+@import "@fontsource/ibm-plex-sans/latin-400.css";
+@import "@fontsource/ibm-plex-sans/latin-500.css";
+@import "@fontsource/ibm-plex-sans/latin-600.css";
+@import "@fontsource/ibm-plex-sans/latin-700.css";
+@import "@fontsource/ibm-plex-mono/latin-400.css";
+@import "@fontsource/ibm-plex-mono/latin-500.css";
+
+/* The quantms palette, shared with portal.quantms.org and quantms.org. */
 :root {
-  --bg: #0f172a;
-  --bg-soft: #1e293b;
-  --bg-panel: #0b1120;
-  --border: #334155;
-  --text: #e2e8f0;
-  --text-dim: #94a3b8;
-  --muted: #94a3b8;
-  --accent: #22d3ee;
-  --accent-2: #818cf8;
-  --ok: #34d399;
-  --warn: #fbbf24;
-  --err: #f87171;
-  --radius: 10px;
-  color-scheme: dark;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --brand: #1a5fb4;
+  --brand-deep: #0b3a6a;
+  --brand-ink: #082b4f;
+  --brand-tint: #eaf2fb;
+  --on-dark: #d5e4f4;
+  --on-dark-muted: #b9cde3;
+  --on-dark-rule: #3a628f;
+  /* The deep-blue band that opens the start page. */
+  --band: var(--brand-deep);
+
+  /* Surfaces: the page, the sidebar and table heads (alt), raised controls
+     (soft) and cards and panels (panel). */
+  --bg: #ffffff;
+  --bg-alt: #f5f7f9;
+  --bg-soft: #ffffff;
+  --bg-panel: #ffffff;
+  --hover: #eef2f6;
+  --border: #d1d9e0;
+  --rule: #e2e7ec;
+  --text: #1f2328;
+  --text-dim: #4a5562;
+  --muted: #59636e;
+  --accent: var(--brand);
+  --accent-hover: #164f96;
+  --on-accent: #ffffff;
+  --ok: #047857;
+  --warn: #b45309;
+  --err: #c62828;
+  --err-tint: #fdf0f0;
+  --radius: 8px;
+
+  /* Categorical palette, colour-blind-checked in this order on adjacent pairs
+     (the dataviz default; the portal uses the same slots). */
+  --cat-1: #2a78d6;
+  --cat-2: #eb6834;
+  --cat-3: #1baf7a;
+  --cat-4: #eda100;
+  --cat-5: #e87ba4;
+  --cat-6: #008300;
+  --cat-7: #6250d6;
+  --cat-8: #e34948;
+  /* One series of counts; a distribution pooled over the whole dataset is
+     navy, outside the categorical palette, so it never reads as a group. */
+  --data: var(--cat-1);
+  --data-pooled: #0b3a6a;
+  --data-other: #a3acb6;
+  --chart-grid: #e2e7ec;
+  --chart-axis: #b8c2cc;
+  /* Fragment ions, as in the PRIDE USI viewer: b blue, y red. */
+  --ion-b: #2a78d6;
+  --ion-y: #e34948;
+  /* Behind dialogs, and under floating menus. */
+  --scrim: rgba(8, 43, 79, 0.42);
+  --shadow: 0 6px 24px rgba(8, 43, 79, 0.16);
+
+  --font: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: light;
+  font-family: var(--font);
 }
 
-/* ---- Light theme ---- */
-:root[data-theme="light"] {
-  --bg: #e8edf4;
-  --bg-soft: #ffffff;
-  --bg-panel: #f8fafc;
-  --border: #d4dde8;
-  --text: #0f172a;
-  --text-dim: #64748b;
-  --muted: #64748b;
-  --accent: #0891b2;
-  --accent-2: #6366f1;
-  --ok: #059669;
-  --warn: #d97706;
-  --err: #dc2626;
-  color-scheme: light;
+/* Dark: the same palette stepped for a navy surface. */
+:root[data-theme="dark"] {
+  --brand-ink: #051426;
+  --brand-tint: #16314f;
+  --on-dark-rule: #23415f;
+  --band: #0f2540;
+  --bg: #0b1828;
+  --bg-alt: #0e1e31;
+  --bg-soft: #13263c;
+  --bg-panel: #0f2136;
+  --hover: #172c45;
+  --border: #284462;
+  --rule: #1d3450;
+  --text: #e3ebf4;
+  --text-dim: #b2c3d6;
+  --muted: #94a8bd;
+  --accent: #6da7ec;
+  --accent-hover: #86b6ef;
+  --on-accent: #051426;
+  --ok: #3fb97f;
+  --warn: #e3a33a;
+  --err: #f07a7a;
+  --err-tint: #2a1c26;
+  --cat-1: #3987e5;
+  --cat-2: #d95926;
+  --cat-3: #199e70;
+  --cat-4: #c98500;
+  --cat-5: #d55181;
+  --cat-6: #008300;
+  --cat-7: #9085e9;
+  --cat-8: #e66767;
+  --data-pooled: #86b6ef;
+  --data-other: #6b7d90;
+  --chart-grid: #1d3450;
+  --chart-axis: #3a5674;
+  --ion-b: #3987e5;
+  --ion-y: #e66767;
+  --scrim: rgba(2, 8, 16, 0.6);
+  --shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  color-scheme: dark;
 }
 
 * {
@@ -48,6 +125,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-size: 14px;
+  line-height: 1.45;
 }
 
 h1,
@@ -57,18 +135,24 @@ h4 {
   font-weight: 600;
 }
 
+a {
+  color: var(--accent);
+}
+
 button {
   font: inherit;
   cursor: pointer;
   border: 1px solid var(--border);
   background: var(--bg-soft);
   color: var(--text);
-  border-radius: 8px;
-  padding: 8px 14px;
+  border-radius: 6px;
+  padding: 7px 14px;
+  font-weight: 500;
   transition: background 0.15s, border-color 0.15s;
 }
 button:hover:not(:disabled) {
   border-color: var(--accent);
+  color: var(--accent);
 }
 button:disabled {
   opacity: 0.5;
@@ -77,11 +161,21 @@ button:disabled {
 button.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #06222b;
+  color: var(--on-accent);
   font-weight: 600;
 }
 button.primary:hover:not(:disabled) {
-  background: #67e8f9;
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: var(--on-accent);
+}
+/* Small secondary actions (PNG, CSV, count, close). */
+button.xs {
+  padding: 1px 8px;
+  font-size: 12px;
+  border-radius: 4px;
+  font-weight: 500;
+  color: var(--text-dim);
 }
 input,
 select,
@@ -90,33 +184,55 @@ textarea {
   color: var(--text);
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px 10px;
+  border-radius: 6px;
+  padding: 7px 10px;
   outline: none;
 }
 input:focus,
 select:focus,
 textarea:focus {
   border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--brand-tint);
+}
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--accent);
 }
 
 .mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--mono);
 }
 
 .muted {
-  color: var(--text-dim);
+  color: var(--muted);
 }
 
+/* Error text; a block of it (.pad) reads as a callout with a red rule. */
 .error {
   color: var(--err);
+}
+.error.pad {
+  margin: 16px 0;
+  padding: 10px 14px;
+  border-left: 3px solid var(--err);
+  background: var(--err-tint);
+  border-radius: 0 6px 6px 0;
+}
+
+/* A section heading with a brand bar on the left, as on the portal. */
+.section-title {
+  margin: 0 0 6px;
+  padding-left: 12px;
+  border-left: 4px solid var(--accent);
+  font-size: 20px;
+  line-height: 1.3;
 }
 
 .spinner {
   display: inline-block;
   width: 14px;
   height: 14px;
-  border: 2px solid var(--border);
+  border: 2px solid var(--rule);
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
@@ -126,4 +242,8 @@ textarea:focus {
   to {
     transform: rotate(360deg);
   }
+}
+
+::selection {
+  background: var(--brand-tint);
 }

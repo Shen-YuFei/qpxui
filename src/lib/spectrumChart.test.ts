@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { CATEGORICAL } from "./charts";
 import type { FragmentIon, Peak } from "./fragments";
 import { B_COLOR, Y_COLOR, ionColor, spectrumOption, type SpectrumChart } from "./spectrumChart";
 
@@ -19,7 +20,10 @@ function chart(over: Partial<SpectrumChart> = {}): any {
     showLabels: true,
     unit: "ppm",
     tolerance: 20,
-    colors: { dim: "#dim", border: "#border", grey: "#grey" },
+    colors: {
+      text: "#text", dim: "#dim", border: "#border", accent: "#accent", bg: "#bg", grid: "#grid", axis: "#axis",
+      pooled: "#pooled", other: "#grey", cat: CATEGORICAL, font: "font",
+    },
     ...over,
   });
 }

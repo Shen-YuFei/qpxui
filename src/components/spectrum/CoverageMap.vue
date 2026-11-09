@@ -29,8 +29,8 @@ defineProps<{ marks: CoverageMark[] }>();
   padding: 0 1px;
 }
 .coverage .aa.mod {
-  color: var(--accent);
-  font-weight: 700;
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 .cut {
   position: relative;
@@ -44,8 +44,8 @@ defineProps<{ marks: CoverageMark[] }>();
   top: -6px;
   height: calc(50% + 6px);
   width: 6px;
-  border-left: 2px solid #ef4444;
-  border-top: 2px solid #ef4444;
+  border-left: 2px solid var(--ion-y);
+  border-top: 2px solid var(--ion-y);
 }
 .cut.b::after {
   content: "";
@@ -54,7 +54,7 @@ defineProps<{ marks: CoverageMark[] }>();
   bottom: -6px;
   height: calc(50% + 6px);
   width: 6px;
-  border-right: 2px solid #3b82f6;
-  border-bottom: 2px solid #3b82f6;
+  border-right: 2px solid var(--ion-b);
+  border-bottom: 2px solid var(--ion-b);
 }
 </style>

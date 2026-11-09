@@ -102,7 +102,6 @@ const ionTable = computed(() => ionTableRows(parsed.value, ions.value, matchedKe
 
 const option = computed(() => {
   void settings.theme;
-  const { dim, border } = chartTheme();
   return spectrumOption({
     peaks: peaks.value,
     mirror: mirror.value,
@@ -110,7 +109,7 @@ const option = computed(() => {
     showLabels: showLabels.value,
     unit: tolUnit.value,
     tolerance: source.value === "file" ? (tolUnit.value === "Da" ? 0.02 : 20) : tol.value.value,
-    colors: { dim, border, grey: settings.theme === "light" ? "#94a3b8" : "#64748b" },
+    colors: chartTheme(),
   });
 });
 
@@ -214,7 +213,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
       </div>
 
       <div v-if="loading" class="state muted"><span class="spinner"></span> Reading peaks…</div>
-      <div v-else-if="error" class="state error">⚠ {{ error }}</div>
+      <div v-else-if="error" class="state error">{{ error }}</div>
       <template v-else-if="rec">
         <div class="meta">
           <span v-if="rec.run_file_name" class="mono" :title="rec.run_file_name">{{ rec.run_file_name }}</span>
@@ -299,7 +298,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(2, 6, 23, 0.55);
+  background: var(--scrim);
   z-index: 50;
   display: flex;
   align-items: flex-start;
@@ -316,7 +315,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   display: flex;
   flex-direction: column;
   gap: 8px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow);
 }
 .head {
   display: flex;
@@ -332,10 +331,11 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   overflow: hidden;
 }
 .chip {
-  font-size: 11px;
-  padding: 1px 7px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
+  font-size: 12px;
+  padding: 0 7px;
+  border-radius: 3px;
+  background: var(--bg-alt);
+  border: 1px solid var(--rule);
   color: var(--text-dim);
 }
 .acts {
@@ -344,13 +344,13 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   align-items: center;
 }
 .msg {
-  font-size: 11px;
+  font-size: 12px;
 }
 .meta {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 14px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 .meta .mono {
@@ -366,7 +366,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   display: flex;
   gap: 8px;
   align-items: center;
-  font-size: 12px;
+  font-size: 13px;
 }
 .usi code {
   flex: 1;
@@ -374,9 +374,10 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  background: var(--bg-soft);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  font-family: var(--mono);
+  background: var(--bg-alt);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
   padding: 3px 8px;
 }
 .usi a {
@@ -384,7 +385,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   white-space: nowrap;
 }
 .warn {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--warn);
 }
 .controls {
@@ -392,7 +393,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   flex-wrap: wrap;
   gap: 6px 12px;
   align-items: center;
-  font-size: 12px;
+  font-size: 13px;
 }
 .controls label {
   display: inline-flex;
@@ -406,7 +407,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   margin-left: auto;
 }
 .error {
-  color: var(--danger, #ef4444);
+  color: var(--err);
 }
 .chartbox {
   height: 470px;
@@ -419,10 +420,5 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   padding: 40px;
   text-align: center;
   font-size: 13px;
-}
-button.xs {
-  padding: 2px 8px;
-  font-size: 11px;
-  border-radius: 6px;
 }
 </style>

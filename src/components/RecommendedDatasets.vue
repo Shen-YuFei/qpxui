@@ -50,48 +50,40 @@ onMounted(() => {
 
 <template>
   <section class="recommended">
-    <div class="rec-head">
-      <h3>✨ Recommended datasets</h3>
-      <p class="muted">
-        Featured biological datasets from the quantms portal — human cancer cell lines and
-        immunopeptidomics. Expand one to pick its QPX views, then <b>Stream</b> lazily or
-        <b>download to cache</b>.
-      </p>
-    </div>
+    <h2 class="section-title">Recommended datasets</h2>
+    <p class="muted intro">
+      Biological datasets from the quantms portal: human cancer cell lines and immunopeptidomics.
+      Expand one to pick its views, then stream them or download them to the cache.
+    </p>
 
     <div v-if="error" class="error">{{ error }}</div>
     <div v-else-if="busy" class="muted">Loading recommended datasets… <span class="spinner"></span></div>
     <div v-else-if="!datasets.length" class="muted">No featured datasets available.</div>
 
-    <div v-if="datasets.length" class="grid">
-      <article
-        v-for="ds in datasets"
-        :key="portalRef(ds)"
-        class="card"
-        :class="{ open: isOpen(ds) }"
-      >
-        <header class="card-head" @click="toggleDataset(ds)">
-          <div class="acc-row">
-            <span class="acc">{{ ds.accession }}</span>
-            <span v-if="ds.collectionTitle" class="chip" :title="ds.collectionTitle">{{ ds.collectionTitle }}</span>
-            <span class="spacer"></span>
-            <span class="chev">{{ isOpen(ds) ? "▾" : "▸" }}</span>
-          </div>
-          <h4>{{ ds.title || ds.accession }}</h4>
-          <div class="sub muted">
-            <span v-if="ds.organism">{{ ds.organism }}</span>
-            <span v-if="ds.instrument"> · {{ ds.instrument }}</span>
-            <span v-if="ds.samples"> · {{ ds.samples }} samples</span>
-          </div>
-          <div class="counts">
-            <span class="stat" title="Proteins"><b>{{ fmtCount(ds.proteins) }}</b> prot</span>
-            <span class="stat" title="Distinct peptides"><b>{{ fmtCount(ds.peptides) }}</b> pep</span>
-            <span class="stat" title="PSMs"><b>{{ fmtCount(ds.psmCount) }}</b> PSM</span>
-          </div>
+    <div v-if="datasets.length" class="list">
+      <article v-for="ds in datasets" :key="portalRef(ds)" class="row" :class="{ open: isOpen(ds) }">
+        <header class="row-head" @click="toggleDataset(ds)">
+          <span class="chev" aria-hidden="true">{{ isOpen(ds) ? "▾" : "▸" }}</span>
+          <span class="acc mono">{{ ds.accession }}</span>
+          <span class="what">
+            <span class="title">{{ ds.title || ds.accession }}</span>
+            <span class="sub muted">
+              <span v-if="ds.organism">{{ ds.organism }}</span>
+              <span v-if="ds.instrument"> · {{ ds.instrument }}</span>
+              <span v-if="ds.samples"> · {{ ds.samples }} samples</span>
+              <span v-if="ds.collectionTitle"> · {{ ds.collectionTitle }}</span>
+            </span>
+          </span>
+          <span class="counts">
+            <span title="Proteins"><b>{{ fmtCount(ds.proteins) }}</b> proteins</span>
+            <span title="Distinct peptides"><b>{{ fmtCount(ds.peptides) }}</b> peptides</span>
+            <span title="PSMs"><b>{{ fmtCount(ds.psmCount) }}</b> PSMs</span>
+          </span>
         </header>
 
         <PortalViews
           v-if="isOpen(ds)"
+          class="views"
           :accession="ds.accession"
           :dataset-ref="portalRef(ds)"
           :organism="ds.organism"
@@ -104,102 +96,68 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.recommended {
-  margin-top: 28px;
-  padding-top: 22px;
+.intro {
+  margin: 0 0 14px;
+  font-size: 14px;
+}
+.list {
   border-top: 1px solid var(--border);
-  flex: 1 1 auto;
+}
+.row {
+  border-bottom: 1px solid var(--rule);
+}
+.row.open {
+  background: var(--bg-alt);
+}
+.row-head {
   display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-.rec-head h3 {
-  margin: 0 0 4px;
-}
-.rec-head p {
-  margin: 0 0 12px;
-  font-size: 12px;
-}
-.grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  grid-auto-rows: minmax(170px, 1fr);
-  gap: 12px;
-  flex: 1 1 auto;
-}
-@media (max-width: 1200px) {
-  .grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-@media (max-width: 720px) {
-  .grid {
-    grid-template-columns: 1fr;
-  }
-}
-.card {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-soft);
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-}
-.card.open {
-  border-color: var(--accent);
-}
-.card-head {
+  align-items: baseline;
+  gap: 14px;
+  padding: 10px 8px;
   cursor: pointer;
 }
-.acc-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.acc {
-  font-weight: 700;
-  color: var(--accent);
-  font-family: var(--mono);
-  font-size: 12px;
-}
-.chip {
-  font-size: 10px;
-  padding: 1px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  color: var(--muted);
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.spacer {
-  flex: 1;
+.row-head:hover {
+  background: var(--hover);
 }
 .chev {
   color: var(--muted);
+  width: 10px;
 }
-.card h4 {
-  margin: 6px 0 2px;
+.acc {
+  color: var(--accent);
   font-size: 13px;
+  font-weight: 500;
+  min-width: 92px;
+}
+.what {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.title {
+  font-weight: 600;
 }
 .sub {
-  font-size: 11px;
+  font-size: 13px;
 }
 .counts {
   display: flex;
-  gap: 14px;
-  margin-top: 6px;
-  font-size: 11px;
+  gap: 18px;
+  font-size: 13px;
   color: var(--muted);
+  white-space: nowrap;
 }
 .counts b {
   color: var(--text);
-  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.views {
+  padding: 4px 8px 14px 54px;
 }
 .error {
   margin: 8px 0;
-  color: var(--err);
-  font-size: 12px;
+  font-size: 13px;
 }
 </style>

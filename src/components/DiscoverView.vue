@@ -123,7 +123,7 @@ const hasNext = computed(() => page.value < results.value.totalPages);
 <template>
   <div class="discover">
     <div class="head">
-      <h3>Discover datasets on the quantms portal</h3>
+      <h2 class="section-title">Discover datasets on the quantms portal</h2>
       <p class="muted">
         Find reanalysed QPX datasets published on the
         <a href="https://portal.quantms.org" target="_blank" rel="noopener">quantms portal</a> — by
@@ -171,7 +171,7 @@ const hasNext = computed(() => page.value < results.value.totalPages);
       <select v-model="sort" class="sel" @change="changeFilter">
         <option v-for="s in SORTS" :key="s.key" :value="s.key">{{ s.label }}</option>
       </select>
-      <button class="ghost" @click="clearFilters">Reset</button>
+      <button @click="clearFilters">Reset</button>
     </div>
 
     <div v-if="facetsError" class="error">Filters: {{ facetsError }}</div>
@@ -254,36 +254,32 @@ const hasNext = computed(() => page.value < results.value.totalPages);
 </template>
 
 <style scoped>
-.discover {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 18px;
-  background: var(--bg-panel);
+.head p {
+  margin: 0 0 14px;
+  max-width: 900px;
+  font-size: 14px;
 }
-.head h3 {
-  margin: 0 0 6px;
-}
-a {
-  color: var(--accent);
-}
+/* Underlined tabs, as on the report page. */
 .tabbar {
-  display: inline-flex;
+  display: flex;
   gap: 4px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 3px;
-  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
 }
 .tab {
-  padding: 6px 14px;
-  font-size: 13px;
   border: none;
+  border-radius: 0;
   background: transparent;
-  border-radius: 6px;
+  padding: 8px 14px 9px;
+  color: var(--text-dim);
+  border-bottom: 3px solid transparent;
+  margin-bottom: -1px;
+}
+.tab:hover:not(:disabled) {
+  color: var(--accent);
 }
 .tab.on {
-  background: var(--accent);
-  color: #10142b;
+  color: var(--accent);
+  border-bottom-color: var(--accent);
   font-weight: 600;
 }
 .filters {
@@ -299,29 +295,21 @@ a {
 .sel {
   max-width: 220px;
 }
-.ghost {
-  padding: 6px 12px;
-}
 .meta {
-  margin: 6px 0 10px;
-  font-size: 12px;
+  margin: 6px 0 8px;
+  font-size: 13px;
 }
 .cards {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  max-height: calc(100vh - 380px);
+  border-top: 1px solid var(--border);
+  max-height: calc(100vh - 420px);
   overflow-y: auto;
-  padding-right: 4px;
 }
 .card {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-soft);
-  padding: 12px 14px;
+  border-bottom: 1px solid var(--rule);
+  padding: 12px 8px;
 }
 .card.open {
-  border-color: var(--accent);
+  background: var(--bg-alt);
 }
 .card-head {
   cursor: pointer;
@@ -329,60 +317,62 @@ a {
 .acc-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 .acc {
-  font-weight: 700;
+  font-weight: 500;
   color: var(--accent);
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 13px;
 }
 .chip {
-  font-size: 10px;
-  padding: 1px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
+  font-size: 12px;
   color: var(--muted);
-  max-width: 260px;
+  max-width: 320px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.chip::before {
+  content: "· ";
 }
 .spacer {
   flex: 1;
 }
 .size {
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
 }
 .chev {
   color: var(--muted);
 }
 .card h4 {
-  margin: 6px 0 2px;
-  font-size: 14px;
+  margin: 4px 0 2px;
+  font-size: 15px;
 }
 .sub {
-  font-size: 11px;
+  font-size: 13px;
 }
 .counts {
   display: flex;
-  gap: 16px;
-  margin-top: 6px;
-  font-size: 11px;
+  gap: 18px;
+  margin-top: 4px;
+  font-size: 13px;
   color: var(--muted);
 }
 .counts b {
   color: var(--text);
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 .meta-body {
-  margin-top: 8px;
+  margin-top: 6px;
 }
 .desc {
-  font-size: 12px;
+  margin: 0;
+  font-size: 13px;
   color: var(--text-dim);
-  line-height: 1.4;
+  line-height: 1.5;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -395,12 +385,12 @@ a {
   margin-top: 6px;
 }
 .tag {
-  font-size: 10px;
-  padding: 1px 8px;
-  border-radius: 999px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  color: var(--muted);
+  font-size: 12px;
+  padding: 0 7px;
+  border-radius: 3px;
+  background: var(--bg-alt);
+  border: 1px solid var(--rule);
+  color: var(--text-dim);
 }
 .tag.more {
   color: var(--accent);
@@ -411,18 +401,17 @@ a {
 .links {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-top: 8px;
-  font-size: 11px;
+  gap: 14px;
+  margin-top: 6px;
+  font-size: 13px;
 }
 .error {
   margin: 8px 0;
-  color: var(--err);
-  font-size: 12px;
+  font-size: 13px;
 }
 .empty {
   padding: 14px 0;
-  font-size: 12px;
+  font-size: 13px;
 }
 .pager {
   display: flex;

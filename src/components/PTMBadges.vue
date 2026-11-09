@@ -24,27 +24,28 @@ defineProps<{ mods: unknown }>();
   flex-wrap: wrap;
   gap: 4px;
 }
+/* A tag: text ink on a light tint, the modification colour in the dot. */
 .ptm-badge {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  font-size: 10px;
-  font-weight: 700;
-  padding: 1px 6px;
-  border-radius: 999px;
-  color: var(--ptm);
-  background: color-mix(in srgb, var(--ptm) 18%, transparent);
-  border: 1px solid color-mix(in srgb, var(--ptm) 45%, transparent);
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 0 6px;
+  border-radius: 3px;
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--ptm) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ptm) 35%, transparent);
   cursor: help;
-  line-height: 1.4;
+  line-height: 1.5;
 }
 .ptm-badge-dot {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--ptm);
 }
 .ptm-badge-pos {
-  opacity: 0.75;
+  color: var(--muted);
 }
 </style>

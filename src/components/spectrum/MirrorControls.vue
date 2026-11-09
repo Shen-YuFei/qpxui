@@ -54,7 +54,7 @@ const usiInput = defineModel<string>("usiInput", { required: true });
       <button class="xs" :disabled="busy" @click="emit('load')">Load</button>
     </template>
     <span v-if="busy" class="muted"><span class="spinner"></span></span>
-    <span v-if="error" class="error">⚠ {{ error }}</span>
+    <span v-if="error" class="error">{{ error }}</span>
     <span v-if="sim" class="sim" title="Cosine of square-root intensities after one-to-one peak matching; SA = normalised spectral angle">
       cosine <b>{{ sim.cosine.toFixed(3) }}</b> · SA <b>{{ sim.angle.toFixed(3) }}</b> · {{ sim.matched }} matched peaks
     </span>
@@ -67,7 +67,7 @@ const usiInput = defineModel<string>("usiInput", { required: true });
   flex-wrap: wrap;
   gap: 6px 12px;
   align-items: center;
-  font-size: 12px;
+  font-size: 13px;
 }
 .controls label {
   display: inline-flex;
@@ -83,25 +83,20 @@ const usiInput = defineModel<string>("usiInput", { required: true });
 .usi-in {
   flex: 1;
   min-width: 320px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .sim {
   margin-left: auto;
   color: var(--text-dim);
 }
 .sim b {
-  color: var(--accent);
+  color: var(--text);
 }
 .warn {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--warn);
 }
 .error {
-  color: var(--danger, #ef4444);
-}
-button.xs {
-  padding: 2px 8px;
-  font-size: 11px;
-  border-radius: 6px;
+  color: var(--err);
 }
 </style>

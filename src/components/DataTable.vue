@@ -295,7 +295,7 @@ function isModsCell(j: number): boolean {
       </div>
     </div>
 
-    <div v-if="error" class="error pad">⚠ {{ error }}</div>
+    <div v-if="error" class="error pad">{{ error }}</div>
     <div v-else-if="loading" class="pad muted">Querying… <span class="spinner"></span></div>
     <HScroll v-else ref="hs">
       <table>
@@ -392,9 +392,9 @@ function isModsCell(j: number): boolean {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--muted, var(--text));
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-dim);
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
@@ -413,7 +413,7 @@ function isModsCell(j: number): boolean {
   max-width: 190px;
 }
 th.flash-col {
-  background: color-mix(in srgb, var(--accent) 35%, var(--bg-soft));
+  background: var(--brand-tint);
   transition: background 0.3s;
 }
 td.active {
@@ -432,14 +432,16 @@ th,
 td {
   text-align: left;
   padding: 6px 12px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--rule);
   white-space: nowrap;
-  font-size: 12px;
+  font-size: 12.5px;
 }
 th {
   position: sticky;
   top: 0;
-  background: var(--bg-soft);
+  background: var(--bg-alt);
+  border-bottom-color: var(--border);
+  font-weight: 500;
   cursor: pointer;
   user-select: none;
   z-index: 1;
@@ -448,7 +450,8 @@ th:hover {
   color: var(--accent);
 }
 .sort {
-  font-size: 9px;
+  font-size: 10px;
+  color: var(--accent);
 }
 td.num {
   font-variant-numeric: tabular-nums;

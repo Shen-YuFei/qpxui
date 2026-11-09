@@ -86,8 +86,8 @@ defineExpose({ el: scroller, sync: syncScroll });
   position: relative;
   flex: none;
   height: 14px;
-  background: var(--bg-soft);
-  border-top: 1px solid var(--border);
+  background: var(--bg-alt);
+  border-top: 1px solid var(--rule);
   cursor: pointer;
 }
 .hthumb {
@@ -95,12 +95,12 @@ defineExpose({ el: scroller, sync: syncScroll });
   top: 3px;
   bottom: 3px;
   border-radius: 4px;
-  background: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: var(--chart-axis);
   cursor: grab;
   touch-action: none;
 }
 .hthumb:hover,
 .hthumb:active {
-  background: var(--accent);
+  background: var(--muted);
 }
 </style>

@@ -103,7 +103,7 @@ async function download() {
           :disabled="disabled || downloading || !chosen.length"
           title="Query the files in place — each query fetches only the byte ranges it needs"
         >
-          ⚡ Stream (lazy)
+          Stream
         </button>
         <button class="primary" @click="download" :disabled="disabled || downloading || !chosen.length">
           {{ downloading ? "Downloading…" : "Download to cache" }}
@@ -160,17 +160,16 @@ async function download() {
 }
 .error {
   margin: 8px 0;
-  color: var(--err);
-  font-size: 12px;
+  font-size: 13px;
 }
 .all {
   font-weight: 600;
-  font-size: 12px;
+  font-size: 13px;
   display: flex;
   gap: 8px;
   align-items: center;
   padding-bottom: 6px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--rule);
   margin-bottom: 4px;
 }
 .view-list {
@@ -182,7 +181,7 @@ async function download() {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 12px;
+  font-size: 13px;
   cursor: pointer;
 }
 .view-name {

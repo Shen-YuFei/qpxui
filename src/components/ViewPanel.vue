@@ -51,7 +51,7 @@ watch(() => state.selectedView?.path, activate, { immediate: true });
       </nav>
     </div>
 
-    <div v-if="error" class="error pad">⚠ {{ error }}</div>
+    <div v-if="error" class="error pad">{{ error }}</div>
     <div v-else-if="loadingView" class="pad muted">Loading view into DuckDB… <span class="spinner"></span></div>
     <div v-else-if="!state.selectedView" class="pad muted">Select a view from the left sidebar.</div>
     <template v-else>
@@ -70,34 +70,48 @@ watch(() => state.selectedView?.path, activate, { immediate: true });
 }
 .panel-head {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
-  padding: 14px 18px;
+  gap: 16px;
+  padding: 14px 18px 0;
   border-bottom: 1px solid var(--border);
+}
+.panel-head > div {
+  padding-bottom: 10px;
+  min-width: 0;
 }
 .title {
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 500;
 }
 .sub {
-  font-size: 11px;
+  font-size: 12px;
   max-width: 60vw;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Underlined tabs, as on the report page. */
 .tabs {
   display: flex;
-  gap: 6px;
+  gap: 4px;
 }
 .tabs button {
-  padding: 7px 14px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 8px 14px 9px;
+  color: var(--text-dim);
+  border-bottom: 3px solid transparent;
+  margin-bottom: -1px;
+}
+.tabs button:hover:not(:disabled) {
+  color: var(--accent);
 }
 .tabs button.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #06222b;
-  font-weight: 700;
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
 }
 .pad {
   padding: 18px;

@@ -57,7 +57,7 @@ onMounted(async () => {
 <template>
   <div>
     <div v-if="!sample && !runV" class="muted pad">No sample or run view in this dataset.</div>
-    <div v-else-if="error" class="error pad">⚠ {{ error }}</div>
+    <div v-else-if="error" class="error pad">{{ error }}</div>
     <div v-else-if="busy" class="muted pad">Loading samples… <span class="spinner"></span></div>
     <template v-else>
       <div v-if="facets.length" class="grid">
@@ -113,12 +113,7 @@ onMounted(async () => {
 }
 h3 {
   margin: 0;
-  font-size: 14px;
-}
-button.xs {
-  padding: 2px 8px;
-  font-size: 11px;
-  border-radius: 6px;
+  font-size: 15px;
 }
 .pad {
   padding: 18px;

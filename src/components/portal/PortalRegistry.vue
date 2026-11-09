@@ -88,36 +88,37 @@ const filtered = computed(() => filterRegistry(props.rows, query.value, sortKey.
 }
 .meta {
   margin: 8px 0;
-  font-size: 12px;
+  font-size: 13px;
 }
 .rows {
   flex: 1;
   overflow-y: auto;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 4px;
+  border-radius: 6px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
 }
 .row {
   text-align: left;
-  padding: 8px 10px;
-  border-radius: 6px;
-  border: 1px solid transparent;
+  padding: 8px 12px;
+  border: none;
+  border-bottom: 1px solid var(--rule);
+  border-radius: 0;
   background: transparent;
+  color: var(--text);
+  font-weight: 400;
   display: flex;
   flex-direction: column;
   gap: 2px;
   width: 100%;
 }
-.row:hover {
-  background: var(--bg-soft);
-  border-color: var(--border);
+.row:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text);
 }
 .row.active {
-  background: var(--bg-soft);
-  border-color: var(--accent);
+  background: var(--brand-tint);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 .row-top {
   display: flex;
@@ -126,15 +127,16 @@ const filtered = computed(() => filterRegistry(props.rows, query.value, sortKey.
   gap: 8px;
 }
 .acc {
-  font-weight: 600;
+  font-family: var(--mono);
+  font-weight: 500;
   color: var(--accent);
 }
 .size {
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
 }
 .title {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text);
   line-height: 1.3;
   display: -webkit-box;
@@ -143,7 +145,7 @@ const filtered = computed(() => filterRegistry(props.rows, query.value, sortKey.
   overflow: hidden;
 }
 .sub {
-  font-size: 11px;
+  font-size: 12px;
 }
 .sortbar {
   display: flex;
@@ -155,24 +157,26 @@ const filtered = computed(() => filterRegistry(props.rows, query.value, sortKey.
 }
 .chip {
   padding: 2px 9px;
-  font-size: 11px;
-  border-radius: 999px;
+  font-size: 12px;
+  border-radius: 4px;
+  font-weight: 400;
 }
 .chip.on {
   border-color: var(--accent);
   color: var(--accent);
+  background: var(--brand-tint);
   font-weight: 600;
 }
 .counts {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
 .counts .hi {
-  color: var(--accent);
+  color: var(--text);
   font-weight: 600;
 }
 .counts .coll {
@@ -184,6 +188,6 @@ const filtered = computed(() => filterRegistry(props.rows, query.value, sortKey.
 }
 .empty {
   padding: 12px;
-  font-size: 12px;
+  font-size: 13px;
 }
 </style>

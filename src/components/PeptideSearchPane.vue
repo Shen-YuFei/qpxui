@@ -197,22 +197,28 @@ onMounted(async () => {
   gap: 8px;
   align-items: center;
 }
+/* A segmented control. */
 .typebar {
   display: inline-flex;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: hidden;
 }
 .type {
-  padding: 6px 12px;
-  font-size: 12px;
+  padding: 6px 14px;
+  font-size: 13px;
   border: none;
-  background: transparent;
+  border-radius: 0;
+  background: var(--bg-panel);
+  color: var(--text-dim);
 }
-.type.on {
+.type + .type {
+  border-left: 1px solid var(--border);
+}
+.type.on,
+.type.on:hover:not(:disabled) {
   background: var(--accent);
-  color: #10142b;
-  font-weight: 600;
+  color: var(--on-accent);
 }
 .search {
   flex: 1 1 280px;
@@ -228,34 +234,29 @@ onMounted(async () => {
   max-width: 260px;
 }
 .hint {
-  font-size: 12px;
+  font-size: 13px;
   margin: 8px 0;
 }
 .meta {
   margin: 6px 0 8px;
-  font-size: 12px;
+  font-size: 13px;
 }
 .note {
-  font-size: 12px;
-  color: #a06a00;
+  font-size: 13px;
+  color: var(--warn);
   margin-bottom: 8px;
 }
 .hits {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: calc(100vh - 460px);
+  border-top: 1px solid var(--border);
+  max-height: calc(100vh - 500px);
   overflow-y: auto;
-  padding-right: 4px;
 }
 .hit {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-soft);
-  padding: 10px 12px;
+  border-bottom: 1px solid var(--rule);
+  padding: 10px 8px;
 }
 .hit.open {
-  border-color: var(--accent);
+  background: var(--bg-alt);
 }
 .hit-head {
   cursor: pointer;
@@ -266,17 +267,17 @@ onMounted(async () => {
   gap: 8px;
 }
 .acc {
-  font-weight: 700;
+  font-weight: 500;
   color: var(--accent);
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 13px;
 }
 .chip {
-  font-size: 10px;
-  padding: 1px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
+  font-size: 12px;
   color: var(--muted);
+}
+.chip::before {
+  content: "· ";
 }
 .spacer {
   flex: 1;
@@ -285,18 +286,19 @@ onMounted(async () => {
   color: var(--muted);
 }
 .sub {
-  font-size: 11px;
+  font-size: 13px;
   margin-top: 2px;
 }
 .counts {
   display: flex;
-  gap: 16px;
-  margin-top: 6px;
-  font-size: 11px;
+  gap: 18px;
+  margin-top: 4px;
+  font-size: 13px;
   color: var(--muted);
 }
 .counts b {
   color: var(--text);
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 .sample {
@@ -306,16 +308,15 @@ onMounted(async () => {
   margin-top: 8px;
 }
 .pf {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-dim);
 }
 .error {
   margin: 8px 0;
-  color: var(--err);
-  font-size: 12px;
+  font-size: 13px;
 }
 .empty {
   padding: 12px 0;
-  font-size: 12px;
+  font-size: 13px;
 }
 </style>

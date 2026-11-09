@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ChartTheme } from "./charts";
+import { CATEGORICAL, type ChartTheme } from "./charts";
 import type { QuantMatrix } from "./quant";
 import {
   correlationChart,
@@ -14,7 +14,10 @@ import {
   type SampleStyle,
 } from "./quantCharts";
 
-const theme: ChartTheme = { text: "#text", dim: "#dim", border: "#border", accent: "#accent", accent2: "#accent2", bg: "#bg" };
+const theme: ChartTheme = {
+  text: "#text", dim: "#dim", border: "#border", accent: "#accent", bg: "#ffffff", grid: "#grid", axis: "#axis",
+  pooled: "#pooled", other: "#other", cat: CATEGORICAL, font: "font",
+};
 const samples = ["run_B1", "run_A1", "run_A2"];
 const groupOf: Record<string, string> = { run_A1: "A", run_A2: "A", run_B1: "B" };
 
@@ -26,7 +29,7 @@ function style(groupBy = ""): SampleStyle {
     groupBy,
     groups: groupBy ? ["A", "B"] : [],
     groupOf: (s) => (groupBy ? groupOf[s] : ""),
-    groupColor: (g) => colors[g] ?? theme.accent,
+    groupColor: (g) => colors[g] ?? theme.pooled,
   };
 }
 

@@ -1,7 +1,8 @@
 // Charts of the Quantification tab: abundance distributions and protein
 // counts per sample, the sample correlation heatmap, the PCA scores and one
 // protein's abundance across samples, and their CSV exports.
-import { escapeHtml, toCsv, type ChartSpec, type ChartTheme, type GroupStyle } from "./charts";
+import { escapeHtml, legendStyle, toCsv, tooltipStyle, type ChartSpec, type ChartTheme, type GroupStyle } from "./charts";
+import { DIVERGING, lightness, mix, SEQUENTIAL_BLUE } from "./colours";
 import { column, quantile, type Pca, type QuantMatrix } from "./quant";
 
 /** How the charts name and colour samples. */
@@ -29,14 +30,15 @@ export function correlationChart(samples: string[], c: { r: number[][]; ord: num
     data: labels,
     axisLabel: { show: showLabels, color: t.dim, fontSize: 10, rotate: pos === "x" ? 50 : 0, formatter: short },
     axisTick: { show: false },
-    axisLine: { lineStyle: { color: t.border } },
+    axisLine: { lineStyle: { color: t.axis } },
     splitArea: { show: false },
   });
   return {
     animation: false,
     backgroundColor: "transparent",
+    textStyle: { fontFamily: t.font },
     tooltip: {
-      confine: true,
+      ...tooltipStyle(t),
       formatter: (p: any) => {
         const [x, y, v] = p.data;
         return `${escapeHtml(labels[x])}<br/>${escapeHtml(labels[y])}<br/>Pearson r <b>${typeof v === "number" ? v.toFixed(3) : "–"}</b>`;
@@ -55,10 +57,23 @@ export function correlationChart(samples: string[], c: { r: number[][]; ord: num
       itemHeight: 160,
       precision: 2,
       textStyle: { color: t.dim },
-      inRange: { color: ["#313695", "#4575b4", "#74add1", "#abd9e9", "#ffffbf", "#fdae61", "#f46d43", "#d73027"] },
+      inRange: { color: correlationColours(min, t) },
     },
     series: [{ type: "heatmap", data, progressive: 0, emphasis: { itemStyle: { borderColor: t.text, borderWidth: 1 } } }],
   };
+}
+
+/** Colour stops from `min` to 1: one hue, light to dark, when every r is
+ * positive; otherwise red below 0 and blue above, through a grey at 0. On the
+ * dark theme the weak end sits near the surface and strong r is light. */
+export function correlationColours(min: number, t: ChartTheme): string[] {
+  const dark = lightness(t.bg) < 0.5;
+  if (min >= 0) return dark ? [...SEQUENTIAL_BLUE].reverse() : SEQUENTIAL_BLUE;
+  const mid = dark ? DIVERGING.midDark : DIVERGING.mid;
+  return Array.from({ length: 21 }, (_, k) => {
+    const r = min + (k * (1 - min)) / 20;
+    return r < 0 ? mix(mid, DIVERGING.negative, -r) : mix(mid, DIVERGING.positive, r);
+  });
 }
 
 /** Sample scores on principal components `cx` and `cy`. */
@@ -70,7 +85,7 @@ export function pcaChart(samples: string[], p: Pca, cx: number, cy: number, st: 
     name: g || "samples",
     type: "scatter",
     symbolSize: 11,
-    itemStyle: { color: st.groupColor(g), borderColor: t.bg, borderWidth: 1 },
+    itemStyle: { color: st.groupColor(g), borderColor: t.bg, borderWidth: 2 },
     label: { show: labelsOn, position: "right", fontSize: 10, color: t.dim, formatter: (d: any) => st.short(d.data[2]) },
     labelLayout: { hideOverlap: true },
     data: samples.map((s, j) => (st.groupOf(s) === g || !st.groupBy ? [p.scores[j][cx], p.scores[j][cy], s] : null)).filter(Boolean),
@@ -84,14 +99,16 @@ export function pcaChart(samples: string[], p: Pca, cx: number, cy: number, st: 
     nameGap: 28,
     nameTextStyle: { color: t.dim },
     axisLabel: { color: t.dim },
-    splitLine: { lineStyle: { color: t.border, opacity: 0.5 } },
+    axisLine: { lineStyle: { color: t.axis } },
+    splitLine: { lineStyle: { color: t.grid } },
   });
   return {
     animation: false,
     backgroundColor: "transparent",
-    legend: st.groupBy ? { top: 0, type: "scroll", textStyle: { color: t.dim }, pageTextStyle: { color: t.dim } } : undefined,
+    textStyle: { fontFamily: t.font },
+    legend: st.groupBy ? legendStyle(t) : undefined,
     tooltip: {
-      confine: true,
+      ...tooltipStyle(t),
       formatter: (prm: any) => {
         const [x, y, s] = prm.data;
         const g = st.groupBy ? `<br/>${escapeHtml(st.groupBy)}: ${escapeHtml(st.groupOf(s))}` : "";
@@ -135,13 +152,12 @@ export function profileChart(samples: string[], order: number[], row: Float64Arr
   return {
     animation: false,
     backgroundColor: "transparent",
-    legend: st.groupBy
-      ? { top: 0, type: "scroll", data: st.groups.map((g) => ({ name: g, itemStyle: { color: st.groupColor(g) } })), textStyle: { color: t.dim }, pageTextStyle: { color: t.dim } }
-      : undefined,
+    textStyle: { fontFamily: t.font },
+    legend: st.groupBy ? { ...legendStyle(t), data: st.groups.map((g) => ({ name: g, itemStyle: { color: st.groupColor(g) } })) } : undefined,
     tooltip: {
+      ...tooltipStyle(t),
       trigger: "axis",
-      confine: true,
-      axisPointer: { type: "shadow" },
+      axisPointer: { type: "shadow", shadowStyle: { color: `${t.axis}33` } },
       formatter: (ps: any) => {
         const p = (Array.isArray(ps) ? ps : [ps]).find((x: any) => x.seriesType === "bar");
         if (!p) return "";
@@ -156,7 +172,7 @@ export function profileChart(samples: string[], order: number[], row: Float64Arr
       type: "category",
       data: labels,
       axisLabel: { show: labels.length <= 60, color: t.dim, rotate: labels.length > 10 ? 45 : 0, fontSize: 10, formatter: st.short, hideOverlap: true },
-      axisLine: { lineStyle: { color: t.border } },
+      axisLine: { lineStyle: { color: t.axis } },
     },
     yAxis: {
       type: "value",
@@ -166,14 +182,15 @@ export function profileChart(samples: string[], order: number[], row: Float64Arr
       nameTextStyle: { color: t.dim },
       min: finite.length ? Math.floor(Math.min(...finite) - 1) : undefined,
       axisLabel: { color: t.dim },
-      splitLine: { lineStyle: { color: t.border, opacity: 0.5 } },
+      splitLine: { lineStyle: { color: t.grid } },
     },
     series: [
       {
         name: "abundance",
         type: "bar",
         data,
-        barMaxWidth: 26,
+        barMaxWidth: 24,
+        itemStyle: { borderRadius: [4, 4, 0, 0] },
         markLine: marks.length ? { silent: true, symbol: "none", label: { show: false }, data: marks } : undefined,
       },
       // Legend entries for the groups (bars are coloured per item).

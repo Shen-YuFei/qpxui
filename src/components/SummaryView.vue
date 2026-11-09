@@ -5,7 +5,7 @@ import { ensureViewReady, describeTable, countRows, type ColumnInfo } from "../l
 import type { ViewInfo } from "../lib/api";
 import { scanBytes, viewScale, type ViewScale } from "../lib/report";
 import { columnHistogram, isNumericScalar, summaryCounts } from "../lib/queries/summary";
-import { chartTheme } from "../lib/charts";
+import { chartTheme, tooltipStyle } from "../lib/charts";
 import { fmtBytes } from "../lib/format";
 import { COL } from "../lib/qpx";
 
@@ -32,10 +32,14 @@ const numericCols = computed(() =>
 );
 
 function barOption(labels: string[], values: number[], title: string, ranges?: string[]) {
+  const t = chartTheme();
   return {
-    title: { text: title, textStyle: { color: chartTheme().text, fontSize: 13 } },
+    textStyle: { fontFamily: t.font },
+    title: { text: title, textStyle: { color: t.text, fontSize: 13, fontWeight: 600, fontFamily: t.font } },
     tooltip: {
+      ...tooltipStyle(t),
       trigger: "axis",
+      axisPointer: { type: "shadow", shadowStyle: { color: `${t.axis}33` } },
       ...(ranges && {
         formatter: (params: any[]) => {
           const i = params[0].dataIndex;
@@ -47,10 +51,12 @@ function barOption(labels: string[], values: number[], title: string, ranges?: s
     xAxis: {
       type: "category",
       data: labels,
-      axisLabel: { color: "#94a3b8", rotate: labels.length > 8 ? 40 : 0 },
+      axisLine: { lineStyle: { color: t.axis } },
+      axisTick: { lineStyle: { color: t.axis } },
+      axisLabel: { color: t.dim, rotate: labels.length > 8 ? 40 : 0 },
     },
-    yAxis: { type: "value", axisLabel: { color: "#94a3b8" } },
-    series: [{ type: "bar", data: values, itemStyle: { color: "#22d3ee" }, barMaxWidth: 28 }],
+    yAxis: { type: "value", axisLabel: { color: t.dim }, splitLine: { lineStyle: { color: t.grid } } },
+    series: [{ type: "bar", data: values, itemStyle: { color: t.pooled, borderRadius: [4, 4, 0, 0] }, barMaxWidth: 24 }],
   };
 }
 
@@ -137,7 +143,7 @@ async function buildAll() {
       <button v-if="!held" @click="buildSummaries" :disabled="busy">Refresh</button>
     </div>
 
-    <div v-if="error" class="error pad">⚠ {{ error }}</div>
+    <div v-if="error" class="error pad">{{ error }}</div>
     <div v-else-if="busy" class="pad muted">Summarising… <span class="spinner"></span></div>
     <div v-else-if="held" class="pad held">
       <p>
@@ -151,7 +157,7 @@ async function buildAll() {
       <div v-if="hist" class="card wide">
         <VChart :option="hist" autoresize style="width: 100%; height: 300px" />
       </div>
-      <div v-else-if="histError" class="card wide error pad">⚠ No histogram of {{ numericCol }}: {{ histError }}</div>
+      <div v-else-if="histError" class="card wide error pad">No histogram of {{ numericCol }}: {{ histError }}</div>
       <div v-for="c in cards" :key="c.key" class="card">
         <VChart :option="c.option" autoresize style="width: 100%; height: 300px" />
       </div>
@@ -175,8 +181,9 @@ async function buildAll() {
   margin-bottom: 14px;
 }
 .held {
-  border: 1px dashed var(--border);
-  border-radius: 8px;
+  border-left: 3px solid var(--accent);
+  background: var(--bg-alt);
+  border-radius: 0 6px 6px 0;
   font-size: 13px;
 }
 .held p {
@@ -186,7 +193,7 @@ async function buildAll() {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: 13px;
 }
 .pick select {
   max-width: 240px;
@@ -200,7 +207,7 @@ async function buildAll() {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-panel);
-  padding: 10px;
+  padding: 12px 14px 8px;
 }
 .card.wide {
   grid-column: 1 / -1;

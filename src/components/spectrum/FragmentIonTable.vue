@@ -38,7 +38,7 @@ defineProps<{ charges: number[]; rows: IonRow[] }>();
 <style scoped>
 .ions summary {
   cursor: pointer;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 .tablewrap {
@@ -48,7 +48,7 @@ defineProps<{ charges: number[]; rows: IonRow[] }>();
 }
 table {
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: 13px;
   margin: 0 auto;
 }
 th,
@@ -59,26 +59,26 @@ td {
 }
 td.num {
   width: 64px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--mono);
   text-align: right;
 }
 td.aa {
   font-weight: 700;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--mono);
 }
 th.bh {
-  color: #3b82f6;
+  color: var(--ion-b);
 }
 th.yh {
-  color: #ef4444;
+  color: var(--ion-y);
 }
 td.bhit {
-  background: rgba(59, 130, 246, 0.22);
+  background: color-mix(in srgb, var(--ion-b) 20%, transparent);
   color: var(--text);
   font-weight: 600;
 }
 td.yhit {
-  background: rgba(239, 68, 68, 0.22);
+  background: color-mix(in srgb, var(--ion-y) 20%, transparent);
   color: var(--text);
   font-weight: 600;
 }

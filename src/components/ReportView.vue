@@ -219,13 +219,13 @@ const descOpen = ref(false);
 
 <template>
   <div class="report">
-    <div v-if="error" class="error pad">⚠ {{ error }}</div>
+    <div v-if="error" class="error pad">{{ error }}</div>
     <div v-else-if="loading" class="pad muted">Opening dataset views… <span class="spinner"></span></div>
     <template v-else-if="tables">
       <header class="hdr">
         <div class="ident">
-          <div class="acc mono">{{ accession }}<span v-if="accession !== ds.prefix" class="muted"> · {{ ds.prefix }}</span></div>
-          <h2>{{ meta.project_title || "QPX dataset report" }}</h2>
+          <div v-if="meta.project_title" class="acc mono">{{ accession }}<span v-if="accession !== ds.prefix"> · {{ ds.prefix }}</span></div>
+          <h2>{{ meta.project_title || ds.prefix }}</h2>
           <div v-if="metaError" class="error">Dataset metadata: {{ metaError }}</div>
           <p v-if="meta.project_description" class="desc muted" :class="{ open: descOpen }" @click="descOpen = !descOpen">{{ meta.project_description }}</p>
           <div class="facts">
@@ -284,31 +284,33 @@ const descOpen = ref(false);
 
 <style scoped>
 .report {
-  padding: 16px 18px 28px;
+  padding: 22px 28px 32px;
+  max-width: 1680px;
 }
 .hdr {
   display: flex;
-  justify-content: space-between;
-  gap: 18px;
-  flex-wrap: wrap;
-  margin-bottom: 14px;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 18px;
 }
 .ident {
-  flex: 1 1 420px;
   min-width: 0;
+  max-width: 1100px;
 }
 .acc {
-  font-size: 12px;
-  color: var(--accent);
-  font-weight: 700;
+  font-size: 13px;
+  color: var(--muted);
 }
 h2 {
   margin: 2px 0 6px;
-  font-size: 18px;
+  font-size: 24px;
+  line-height: 1.25;
+  font-weight: 600;
 }
 .desc {
-  font-size: 12px;
-  margin: 0 0 8px;
+  font-size: 14px;
+  margin: 0 0 10px;
+  color: var(--text-dim);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -321,67 +323,74 @@ h2 {
 .facts {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 16px;
-  font-size: 12px;
+  gap: 6px 22px;
+  font-size: 13px;
   align-items: center;
 }
 .facts b {
-  color: var(--text-dim);
-  font-weight: 600;
-  margin-right: 4px;
+  color: var(--muted);
+  font-weight: 400;
+  margin-right: 6px;
 }
 .facts a {
-  color: var(--accent);
   text-decoration: none;
 }
+.facts a:hover {
+  text-decoration: underline;
+}
 .cite {
-  margin-top: 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px 10px;
-  background: var(--bg-panel);
+  margin-top: 12px;
+  border-left: 3px solid var(--accent);
+  padding: 8px 12px;
+  background: var(--bg-alt);
+  border-radius: 0 6px 6px 0;
 }
 .cite p {
   margin: 0 0 6px;
-  font-size: 11px;
+  font-size: 12px;
   white-space: pre-wrap;
 }
 .cite-acts {
   display: flex;
   gap: 8px;
   align-items: center;
-  font-size: 11px;
+  font-size: 12px;
   flex-wrap: wrap;
 }
+/* Headline counts: a strip of figures between hairlines, as on the portal. */
 .kpis {
   display: flex;
-  gap: 10px;
   flex-wrap: wrap;
-  align-items: flex-start;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
 }
 .kpi {
-  min-width: 104px;
-  padding: 10px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-panel);
+  min-width: 128px;
+  padding: 10px 22px 10px 16px;
+  border-left: 1px solid var(--rule);
+  display: flex;
+  flex-direction: column-reverse;
+  justify-content: flex-end;
+}
+.kpi:first-child {
+  border-left: none;
+  padding-left: 0;
 }
 .kv {
   font-size: 22px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  line-height: 1.3;
 }
 .kl {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-  color: var(--text-dim);
+  font-size: 13px;
+  color: var(--muted);
 }
 .tabs {
   display: flex;
-  gap: 4px;
+  flex-wrap: wrap;
+  gap: 2px;
   border-bottom: 1px solid var(--border);
-  margin-bottom: 14px;
+  margin-bottom: 18px;
 }
 .tabs button {
   border: none;
@@ -389,17 +398,17 @@ h2 {
   border-radius: 0;
   background: transparent;
   padding: 8px 14px;
-  color: var(--text-dim);
+  margin-bottom: -1px;
+  color: var(--text);
+  font-weight: 500;
+}
+.tabs button:hover:not(:disabled) {
+  color: var(--accent);
 }
 .tabs button.active {
   color: var(--accent);
   border-bottom-color: var(--accent);
-  font-weight: 700;
-}
-button.xs {
-  padding: 2px 8px;
-  font-size: 11px;
-  border-radius: 6px;
+  font-weight: 600;
 }
 .pad {
   padding: 18px;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SERIES_COLORS, commonPrefix, escapeHtml, seriesColor, specToCsv, toCsv } from "./charts";
+import { CATEGORICAL, commonPrefix, escapeHtml, seriesColor, specToCsv, toCsv, type ChartTheme } from "./charts";
 
 describe("commonPrefix", () => {
   it("cuts a shared run-name prefix at a separator", () => {
@@ -31,9 +31,10 @@ describe("escapeHtml", () => {
 
 describe("seriesColor", () => {
   it("colours keys by their place, cycling past the last colour", () => {
-    const keys = Array.from({ length: SERIES_COLORS.length + 1 }, (_, i) => i);
-    expect(seriesColor(keys, 1)).toBe(SERIES_COLORS[1]);
-    expect(seriesColor(keys, SERIES_COLORS.length)).toBe(SERIES_COLORS[0]);
-    expect(seriesColor([2, 3], null as number | null)).toBe(SERIES_COLORS[0]);
+    const t = { cat: CATEGORICAL } as ChartTheme;
+    const keys = Array.from({ length: CATEGORICAL.length + 1 }, (_, i) => i);
+    expect(seriesColor(keys, 1, t)).toBe(CATEGORICAL[1]);
+    expect(seriesColor(keys, CATEGORICAL.length, t)).toBe(CATEGORICAL[0]);
+    expect(seriesColor([2, 3], null as number | null, t)).toBe(CATEGORICAL[0]);
   });
 });

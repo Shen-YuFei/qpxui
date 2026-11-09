@@ -103,7 +103,7 @@ const sampleAxis = computed(() => {
   return [...all].sort((a, b) => natural(groupOf(a), groupOf(b)) || natural(a, b));
 });
 const groups = computed(() => (groupBy.value ? [...new Set(sampleAxis.value.map(groupOf))].sort(natural) : []));
-const groupColor = (g: string) => (g ? seriesColor(groups.value, g) : chartTheme().accent);
+const groupColor = (g: string) => (g ? seriesColor(groups.value, g) : chartTheme().pooled);
 
 /** log2 intensity per sample, summed over the peptidoform's features (charges, fractions). */
 const perSample = computed(() => {
@@ -194,7 +194,7 @@ const base = computed(() => `${props.fileBase}_${props.peptidoform.replace(/[^A-
 <template>
   <div class="profile">
     <div v-if="!src" class="muted">No feature or PSM view in this dataset.</div>
-    <div v-else-if="error" class="error">⚠ {{ error }}</div>
+    <div v-else-if="error" class="error">{{ error }}</div>
     <div v-else-if="busy" class="muted">Loading every {{ srcLabel.slice(0, -1) }} of this peptidoform… <span class="spinner"></span></div>
     <template v-else>
       <div class="kpis">
@@ -218,7 +218,7 @@ const base = computed(() => `${props.fileBase}_${props.peptidoform.replace(/[^A-
         <label v-if="channels.length" title="Subtract each sample's median log2 intensity over all evidence (reads the whole intensities column once)">
           <input v-model="normalise" type="checkbox" :disabled="medBusy" /> Normalise to sample median
           <span v-if="medBusy" class="spinner"></span>
-          <span v-if="medError" class="muted error-inline" :title="medError">⚠ medians failed</span>
+          <span v-if="medError" class="muted error-inline" :title="medError">medians failed</span>
         </label>
         <span v-if="truncated" class="muted">Only the first {{ MAX_FEATURES.toLocaleString() }} {{ srcLabel }} are shown.</span>
       </div>
@@ -262,28 +262,39 @@ const base = computed(() => `${props.fileBase}_${props.peptidoform.replace(/[^A-
   flex-direction: column;
   gap: 10px;
 }
+/* A stat strip: value over a sentence-case label, hairlines between. */
 .kpis {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 18px;
+  row-gap: 6px;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  padding: 8px 0;
 }
 .kpis > div {
   display: flex;
   flex-direction: column;
+  padding: 0 14px;
+  border-left: 1px solid var(--rule);
+}
+.kpis > div:first-child {
+  padding-left: 0;
+  border-left: none;
 }
 .kpis b {
-  font-size: 15px;
+  font-size: 16px;
+  font-weight: 600;
 }
 .kpis span {
-  font-size: 11px;
-  color: var(--text-dim);
+  font-size: 12px;
+  color: var(--muted);
 }
 .ctl {
   display: flex;
   flex-wrap: wrap;
   gap: 14px;
   align-items: center;
-  font-size: 12px;
+  font-size: 13px;
 }
 .ctl label {
   display: flex;
@@ -291,8 +302,8 @@ const base = computed(() => `${props.fileBase}_${props.peptidoform.replace(/[^A-
   align-items: center;
 }
 .ctl select {
-  font-size: 11px;
-  padding: 1px 4px;
+  font-size: 12px;
+  padding: 2px 6px;
 }
 .pair {
   display: grid;
