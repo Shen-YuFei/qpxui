@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import VChart from "vue-echarts/csp";
+import VChart from "vue-echarts";
 import { buildOption, chartTheme, specToCsv, type ChartSpec } from "../lib/charts";
 import { savePng, saveText } from "../lib/export";
 import { settings } from "../lib/settings";

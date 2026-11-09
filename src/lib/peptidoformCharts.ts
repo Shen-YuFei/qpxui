@@ -83,7 +83,7 @@ export function sampleChart(labels: string[], perSample: PerSample, evidence: st
         return `<b>${escapeHtml(s)}</b>${g}<br/>${body}`;
       },
     },
-    grid: { left: 26, right: 18, top: st.groupBy ? 32 : 14, bottom: 4, containLabel: true },
+    grid: { left: 26, right: 18, top: st.groupBy ? 32 : 14, bottom: 4, outerBoundsMode: "same", outerBoundsContain: "axisLabel" },
     dataZoom: labels.length > 80 ? [{ type: "inside" }, { ...sliderStyle(st.theme), bottom: 0 }] : undefined,
     xAxis: categoryAxis(labels, st.theme),
     yAxis: valueAxis(st.yLabel, st.theme),
@@ -128,7 +128,7 @@ export function distributionChart(labels: string[], perSample: PerSample, unit: 
         return `<b>${escapeHtml(p.value[2])}</b><br/>${st.yLabel} <b>${Number(p.value[1]).toFixed(2)}</b>`;
       },
     },
-    grid: { left: 26, right: 18, top: 14, bottom: 4, containLabel: true },
+    grid: { left: 26, right: 18, top: 14, bottom: 4, outerBoundsMode: "same", outerBoundsContain: "axisLabel" },
     xAxis: {
       ...categoryAxis(cats, t),
       axisLabel: {
@@ -170,7 +170,7 @@ export function retentionChart(features: Feature[], runs: string[], charges: (nu
         return `<b>${escapeHtml(f.run)}</b><br/>z ${f.charge ?? "?"} · RT <b>${f.rt!.toFixed(2)}</b> min${win}${pep}`;
       },
     },
-    grid: { left: 26, right: 18, top: charges.length > 1 ? 32 : 14, bottom: 4, containLabel: true },
+    grid: { left: 26, right: 18, top: charges.length > 1 ? 32 : 14, bottom: 4, outerBoundsMode: "same", outerBoundsContain: "axisLabel" },
     dataZoom: labels.length > 80 ? [{ type: "inside" }, { ...sliderStyle(t), bottom: 0 }] : undefined,
     xAxis: categoryAxis(labels, t),
     yAxis: valueAxis("RT (min)", t),

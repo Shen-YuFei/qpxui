@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import VChart from "vue-echarts/csp";
+import VChart from "vue-echarts";
 import { ensureViewReady, describeTable, countRows, type ColumnInfo } from "../lib/duck";
 import type { ViewInfo } from "../lib/api";
 import { scanBytes, viewScale, type ViewScale } from "../lib/report";
@@ -35,7 +35,7 @@ function barOption(labels: string[], values: number[], title: string, ranges?: s
   const t = chartTheme();
   return {
     textStyle: { fontFamily: t.font },
-    title: { text: title, textStyle: { color: t.text, fontSize: 13, fontWeight: 600, fontFamily: t.font } },
+    title: { text: title, left: 0, top: 0, textStyle: { color: t.text, fontSize: 13, fontWeight: 600, fontFamily: t.font } },
     tooltip: {
       ...tooltipStyle(t),
       trigger: "axis",
@@ -47,7 +47,7 @@ function barOption(labels: string[], values: number[], title: string, ranges?: s
         },
       }),
     },
-    grid: { left: 50, right: 16, top: 44, bottom: 30 },
+    grid: { left: 50, right: 16, top: 44, bottom: 30, outerBoundsMode: "none" },
     xAxis: {
       type: "category",
       data: labels,

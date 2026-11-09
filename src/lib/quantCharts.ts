@@ -44,7 +44,7 @@ export function correlationChart(samples: string[], c: { r: number[][]; ord: num
         return `${escapeHtml(labels[x])}<br/>${escapeHtml(labels[y])}<br/>Pearson r <b>${typeof v === "number" ? v.toFixed(3) : "–"}</b>`;
       },
     },
-    grid: { left: 8, right: 70, top: 10, bottom: 8, containLabel: true },
+    grid: { left: 8, right: 70, top: 10, bottom: 8, outerBoundsMode: "same", outerBoundsContain: "axisLabel" },
     xAxis: axis("x"),
     yAxis: { ...axis("y"), inverse: true },
     visualMap: {
@@ -115,7 +115,7 @@ export function pcaChart(samples: string[], p: Pca, cx: number, cy: number, st: 
         return `<b>${escapeHtml(s)}</b>${g}<br/>PC${cx + 1} ${x.toFixed(2)} · PC${cy + 1} ${y.toFixed(2)}`;
       },
     },
-    grid: { left: 34, right: 24, top: st.groupBy ? 34 : 14, bottom: 30, containLabel: true },
+    grid: { left: 34, right: 24, top: st.groupBy ? 34 : 14, bottom: 30, outerBoundsMode: "same", outerBoundsContain: "axisLabel" },
     xAxis: axis(pct(cx)),
     yAxis: { ...axis(pct(cy)), nameGap: 36, nameRotate: 90 },
     series,
@@ -167,7 +167,7 @@ export function profileChart(samples: string[], order: number[], row: Float64Arr
         return `<b>${escapeHtml(s)}</b>${g}<br/>log2 abundance <b>${v == null ? "not quantified" : Number(v).toFixed(2)}</b>`;
       },
     },
-    grid: { left: 26, right: 18, top: st.groupBy ? 32 : 14, bottom: labels.length > 60 ? 8 : 4, containLabel: true },
+    grid: { left: 26, right: 18, top: st.groupBy ? 32 : 14, bottom: labels.length > 60 ? 8 : 4, outerBoundsMode: "same", outerBoundsContain: "axisLabel" },
     xAxis: {
       type: "category",
       data: labels,

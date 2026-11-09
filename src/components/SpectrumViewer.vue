@@ -3,7 +3,7 @@
 // ion labels, fragment coverage map, mass-error panel and fragment ion table.
 // Only the selected PSM's peak arrays are read from the (possibly streamed) file.
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import VChart from "vue-echarts/csp";
+import VChart from "vue-echarts";
 import PeptideSeq from "./PeptideSeq.vue";
 import CoverageMap from "./spectrum/CoverageMap.vue";
 import FragmentIonTable from "./spectrum/FragmentIonTable.vue";

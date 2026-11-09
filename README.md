@@ -410,7 +410,8 @@ The front end has three layers, kept apart by ESLint import rules (`eslint.confi
 The release WebView CSP allows bundled assets, WASM, local DuckDB workers, Tauri IPC and the
 Rust range proxy on `127.0.0.1` with a dynamic port. Images can use `data:`/`blob:` and chart
 tooltips can use inline style attributes; scripts cannot use `unsafe-eval` or inline handlers.
-Charts use `vue-echarts/csp` with bundled CSS, and the IBM Plex fonts are bundled too. The only
+Charts load the bundled `vue-echarts/style.css` rather than inline styles, and the IBM Plex fonts
+are bundled too. The only
 allowed external connections are the Koina and two PROXI/USI endpoints used by spectrum mirrors,
 and the UniProt taxonomy search and EBI OLS ontology endpoints used to colour samples by
 biological group. Portal and S3 requests run in Rust
