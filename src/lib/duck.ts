@@ -1,25 +1,20 @@
 import * as duckdb from "@duckdb/duckdb-wasm";
-import { state } from "../store";
+import { reactive } from "vue";
 import { api, type ViewInfo } from "./api";
+import { CANCELLED, engineErrorText } from "./errors";
 
-// Bundle the DuckDB WASM + worker assets locally (no CDN), so the desktop
-// app keeps working offline. Vite turns these imports into static asset URLs.
+// Bundle the engine and workers here; predev/prebuild also fetch the signed
+// Parquet extension into public/, so local queries need no runtime downloads.
+// No `coi` (threads) bundle: it needs a cross-origin isolated page, which the
+// app never is, so selectBundle would never pick it.
 import duckdb_wasm_mvp from "@duckdb/duckdb-wasm/dist/duckdb-mvp.wasm?url";
 import mvp_worker from "@duckdb/duckdb-wasm/dist/duckdb-browser-mvp.worker.js?url";
 import duckdb_wasm_eh from "@duckdb/duckdb-wasm/dist/duckdb-eh.wasm?url";
 import eh_worker from "@duckdb/duckdb-wasm/dist/duckdb-browser-eh.worker.js?url";
-import duckdb_wasm_coi from "@duckdb/duckdb-wasm/dist/duckdb-coi.wasm?url";
-import coi_worker from "@duckdb/duckdb-wasm/dist/duckdb-browser-coi.worker.js?url";
-import coi_pthread_worker from "@duckdb/duckdb-wasm/dist/duckdb-browser-coi.pthread.worker.js?url";
 
 const MANUAL_BUNDLES: duckdb.DuckDBBundles = {
   mvp: { mainModule: duckdb_wasm_mvp, mainWorker: mvp_worker },
   eh: { mainModule: duckdb_wasm_eh, mainWorker: eh_worker },
-  coi: {
-    mainModule: duckdb_wasm_coi,
-    mainWorker: coi_worker,
-    pthreadWorker: coi_pthread_worker,
-  },
 };
 
 let db: duckdb.AsyncDuckDB | null = null;
@@ -54,8 +49,9 @@ async function tracked<T>(fn: () => Promise<T>): Promise<T> {
 
 /** Stop whatever the engine is doing (duckdb-wasm runs one query at a time, so
  * a long scan of the previous dataset would hold up the next one). Kills the
- * worker when something is running; the next query starts a fresh engine.
- * Returns true when it restarted, so callers drop tables and cached results. */
+ * worker when something is running; the next query starts a fresh engine,
+ * with no tables. Returns true when it restarted, so callers drop cached
+ * results. */
 export function abandonQueries(): boolean {
   if (!pending || !db) return false;
   const old = db;
@@ -64,9 +60,10 @@ export function abandonQueries(): boolean {
   initPromise = null;
   pending = 0;
   generation++;
+  registered.clear();
   const toCancel = Array.from(trackedCancels);
   trackedCancels.clear();
-  for (const r of toCancel) r(new Error("cancelled"));
+  for (const r of toCancel) r(new Error(CANCELLED));
   void old.terminate().catch(() => {});
   return true;
 }
@@ -92,6 +89,8 @@ async function doInit() {
     filesystem: { reliableHeadRequests: true, allowFullHTTPReads: false, forceFullHTTPReads: false },
   });
   conn = await d.connect();
+  const repository = new URL("/duckdb-extensions", window.location.href).href;
+  await conn.query(`SET custom_extension_repository = '${repository}'`);
   // Prefetch whole column chunks of a row group in one go instead of many
   // small reads: far fewer round trips for streamed (remote) parquet files.
   await conn.query("SET prefetch_all_parquet_files = true");
@@ -107,68 +106,67 @@ function safeName(name: string): string {
 
 /** Register a view's parquet file and expose it as a DuckDB table.
  *
- * Local files (and files already downloaded to cache) are range-read from
- * disk through the backend proxy (falling back to a whole-file buffer).
- * Remote S3 views (`s3://…`) are registered *lazily*: the Rust backend runs a
- * 127.0.0.1 range proxy that fetches byte ranges from S3 with the user's
- * credentials, and DuckDB's HTTP file system asks it only for the ranges a
- * query needs (parquet footer, then the touched column chunks). Huge files
- * open instantly, nothing is downloaded up front, and the bucket needs no CORS.
+ * Every view is read lazily through the Rust backend's 127.0.0.1 range proxy:
+ * local files (and files downloaded to the cache) from disk, `s3://…` views
+ * from S3 with the user's credentials, and portal files over HTTPS. DuckDB's
+ * HTTP file system asks it only for the ranges a query needs (parquet footer,
+ * then the touched column chunks), so huge files open instantly, nothing is
+ * downloaded up front, and the bucket needs no CORS.
  */
+/** Table name per view path. Two folders of a collection can hold files of the
+ * same name: the later one gets a numbered table instead of replacing the
+ * first one's. */
+const tableNames = new Map<string, string>();
+
+/** Paths of the views registered as tables in the running engine (ticked in
+ * the sidebar). */
+export const registered = reactive(new Set<string>());
+
+export function tableName(view: ViewInfo): string {
+  let name = tableNames.get(view.path);
+  if (!name) {
+    const base = safeName(view.name);
+    const taken = new Set(tableNames.values());
+    name = base;
+    for (let i = 2; taken.has(name); i++) name = `${base}_${i}`;
+    tableNames.set(view.path, name);
+  }
+  return name;
+}
+
+/** A new source: its views may take the names of the previous one's, and
+ * are registered again. */
+export function forgetTables(): void {
+  tableNames.clear();
+  registered.clear();
+}
+
 export async function ensureViewReady(view: ViewInfo): Promise<string> {
+  // Named before any await, so concurrent registrations can't pick one name.
+  const table = tableName(view);
   await init();
-  const table = safeName(view.name);
-  if (state.registered.has(view.path)) return table;
+  if (registered.has(view.path)) return table;
   const gen = generation;
   await tracked(() => register(view, table));
   // The engine was restarted meanwhile: the table belongs to the old one.
-  if (gen !== generation) throw new Error("cancelled");
-  state.registered.add(view.path);
-  state.tableName[view.path] = table;
+  if (gen !== generation) throw new Error(CANCELLED);
+  registered.add(view.path);
   return table;
 }
 
 async function register(view: ViewInfo, table: string): Promise<void> {
   // Bind this engine: a restart meanwhile must not touch the new one.
   const { db, conn } = await initDb();
-
+  const handles = view.path.startsWith("s3://")
+    ? await api.streamS3Urls(view.path.slice(5).split("/")[0], [view.path])
+    : /^https?:\/\//.test(view.path)
+      ? await api.streamHttpUrls([view.path])
+      : await api.streamLocalFiles([view.path]);
   const fileKey = `${table}.parquet`;
-  if (view.path.startsWith("s3://")) {
-    const bucket = view.path.slice(5).split("/")[0];
-    let url: string | undefined;
-    try {
-      url = (await api.streamS3Urls(bucket, [view.path]))[view.path]?.url;
-    } catch (e) {
-      // Fall back to a presigned URL read directly by the webview (needs CORS).
-      console.warn("stream proxy unavailable, falling back to presigned URL", e);
-      url = (await api.presignS3Urls(bucket, [view.path]))[view.path];
-    }
-    if (!url) throw new Error(`could not open ${view.path} for streaming`);
-    // Still range requests only (allowFullHTTPReads is off), but with
-    // directIO = false duckdb-wasm keeps the ranges it read, so later queries
-    // over the same columns don't go back to the network.
-    await db.registerFileURL(fileKey, url, duckdb.DuckDBDataProtocol.HTTP, false);
-  } else if (/^https?:\/\//.test(view.path)) {
-    // Public portal file: same lazy range proxy, fetched over HTTPS.
-    const url = (await api.streamHttpUrls([view.path]))[view.path]?.url;
-    if (!url) throw new Error(`could not open ${view.path} for streaming`);
-    await db.registerFileURL(fileKey, url, duckdb.DuckDBDataProtocol.HTTP, false);
-  } else {
-    // Local parquet: range-read from disk through the same proxy, so big
-    // files open instantly and only the touched column chunks are read.
-    let url: string | undefined;
-    try {
-      url = (await api.streamLocalFiles([view.path]))[view.path]?.url;
-    } catch (e) {
-      console.warn("local range proxy unavailable, loading the whole file", e);
-    }
-    if (url) {
-      await db.registerFileURL(fileKey, url, duckdb.DuckDBDataProtocol.HTTP, false);
-    } else {
-      const bytes = base64ToUint8(await api.readFileBytes(view.path));
-      await db.registerFileBuffer(fileKey, bytes);
-    }
-  }
+  // Range requests only (allowFullHTTPReads is off), but with directIO =
+  // false duckdb-wasm keeps the ranges it read, so later queries over the
+  // same columns don't go back to the network.
+  await db.registerFileURL(fileKey, handles[view.path].url, duckdb.DuckDBDataProtocol.HTTP, false);
   await conn.query(
     `CREATE OR REPLACE VIEW "${table}" AS SELECT * FROM read_parquet('${fileKey}')`
   );
@@ -179,36 +177,7 @@ async function initDb(): Promise<{ db: duckdb.AsyncDuckDB; conn: duckdb.AsyncDuc
   return { db: db!, conn: conn! };
 }
 
-export function base64ToUint8(b64: string): Uint8Array {
-  const clean = b64.replace(/\s/g, "");
-  const bin = atob(clean);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return bytes;
-}
-
-/**
- * Annotate a DuckDB error that looks like a failed *remote/lazy* read with a
- * helpful hint, so the user knows it's usually a CORS/Range issue on the S3
- * bucket rather than a bug in the query.
- */
-function guardError(e: unknown): string {
-  const msg = String((e as any)?.message ?? e);
-  if (
-    /access-control|CORS|403|NetworkError|Failed to fetch|Fetch error|range|HTTP error|Unable to connect/i.test(
-      msg
-    )
-  ) {
-    return (
-      `${msg}\n\n` +
-      "Hint: this looks like a failed remote (streamed) read — check your AWS credentials " +
-      "and network, or use “Download to cache” for this view instead."
-    );
-  }
-  return msg;
-}
-
-export type Cell = string | number | boolean | null;
+export type Cell = string | number | bigint | boolean | null;
 
 export interface QueryResult {
   columns: string[];
@@ -236,21 +205,15 @@ function isArrowVector(v: unknown): boolean {
 function normalize(v: unknown): unknown {
   if (v === null || v === undefined) return null;
   const t = typeof v;
-  if (t === "bigint") return Number(v);
+  // 64-bit integers past 2^53 (QPX's hashed ids) stay BigInt: as a Number
+  // they would lose their last digits.
+  if (t === "bigint") return Number.isSafeInteger(Number(v)) ? Number(v) : v;
   if (t === "string" || t === "number" || t === "boolean") return v;
   if (Array.isArray(v)) return v.map(normalize);
   // Arrow Vector / chunk -> collapse to a friendly JS array of values, then
   // normalise recursively (a LIST of STRUCT becomes [{...}, {...}], not a dump
   // of the Vector's internal buffers).
-  if (isArrowVector(v)) {
-    let arr: unknown;
-    try {
-      arr = (v as { toArray: () => unknown }).toArray();
-    } catch {
-      arr = [];
-    }
-    return normalize(arr);
-  }
+  if (isArrowVector(v)) return normalize((v as { toArray: () => unknown }).toArray());
   if (v instanceof Map) {
     const out: Record<string, unknown> = {};
     for (const [k, val] of v) out[String(k)] = normalize(val);
@@ -258,12 +221,8 @@ function normalize(v: unknown): unknown {
   }
   // Arrow rows (StructRow / MapRow) expose toJSON() with the real fields.
   if (typeof (v as { toJSON?: unknown }).toJSON === "function" && !(v instanceof Date)) {
-    try {
-      const j = (v as { toJSON: () => unknown }).toJSON();
-      if (j !== v) return normalize(j);
-    } catch {
-      /* fall through */
-    }
+    const j = (v as { toJSON: () => unknown }).toJSON();
+    if (j !== v) return normalize(j);
   }
   // Typed arrays (Float64Array, Int32Array, …) have numeric-ish elements.
   if (ArrayBuffer.isView(v)) {
@@ -289,6 +248,15 @@ function logQuery(sql: string, ms: number, rows: number) {
 
 type QueryResultType = Awaited<ReturnType<duckdb.AsyncDuckDBConnection["query"]>>;
 
+/**
+ * A result's rows as arrays of display values, read column by column: Arrow's
+ * row objects key values by column name and keep only one of a shared name.
+ */
+export function readRows(table: QueryResultType): QueryResult["rows"] {
+  const columns = table.schema.fields.map((_, j) => table.getChildAt(j)!);
+  return Array.from({ length: table.numRows }, (_, i) => columns.map((c) => normalize(c.get(i)) as never));
+}
+
 export async function runSql(
   sql: string,
   maxRows = 5000
@@ -302,41 +270,23 @@ export async function runSql(
     const c = conn!;
     res = await tracked(() => c.query(sql));
   } catch (e) {
-    throw new Error(guardError(e));
+    throw new Error(engineErrorText(e));
   } finally {
     if (import.meta.env.DEV) w.__qpending--;
   }
   if (import.meta.env.DEV) logQuery(sql, performance.now() - t0, res.numRows);
-  let objects: Record<string, unknown>[] = [];
-  try {
-    objects = res.toArray() as Record<string, unknown>[];
-  } catch {
-    // Non-row queries (e.g. CREATE/UPDATE) or empty result.
-  }
-  const truncated = objects.length > maxRows;
-  if (truncated) objects = objects.slice(0, maxRows);
-
-  const columns = objects.length ? Object.keys(objects[0]) : [];
-  const rows = objects.map((o) => columns.map((c) => normalize(o[c]) as never));
-  return {
-    columns,
-    rows,
-    rowCount: objects.length,
-    truncated,
-  };
+  const truncated = res.numRows > maxRows;
+  const table = truncated ? res.slice(0, maxRows) : res;
+  // Columns come from the schema, so an empty result keeps them, and values
+  // are read by position, so duplicate column names keep their own values.
+  const columns = table.schema.fields.map((f) => f.name);
+  const rows = readRows(table);
+  return { columns, rows, rowCount: rows.length, truncated };
 }
 
 export async function countRows(table: string): Promise<number> {
-  await init();
-  let res: QueryResultType;
-  try {
-    const c = conn!;
-    res = await tracked(() => c.query(`SELECT COUNT(*) AS n FROM "${table}"`));
-  } catch (e) {
-    throw new Error(guardError(e));
-  }
-  const objects = res.toArray() as { n: string | number }[];
-  return Number(objects[0]?.n ?? 0);
+  const r = await runSql(`SELECT COUNT(*) AS n FROM "${table}"`, 1);
+  return Number(r.rows[0][0]);
 }
 
 export interface ColumnInfo {
@@ -346,17 +296,7 @@ export interface ColumnInfo {
 
 /** Read column names + DuckDB types via DESCRIBE. */
 export async function describeTable(table: string): Promise<ColumnInfo[]> {
-  await init();
-  let res: QueryResultType;
-  try {
-    const c = conn!;
-    res = await tracked(() => c.query(`DESCRIBE "${table}"`));
-  } catch (e) {
-    throw new Error(guardError(e));
-  }
-  const objects = res.toArray() as Record<string, unknown>[];
-  return objects.map((o) => ({
-    name: String(o["column_name"] ?? ""),
-    type: String(o["column_type"] ?? ""),
-  }));
+  const r = await runSql(`DESCRIBE "${table}"`);
+  // DESCRIBE's first two columns: column_name, column_type.
+  return r.rows.map(([name, type]) => ({ name: String(name), type: String(type) }));
 }

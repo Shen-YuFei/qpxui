@@ -6,50 +6,26 @@
 import { computed, ref, watch } from "vue";
 import ChartCard from "../ChartCard.vue";
 import type { DatasetInfo } from "../../lib/api";
-import { SERIES_COLORS, chartTheme, commonPrefix, escapeHtml, toCsv } from "../../lib/charts";
-import { runSql } from "../../lib/duck";
-import { groupingColumns, natural, quantile } from "../../lib/quant";
-import {
-  cachedSql,
-  ident,
-  lit,
-  objects,
-  sampleMapSql,
-  targetWhere,
-  type DatasetTables,
-  type TableRef,
-} from "../../lib/report";
+import { chartTheme, toCsv } from "../../lib/charts";
+import { colourScale, useValueGroups } from "../../lib/sampleColours";
+import { distributionChart, retentionChart, sampleChart, type Feature, type ProfileStyle } from "../../lib/peptidoformCharts";
+import { groupingColumns, natural, quantile, sampleGroup } from "../../lib/quant";
+import type { DatasetTables, TableRef } from "../../lib/report";
+import { PROFILE_MAX_FEATURES as MAX_FEATURES, peptidoformProfile, profileSource, runNames, sampleMedians, type Channel } from "../../lib/queries/profile";
+import { sampleMeta } from "../../lib/queries/quant";
 import { settings } from "../../lib/settings";
+import { COL } from "../../lib/qpx";
+import { isCancelled } from "../../lib/errors";
 
 const props = defineProps<{ ds: DatasetInfo; t: DatasetTables; peptidoform: string; fileBase: string }>();
 
-const MAX_FEATURES = 20000;
-
-const hasInt = (r?: TableRef) => !!r?.cols.has("intensities");
 /** Quantified evidence first: features, then PSMs that carry intensities. */
-const src = computed<TableRef | undefined>(() =>
-  hasInt(props.t.feature) ? props.t.feature : hasInt(props.t.psm) ? props.t.psm : props.t.feature ?? props.t.psm
-);
+const src = computed<TableRef | undefined>(() => profileSource(props.t));
 const srcLabel = computed(() => (src.value === props.t.feature ? "features" : "PSMs"));
-
-interface Feature {
-  fid: number;
-  run: string;
-  charge: number | null;
-  rt: number | null;
-  rtLo: number | null;
-  rtHi: number | null;
-  pep: number | null;
-}
-interface Channel {
-  fid: number;
-  sample: string;
-  label: string | null;
-  intensity: number;
-}
 
 const busy = ref(false);
 const error = ref("");
+const contextError = ref("");
 const medError = ref("");
 const features = ref<Feature[]>([]);
 const channels = ref<Channel[]>([]);
@@ -61,31 +37,6 @@ const normalise = ref(false);
 const medians = ref<Map<string, number> | null>(null);
 const medBusy = ref(false);
 
-const pfCol = (S: TableRef) => (S.cols.has("peptidoform") ? "peptidoform" : S.seq);
-
-function profileSql(S: TableRef): string {
-  const has = (c: string) => S.cols.has(c);
-  const sec = (c: string) => (has(c) ? `${c} / 60.0` : "NULL");
-  const quant = hasInt(S);
-  const map = sampleMapSql(props.t.run);
-  const f = `f AS MATERIALIZED (
-  SELECT row_number() OVER ()::BIGINT AS fid, ${has("run_file_name") ? "run_file_name" : "'all'"} AS r,
-         ${has("charge") ? "charge" : "NULL"} AS z, ${sec("rt")} AS rt, ${sec("rt_start")} AS rt_lo, ${sec("rt_stop")} AS rt_hi,
-         ${has("posterior_error_probability") ? "posterior_error_probability" : "NULL"} AS pep${quant ? ", intensities" : ""}
-  FROM ${ident(S.table)} WHERE ${targetWhere(S)} AND ${pfCol(S)} = ${lit(props.peptidoform)}
-  LIMIT ${MAX_FEATURES + 1})`;
-  if (!quant) {
-    return `WITH ${f} SELECT fid, r AS run, z AS charge, rt, rt_lo, rt_hi, pep, NULL AS label, NULL AS sample, NULL AS intensity FROM f ORDER BY fid`;
-  }
-  return `WITH ${f},
-x AS (SELECT fid, r, unnest(intensities) AS i FROM f WHERE len(intensities) > 0)${map.ctes},
-s AS (SELECT x.fid, x.i.label AS label, ${map.col} AS sample, x.i.intensity::DOUBLE AS intensity FROM x ${map.joins} WHERE x.i.intensity > 0)
-SELECT f.fid, f.r AS run, f.z AS charge, f.rt, f.rt_lo, f.rt_hi, f.pep, s.label, s.sample, s.intensity
-FROM f LEFT JOIN s USING (fid) ORDER BY f.fid`;
-}
-
-const num = (v: unknown) => (v == null || !Number.isFinite(Number(v)) ? null : Number(v));
-
 let seq = 0;
 async function load() {
   const S = src.value;
@@ -93,32 +44,17 @@ async function load() {
   const id = ++seq;
   busy.value = true;
   error.value = "";
+  contextError.value = "";
   features.value = [];
   channels.value = [];
   try {
-    const [r] = await Promise.all([runSql(profileSql(S), MAX_FEATURES * 40), loadContext().catch(() => {})]);
+    const [r] = await Promise.all([peptidoformProfile(props.t, S, props.peptidoform), loadContext().catch((e: unknown) => {
+      if (id === seq && !isCancelled(e)) contextError.value = String((e as any)?.message ?? e);
+    })]);
     if (id !== seq) return;
-    const fs = new Map<number, Feature>();
-    const ch: Channel[] = [];
-    for (const row of objects(r)) {
-      const fid = Number(row.fid);
-      if (!fs.has(fid)) {
-        fs.set(fid, {
-          fid,
-          run: String(row.run),
-          charge: num(row.charge),
-          rt: num(row.rt),
-          rtLo: num(row.rt_lo),
-          rtHi: num(row.rt_hi),
-          pep: num(row.pep),
-        });
-      }
-      const v = num(row.intensity);
-      if (row.sample != null && v != null && v > 0) ch.push({ fid, sample: String(row.sample), label: row.label == null ? null : String(row.label), intensity: v });
-    }
-    truncated.value = fs.size > MAX_FEATURES;
-    features.value = [...fs.values()].slice(0, MAX_FEATURES);
-    channels.value = ch;
+    truncated.value = r.truncated;
+    features.value = r.features;
+    channels.value = r.channels;
     if (!groupOptions.value.includes(groupBy.value)) groupBy.value = groupOptions.value[0] ?? "";
   } catch (e: any) {
     if (id === seq) error.value = String(e?.message ?? e);
@@ -129,31 +65,21 @@ async function load() {
 
 /** Sample metadata and the full run list, shared with the Quantification tab cache. */
 async function loadContext() {
-  if (!meta.value.size && props.t.sample?.cols.has("sample_accession")) {
-    const s = await cachedSql(props.ds, "quant.samples", `SELECT * FROM ${ident(props.t.sample.table)}`, 100000);
-    meta.value = new Map(objects(s).map((x) => [String(x.sample_accession), x]));
+  if (!meta.value.size && props.t.sample?.cols.has(COL.sample_accession)) {
+    meta.value = await sampleMeta(props.ds, props.t.sample);
   }
-  if (!allRuns.value.length && props.t.run?.cols.has("run_file_name")) {
-    const r = await cachedSql(props.ds, "pep.runs", `SELECT DISTINCT run_file_name FROM ${ident(props.t.run.table)}`, 100000);
-    allRuns.value = r.rows.map((x) => String(x[0])).sort(natural);
+  if (!allRuns.value.length && props.t.run?.cols.has(COL.run_file_name)) {
+    allRuns.value = await runNames(props.ds, props.t.run);
   }
 }
 
 /** Median log2 intensity of every sample over all target evidence, for normalisation. */
 async function loadMedians() {
   const S = src.value;
-  if (!S || !hasInt(S) || medians.value || medBusy.value) return;
+  if (!S || !S.cols.has(COL.intensities) || medians.value || medBusy.value) return;
   medBusy.value = true;
   try {
-    const map = sampleMapSql(props.t.run);
-    const r = await cachedSql(
-      props.ds,
-      `pep.medians.${S === props.t.feature ? "feature" : "psm"}`,
-      `WITH x AS (SELECT run_file_name AS r, unnest(intensities) AS i FROM ${ident(S.table)} WHERE ${targetWhere(S)} AND len(intensities) > 0)${map.ctes}
-       SELECT ${map.col} AS sample, median(log2(x.i.intensity)) AS med FROM x ${map.joins} WHERE x.i.intensity > 0 GROUP BY 1`,
-      100000
-    );
-    medians.value = new Map(r.rows.map((x) => [String(x[0]), Number(x[1])]));
+    medians.value = await sampleMedians(props.ds, props.t, S);
   } catch (e: any) {
     medError.value = String(e?.message ?? e);
     normalise.value = false;
@@ -169,20 +95,28 @@ watch(() => props.peptidoform, load, { immediate: true });
 
 const isSamples = computed(() => channels.value.some((c) => meta.value.has(c.sample)));
 const groupOptions = computed(() => (isSamples.value ? groupingColumns([...meta.value.keys()], meta.value) : []));
-function groupOf(sample: string): string {
-  if (!groupBy.value) return "";
-  const v = meta.value.get(sample)?.[groupBy.value];
-  return v == null || v === "" ? "not available" : String(v);
-}
+const groupOf = (sample: string) => sampleGroup(meta.value, groupBy.value, sample);
 
 /** Every sample the peptidoform could be in (all mapped samples), else those seen. */
-const sampleAxis = computed(() => {
+const axisSamples = computed(() => {
   const seen = new Set(channels.value.map((c) => c.sample));
-  const all = isSamples.value ? new Set([...meta.value.keys(), ...seen]) : seen;
-  return [...all].sort((a, b) => natural(groupOf(a), groupOf(b)) || natural(a, b));
+  return [...(isSamples.value ? new Set([...meta.value.keys(), ...seen]) : seen)];
 });
-const groups = computed(() => (groupBy.value ? [...new Set(sampleAxis.value.map(groupOf))].sort(natural) : []));
-const groupColor = (g: string) => (g ? SERIES_COLORS[Math.max(0, groups.value.indexOf(g)) % SERIES_COLORS.length] : chartTheme().accent);
+const groupValues = computed(() => (groupBy.value ? axisSamples.value.map(groupOf) : []));
+const { groups: lookedUp, failed: lookupFailed } = useValueGroups(groupBy, groupValues);
+const scale = computed(() => {
+  void settings.theme;
+  return colourScale(groupBy.value, groupValues.value, lookedUp.value);
+});
+/** The groups in legend order. */
+const groups = computed(() => (groupBy.value ? scale.value.order : []));
+const groupColor = (g: string) => (g ? scale.value.colourOf(g) : chartTheme().pooled);
+/** The samples by group, in legend order, then by name. */
+const sampleAxis = computed(() => {
+  const rank = new Map(groups.value.map((g, i) => [g, i]));
+  const r = (s: string) => rank.get(groupOf(s)) ?? rank.size;
+  return [...axisSamples.value].sort((a, b) => r(a) - r(b) || natural(a, b));
+});
 
 /** log2 intensity per sample, summed over the peptidoform's features (charges, fractions). */
 const perSample = computed(() => {
@@ -227,80 +161,18 @@ const theme = computed(() => {
   void settings.theme;
   return chartTheme();
 });
-const prefixOf = (xs: string[]) => commonPrefix(xs);
-/** Axis label: drop the shared prefix, then keep the distinctive end of long names. */
-const shorten = (p: string) => (s: string) => {
-  const rest = p ? s.slice(p.length) : s;
-  return rest.length > 16 ? `…${rest.slice(-15)}` : p ? `…${rest}` : rest;
-};
 const yLabel = computed(() => (normalise.value ? "log2 intensity − sample median" : "log2 intensity"));
 
-function categoryAxis(labels: string[]) {
-  const t = theme.value;
-  const p = prefixOf(labels);
-  return {
-    type: "category",
-    data: labels,
-    axisLabel: { show: labels.length <= 80, color: t.dim, rotate: labels.length > 8 ? 45 : 0, fontSize: 10, formatter: shorten(p), hideOverlap: true },
-    axisLine: { lineStyle: { color: t.border } },
-  };
-}
-function valueAxis(name: string, extra: Record<string, any> = {}) {
-  const t = theme.value;
-  return {
-    type: "value",
-    scale: true,
-    name,
-    nameLocation: "middle",
-    nameGap: 36,
-    nameTextStyle: { color: t.dim },
-    axisLabel: { color: t.dim },
-    splitLine: { lineStyle: { color: t.border, opacity: 0.5 } },
-    ...extra,
-  };
-}
-function groupLegend() {
-  const t = theme.value;
-  return groupBy.value
-    ? { top: 0, type: "scroll", data: groups.value.map((g) => ({ name: g, itemStyle: { color: groupColor(g) } })), textStyle: { color: t.dim }, pageTextStyle: { color: t.dim } }
-    : undefined;
-}
+const style = computed<ProfileStyle>(() => ({
+  theme: theme.value,
+  groupBy: groupBy.value,
+  groups: groups.value,
+  groupOf,
+  groupColor,
+  yLabel: yLabel.value,
+}));
 
-const sampleOption = computed(() => {
-  if (!channels.value.length) return null;
-  const labels = sampleAxis.value;
-  const data = labels.map((s) => {
-    const v = perSample.value.get(s);
-    return { value: v && Number.isFinite(v.log2) ? +v.log2.toFixed(4) : null, itemStyle: { color: groupColor(groupOf(s)) } };
-  });
-  return {
-    animation: false,
-    backgroundColor: "transparent",
-    legend: groupLegend(),
-    tooltip: {
-      trigger: "axis",
-      confine: true,
-      axisPointer: { type: "shadow" },
-      formatter: (ps: any) => {
-        const p = (Array.isArray(ps) ? ps : [ps]).find((x: any) => x.seriesType === "bar");
-        if (!p) return "";
-        const s = labels[p.dataIndex];
-        const v = perSample.value.get(s);
-        const g = groupBy.value ? `<br/>${escapeHtml(groupBy.value)}: ${escapeHtml(groupOf(s))}` : "";
-        const body = v ? `${yLabel.value} <b>${v.log2.toFixed(2)}</b><br/>${v.n} ${srcLabel.value} summed` : "not quantified";
-        return `<b>${escapeHtml(s)}</b>${g}<br/>${body}`;
-      },
-    },
-    grid: { left: 26, right: 18, top: groupBy.value ? 32 : 14, bottom: 4, containLabel: true },
-    dataZoom: labels.length > 80 ? [{ type: "inside" }, { type: "slider", height: 14, bottom: 0 }] : undefined,
-    xAxis: categoryAxis(labels),
-    yAxis: valueAxis(yLabel.value),
-    series: [
-      { name: "intensity", type: "bar", data, barMaxWidth: 26 },
-      ...groups.value.map((g) => ({ name: g, type: "line", data: [], itemStyle: { color: groupColor(g) } })),
-    ],
-  };
-});
+const sampleOption = computed(() => (channels.value.length ? sampleChart(sampleAxis.value, perSample.value, srcLabel.value, style.value) : null));
 
 function sampleCsv(): string {
   const head = ["sample", ...(groupBy.value ? [groupBy.value] : []), normalise.value ? "log2_intensity_minus_sample_median" : "log2_intensity", "n_summed"];
@@ -310,122 +182,18 @@ function sampleCsv(): string {
   }));
 }
 
-/** Box (5–95% whiskers) plus the individual samples, per group. */
-const distOption = computed(() => {
-  if (!perSample.value.size) return null;
-  const t = theme.value;
-  const unit = isSamples.value ? "samples" : "runs";
-  const cats = groupBy.value ? groups.value : [`all ${unit}`];
-  const valuesOf = (g: string) =>
-    sampleAxis.value
-      .filter((s) => !groupBy.value || groupOf(s) === g)
-      .map((s) => ({ s, v: perSample.value.get(s)?.log2 }))
-      .filter((x): x is { s: string; v: number } => x.v != null && Number.isFinite(x.v));
-  const boxes = cats.map((g) => {
-    const xs = valuesOf(g).map((x) => x.v).sort((a, b) => a - b);
-    return xs.length ? [0.05, 0.25, 0.5, 0.75, 0.95].map((q) => +quantile(xs, q).toFixed(4)) : [];
-  });
-  const points = cats.flatMap((g, k) =>
-    valuesOf(g).map((x, i, arr) => ({
-      value: [k + ((i / Math.max(1, arr.length - 1)) - 0.5) * 0.5, +x.v.toFixed(4), x.s],
-      itemStyle: { color: groupColor(groupBy.value ? g : "") },
-    }))
-  );
-  return {
-    animation: false,
-    backgroundColor: "transparent",
-    tooltip: {
-      confine: true,
-      formatter: (p: any) => {
-        if (p.seriesType === "boxplot") {
-          const q = (p.value as number[]).slice(-5);
-          return `<b>${escapeHtml(cats[p.dataIndex])}</b><br/>` + ["5%", "25%", "median", "75%", "95%"].map((n, k) => `${n}: <b>${Number(q[k]).toFixed(2)}</b>`).join("<br/>");
-        }
-        return `<b>${escapeHtml(p.value[2])}</b><br/>${yLabel.value} <b>${Number(p.value[1]).toFixed(2)}</b>`;
-      },
-    },
-    grid: { left: 26, right: 18, top: 14, bottom: 4, containLabel: true },
-    xAxis: {
-      ...categoryAxis(cats),
-      axisLabel: {
-        color: t.dim,
-        fontSize: 10,
-        interval: 0,
-        rotate: cats.length > 4 ? 30 : 0,
-        width: cats.length > 4 ? 140 : Math.max(60, 420 / cats.length),
-        overflow: "break",
-      },
-    },
-    yAxis: valueAxis(yLabel.value),
-    series: [
-      { name: "distribution", type: "boxplot", data: boxes, itemStyle: { color: `${t.accent}22`, borderColor: t.dim } },
-      { name: "samples", type: "scatter", symbolSize: 7, data: points, xAxisIndex: 0, z: 3 },
-    ],
-  };
-});
+const distOption = computed(() =>
+  perSample.value.size ? distributionChart(sampleAxis.value, perSample.value, isSamples.value ? "samples" : "runs", style.value) : null
+);
 
 function distCsv(): string {
   return toCsv(["sample", ...(groupBy.value ? [groupBy.value] : []), normalise.value ? "log2_intensity_minus_sample_median" : "log2_intensity"],
     [...perSample.value].map(([s, v]) => [s, ...(groupBy.value ? [groupOf(s)] : []), Number.isFinite(v.log2) ? v.log2 : null]));
 }
 
-const chargeColor = (z: number | null) => SERIES_COLORS[Math.max(0, charges.value.indexOf(z)) % SERIES_COLORS.length];
-
-/** Apex RT per run, one series per charge, with the elution window as a bar. */
-const rtOption = computed(() => {
-  const withRt = features.value.filter((f) => f.rt != null);
-  if (!withRt.length) return null;
-  const t = theme.value;
-  const labels = runs.value;
-  const idx = new Map(labels.map((r, i) => [r, i]));
-  const ranges = withRt.filter((f) => f.rtLo != null && f.rtHi != null);
-  const med = stats.value.rtMedian;
-  return {
-    animation: false,
-    backgroundColor: "transparent",
-    legend: charges.value.length > 1 ? { top: 0, textStyle: { color: t.dim } } : undefined,
-    tooltip: {
-      confine: true,
-      formatter: (p: any) => {
-        const f: Feature | undefined = p.data?.f;
-        if (!f) return "";
-        const win = f.rtLo != null && f.rtHi != null ? `<br/>window ${f.rtLo.toFixed(2)}–${f.rtHi.toFixed(2)} min` : "";
-        const pep = f.pep != null ? `<br/>PEP ${f.pep.toExponential(1)}` : "";
-        return `<b>${escapeHtml(f.run)}</b><br/>z ${f.charge ?? "?"} · RT <b>${f.rt!.toFixed(2)}</b> min${win}${pep}`;
-      },
-    },
-    grid: { left: 26, right: 18, top: charges.value.length > 1 ? 32 : 14, bottom: 4, containLabel: true },
-    dataZoom: labels.length > 80 ? [{ type: "inside" }, { type: "slider", height: 14, bottom: 0 }] : undefined,
-    xAxis: categoryAxis(labels),
-    yAxis: valueAxis("RT (min)"),
-    series: [
-      ...(ranges.length
-        ? [{
-            name: "window",
-            type: "custom",
-            silent: true,
-            renderItem: (_: any, api: any) => {
-              const a = api.coord([api.value(0), api.value(1)]);
-              const b = api.coord([api.value(0), api.value(2)]);
-              return { type: "line", shape: { x1: a[0], y1: a[1], x2: b[0], y2: b[1] }, style: { stroke: t.dim, lineWidth: 2, opacity: 0.5 } };
-            },
-            data: ranges.map((f) => [idx.get(f.run), f.rtLo, f.rtHi]),
-          }]
-        : []),
-      ...charges.value.map((z, k) => ({
-        name: z == null ? "z ?" : `z ${z}`,
-        type: "scatter",
-        symbolSize: 8,
-        itemStyle: { color: chargeColor(z), borderColor: t.bg, borderWidth: 1 },
-        data: withRt.filter((f) => f.charge === z).map((f) => ({ value: [idx.get(f.run), +f.rt!.toFixed(3)], f })),
-        markLine:
-          k === 0 && med != null
-            ? { silent: true, symbol: "none", label: { color: t.dim, position: "insideEndTop", formatter: `median ${med.toFixed(2)}` }, lineStyle: { color: t.dim, type: "dashed" }, data: [{ yAxis: med }] }
-            : undefined,
-      })),
-    ],
-  };
-});
+const rtOption = computed(() =>
+  features.value.some((f) => f.rt != null) ? retentionChart(features.value, runs.value, charges.value, stats.value.rtMedian, theme.value) : null
+);
 
 function rtCsv(): string {
   return toCsv(["run_file_name", "charge", "rt_min", "rt_start_min", "rt_stop_min", "posterior_error_probability"],
@@ -439,7 +207,7 @@ const base = computed(() => `${props.fileBase}_${props.peptidoform.replace(/[^A-
 <template>
   <div class="profile">
     <div v-if="!src" class="muted">No feature or PSM view in this dataset.</div>
-    <div v-else-if="error" class="error">⚠ {{ error }}</div>
+    <div v-else-if="error" class="error">{{ error }}</div>
     <div v-else-if="busy" class="muted">Loading every {{ srcLabel.slice(0, -1) }} of this peptidoform… <span class="spinner"></span></div>
     <template v-else>
       <div class="kpis">
@@ -452,6 +220,7 @@ const base = computed(() => `${props.fileBase}_${props.peptidoform.replace(/[^A-
         <div v-if="stats.cv != null"><b>{{ stats.cv.toFixed(0) }}%</b><span>intensity CV</span></div>
       </div>
       <div class="ctl">
+        <span v-if="contextError" class="error">Sample / run context: {{ contextError }}</span>
         <label v-if="groupOptions.length">
           Group by
           <select v-model="groupBy">
@@ -459,10 +228,13 @@ const base = computed(() => `${props.fileBase}_${props.peptidoform.replace(/[^A-
             <option v-for="g in groupOptions" :key="g" :value="g">{{ g.replace(/_/g, " ") }}</option>
           </select>
         </label>
+        <span v-if="lookupFailed" class="muted" title="UniProt or the EBI Ontology Lookup Service could not be reached">
+          biological groups unavailable; colours by count
+        </span>
         <label v-if="channels.length" title="Subtract each sample's median log2 intensity over all evidence (reads the whole intensities column once)">
           <input v-model="normalise" type="checkbox" :disabled="medBusy" /> Normalise to sample median
           <span v-if="medBusy" class="spinner"></span>
-          <span v-if="medError" class="muted error-inline" :title="medError">⚠ medians failed</span>
+          <span v-if="medError" class="muted error-inline" :title="medError">medians failed</span>
         </label>
         <span v-if="truncated" class="muted">Only the first {{ MAX_FEATURES.toLocaleString() }} {{ srcLabel }} are shown.</span>
       </div>
@@ -506,28 +278,39 @@ const base = computed(() => `${props.fileBase}_${props.peptidoform.replace(/[^A-
   flex-direction: column;
   gap: 10px;
 }
+/* A stat strip: value over a sentence-case label, hairlines between. */
 .kpis {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 18px;
+  row-gap: 6px;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  padding: 8px 0;
 }
 .kpis > div {
   display: flex;
   flex-direction: column;
+  padding: 0 14px;
+  border-left: 1px solid var(--rule);
+}
+.kpis > div:first-child {
+  padding-left: 0;
+  border-left: none;
 }
 .kpis b {
-  font-size: 15px;
+  font-size: 16px;
+  font-weight: 600;
 }
 .kpis span {
-  font-size: 11px;
-  color: var(--text-dim);
+  font-size: 12px;
+  color: var(--muted);
 }
 .ctl {
   display: flex;
   flex-wrap: wrap;
   gap: 14px;
   align-items: center;
-  font-size: 12px;
+  font-size: 13px;
 }
 .ctl label {
   display: flex;
@@ -535,8 +318,8 @@ const base = computed(() => `${props.fileBase}_${props.peptidoform.replace(/[^A-
   align-items: center;
 }
 .ctl select {
-  font-size: 11px;
-  padding: 1px 4px;
+  font-size: 12px;
+  padding: 2px 6px;
 }
 .pair {
   display: grid;

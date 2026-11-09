@@ -4,10 +4,14 @@
 //! between every chunk. `cancel_download(id)` flips the token; the loop then
 //! aborts promptly instead of streaming the whole file.
 
+use crate::commands::progress;
+use bytes::Bytes;
+use futures::{Stream, StreamExt};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use tauri::AppHandle;
 use tokio::io::AsyncWriteExt;
 
 static ACTIVE: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
@@ -16,23 +20,33 @@ fn registry() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
     ACTIVE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Register a download batch and return its token. Call [`end`] when the
-/// command returns, so the registry doesn't grow unboundedly.
-pub fn begin(id: &str) -> Arc<AtomicBool> {
+/// A registered download batch. Dropping it, however the command ends,
+/// removes its id from the registry.
+pub struct Batch {
+    id: String,
+    pub token: Arc<AtomicBool>,
+}
+
+/// Register a download batch under the frontend's `cancelId`.
+pub fn begin(id: &str) -> Batch {
     let token = Arc::new(AtomicBool::new(false));
     registry()
         .lock()
         .expect("transfers registry poisoned")
         .insert(id.to_string(), token.clone());
-    token
+    Batch {
+        id: id.to_string(),
+        token,
+    }
 }
 
-/// Remove a finished (or failed) download from the registry.
-pub fn end(id: &str) {
-    registry()
-        .lock()
-        .expect("transfers registry poisoned")
-        .remove(id);
+impl Drop for Batch {
+    fn drop(&mut self) {
+        registry()
+            .lock()
+            .expect("transfers registry poisoned")
+            .remove(&self.id);
+    }
 }
 
 /// Request cancellation for a batch. Returns whether a matching download
@@ -41,7 +55,7 @@ pub fn end(id: &str) {
 pub fn cancel(id: &str) -> bool {
     let hit = {
         let guard = registry().lock().expect("transfers registry poisoned");
-        guard.get(id).map(|t| t.clone())
+        guard.get(id).cloned()
     };
     match hit {
         Some(token) => {
@@ -51,6 +65,10 @@ pub fn cancel(id: &str) -> bool {
         None => false,
     }
 }
+
+/// The error of a cancelled download. The front end recognises a cancel by
+/// this exact text (`CANCELLED` in `src/lib/errors.ts`).
+pub const CANCELLED: &str = "cancelled";
 
 /// Poll helper for the download loop.
 pub fn is_cancelled(token: &AtomicBool) -> bool {
@@ -75,25 +93,42 @@ where
             r = &mut fut => return r,
             _ = tick.tick() => {
                 if is_cancelled(token) {
-                    return Err("cancelled".to_string());
+                    return Err(CANCELLED.to_string());
                 }
             }
         }
     }
 }
 
-/// Tauri command: cancel an in-flight download batch by its `cancelId`.
+/// Tauri command: cancel an in-flight download batch by its `cancelId`. A
+/// batch that already finished has nothing left to cancel.
 #[tauri::command]
-pub fn cancel_download(id: String) -> Result<(), String> {
-    if cancel(&id) {
-        Ok(())
-    } else {
-        Err("no such in-flight download".to_string())
-    }
+pub fn cancel_download(id: String) {
+    cancel(&id);
 }
 
 /// How often a stalled download re-checks its cancel token.
 pub const POLL: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Download cache of one source, under the user's cache folder.
+#[derive(Clone, Copy, Debug, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CacheKind {
+    Portal,
+    S3,
+}
+
+impl CacheKind {
+    /// `<cache dir>/qpxui/portal` or `<cache dir>/qpxui/s3-cache`.
+    pub fn root(self) -> Result<PathBuf, String> {
+        let base = dirs::cache_dir().ok_or_else(|| "no cache directory available".to_string())?;
+        let sub = match self {
+            CacheKind::Portal => "portal",
+            CacheKind::S3 => "s3-cache",
+        };
+        Ok(base.join("qpxui").join(sub))
+    }
+}
 
 /// Space left free on the cache volume after a download, so a big transfer
 /// never fills the disk to the last byte.
@@ -104,7 +139,9 @@ pub const RESERVE_BYTES: u64 = 1 << 30;
 pub fn free_space(dir: &Path) -> Result<u64, String> {
     let mut p = dir;
     while !p.exists() {
-        p = p.parent().ok_or_else(|| format!("no existing parent for {}", dir.display()))?;
+        p = p
+            .parent()
+            .ok_or_else(|| format!("no existing parent for {}", dir.display()))?;
     }
     fs4::available_space(p).map_err(|e| format!("free space of {}: {e}", p.display()))
 }
@@ -118,7 +155,11 @@ pub fn human(n: u64) -> String {
         v /= 1024.0;
         i += 1;
     }
-    if i == 0 { format!("{n} B") } else { format!("{v:.1} {}", U[i]) }
+    if i == 0 {
+        format!("{n} B")
+    } else {
+        format!("{v:.1} {}", U[i])
+    }
 }
 
 /// Fail when `need` bytes (plus [`RESERVE_BYTES`]) do not fit in `free`.
@@ -157,7 +198,12 @@ impl PartFile {
         let file = tokio::fs::File::create(&part)
             .await
             .map_err(|e| format!("create {}: {e}", part.display()))?;
-        Ok(Self { part, dest: dest.to_path_buf(), file: Some(file), written: 0 })
+        Ok(Self {
+            part,
+            dest: dest.to_path_buf(),
+            file: Some(file),
+            written: 0,
+        })
     }
 
     pub async fn write(&mut self, chunk: &[u8]) -> Result<(), String> {
@@ -195,23 +241,61 @@ impl Drop for PartFile {
     }
 }
 
+/// Stream one response body to `dest` through its `.part` file, reporting
+/// progress for `name` in `batch` and stopping once the batch is cancelled,
+/// also while the server stalls between chunks. `total` is the expected size,
+/// 0 if unknown.
+pub async fn save(
+    app: Option<&AppHandle>,
+    batch: &Batch,
+    name: &str,
+    dest: &Path,
+    total: u64,
+    body: impl Stream<Item = Result<Bytes, String>>,
+) -> Result<u64, String> {
+    let token = &batch.token;
+    let mut body = std::pin::pin!(body);
+    let mut part = PartFile::create(dest).await?;
+    loop {
+        let next = match tokio::time::timeout(POLL, body.next()).await {
+            Ok(next) => next,
+            Err(_) if is_cancelled(token) => return Err(CANCELLED.to_string()),
+            Err(_) => continue,
+        };
+        if is_cancelled(token) {
+            return Err(CANCELLED.to_string());
+        }
+        let Some(chunk) = next else { break };
+        part.write(&chunk?).await?;
+        if let Some(app) = app {
+            progress::chunk(app, &batch.id, name, part.written, total);
+        }
+    }
+    if total > 0 && part.written != total {
+        return Err(format!("{name}: got {} of {total} bytes", part.written));
+    }
+    let done = part.finish().await?;
+    if let Some(app) = app {
+        progress::done(app, &batch.id, name, done);
+    }
+    Ok(done)
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiskSpace {
     pub free: u64,
     pub reserve: u64,
-    pub dir: String,
 }
 
-/// Tauri command: free space on the download cache volume (`kind` is
-/// `portal` or `s3`), so the UI can warn before starting a download.
+/// Tauri command: free space on the download cache volume, so the UI can
+/// warn before starting a download.
 #[tauri::command]
-pub fn cache_free_space(kind: String) -> Result<DiskSpace, String> {
-    let base = dirs::cache_dir()
-        .or_else(dirs::data_local_dir)
-        .ok_or_else(|| "no cache directory available".to_string())?;
-    let dir = base.join("qpxui").join(if kind == "s3" { "s3-cache" } else { "portal" });
-    Ok(DiskSpace { free: free_space(&dir)?, reserve: RESERVE_BYTES, dir: dir.to_string_lossy().to_string() })
+pub fn cache_free_space(kind: CacheKind) -> Result<DiskSpace, String> {
+    Ok(DiskSpace {
+        free: free_space(&kind.root()?)?,
+        reserve: RESERVE_BYTES,
+    })
 }
 
 #[cfg(test)]
@@ -228,6 +312,29 @@ mod tests {
         // Fits exactly only with the reserve left over.
         assert!(check_fits(19 * gb, 20 * gb).is_ok());
         assert!(check_fits(19 * gb + 1, 20 * gb).is_err());
+    }
+
+    #[test]
+    fn cancel_reaches_a_batch_only_while_it_runs() {
+        let batch = begin("test-cancel");
+        assert!(!is_cancelled(&batch.token));
+        assert!(cancel("test-cancel"));
+        assert!(is_cancelled(&batch.token));
+        assert!(!cancel("test-unknown"));
+        drop(batch);
+        assert!(!cancel("test-cancel"));
+    }
+
+    #[tokio::test]
+    async fn cancellable_ends_a_stalled_request() {
+        let batch = begin("test-cancellable");
+        assert_eq!(cancellable(&batch.token, async { Ok(7) }).await, Ok(7));
+        cancel("test-cancellable");
+        let stalled = std::future::pending::<Result<(), String>>();
+        assert_eq!(
+            cancellable(&batch.token, stalled).await,
+            Err(CANCELLED.to_string())
+        );
     }
 
     #[test]

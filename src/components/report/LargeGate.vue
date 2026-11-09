@@ -16,9 +16,11 @@ defineEmits<{ go: [] }>();
 </template>
 
 <style scoped>
+/* A callout with a brand rule, like the citation box. */
 .gate {
-  border: 1px dashed var(--border);
-  border-radius: 8px;
+  border-left: 3px solid var(--accent);
+  background: var(--bg-alt);
+  border-radius: 0 6px 6px 0;
   padding: 14px 16px;
   font-size: 13px;
   margin-bottom: 12px;

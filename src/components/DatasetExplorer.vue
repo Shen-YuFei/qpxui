@@ -2,6 +2,8 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { hasReport, openReport, searchFor, state, stopQueries } from "../store";
 import { api, type StreamStat, type ViewInfo } from "../lib/api";
+import { registered } from "../lib/duck";
+import { fmtBytes } from "../lib/format";
 
 const datasets = computed(() => state.datasets);
 
@@ -10,11 +12,7 @@ const streamStats = ref<Record<string, StreamStat>>({});
 let timer: number | undefined;
 async function refreshStats() {
   if (!state.datasets.some((d) => d.views.some(isStreamed))) return;
-  try {
-    streamStats.value = await api.streamS3Stats();
-  } catch {
-    /* backend not ready */
-  }
+  streamStats.value = await api.streamS3Stats();
 }
 onMounted(() => {
   refreshStats();
@@ -29,15 +27,9 @@ function isStreamed(v: ViewInfo): boolean {
 function streamTitle(v: ViewInfo): string {
   const s = streamStats.value[v.path];
   if (!s) return "Streamed (lazy) — not read yet";
-  return `Streamed (lazy): ${fmt(s.fetchedBytes)} of ${fmt(s.sizeBytes)} fetched in ${s.requests} range request(s)`;
+  return `Streamed (lazy): ${fmtBytes(s.fetchedBytes)} of ${fmtBytes(s.sizeBytes)} fetched in ${s.requests} range request(s)`;
 }
 
-function fmt(n: number): string {
-  if (!n) return "0 B";
-  const u = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(n) / Math.log(1024));
-  return `${(n / Math.pow(1024, i)).toFixed(1)} ${u[i]}`;
-}
 
 function selectView(v: ViewInfo) {
   state.selectedView = v;
@@ -64,21 +56,6 @@ function runSearch() {
   scope.value = sc;
   searchFor(sc, s);
 }
-
-const viewIcon: Record<string, string> = {
-  dataset: "🛰️",
-  sample: "🧪",
-  run: "⚙️",
-  psm: "🎯",
-  feature: "📐",
-  pg: "🧬",
-  pepmap: "🔗",
-  mz: "📡",
-  ontology: "🏷️",
-  provenance: "📜",
-  ae: "📊",
-  de: "🔥",
-};
 </script>
 
 <template>
@@ -92,6 +69,10 @@ const viewIcon: Record<string, string> = {
       </div>
     </form>
 
+    <div v-if="state.scanWarnings.length" class="scan-warning error">
+      Skipped unreadable folders:
+      <div v-for="folder in state.scanWarnings" :key="folder.path" :title="folder.reason">{{ folder.path }}</div>
+    </div>
     <div class="tree-title">Datasets</div>
 
     <div v-for="d in datasets" :key="d.path + d.prefix" class="ds">
@@ -102,7 +83,7 @@ const viewIcon: Record<string, string> = {
         title="Click to select dataset"
       >
         <span class="ds-name">{{ d.prefix }}</span>
-        <button class="xs" @click.stop="selectDataset(d)">{{ d.views.length }}</button>
+        <span class="ds-count muted" :title="`${d.views.length} views`">{{ d.views.length }}</span>
       </div>
 
       <div v-if="state.selectedDataset === d" class="views">
@@ -113,7 +94,6 @@ const viewIcon: Record<string, string> = {
           @click="openReport()"
           title="Dataset report: KPIs, QC charts, PTMs, samples, protein and peptidoform search"
         >
-          <span class="vi">📈</span>
           <span class="vname">Report &amp; search</span>
         </div>
         <div
@@ -122,15 +102,14 @@ const viewIcon: Record<string, string> = {
           class="view"
           :class="{ active: state.page === 'view' && state.selectedView?.path === v.path }"
           @click="selectView(v)"
-          :title="`${v.name} · ${fmt(v.sizeBytes)}`"
+          :title="`${v.name} · ${fmtBytes(v.sizeBytes)}`"
         >
-          <span class="vi">{{ viewIcon[v.view] ?? '📦' }}</span>
           <span class="vname mono">{{ v.view }}</span>
           <span v-if="isStreamed(v)" class="stream muted" :title="streamTitle(v)">
-            ⚡ {{ fmt(streamStats[v.path]?.fetchedBytes ?? 0) }} /
+            {{ fmtBytes(streamStats[v.path]?.fetchedBytes ?? 0) }} /
           </span>
-          <span class="vsize muted">{{ fmt(v.sizeBytes) }}</span>
-          <span v-if="state.registered.has(v.path)" class="ok" title="Loaded in DuckDB">✓</span>
+          <span class="vsize muted">{{ fmtBytes(v.sizeBytes) }}</span>
+          <span v-if="registered.has(v.path)" class="ok" title="Loaded in DuckDB">✓</span>
         </div>
       </div>
     </div>
@@ -139,104 +118,110 @@ const viewIcon: Record<string, string> = {
 
 <style scoped>
 .tree {
-  padding: 14px;
+  padding: 16px 14px;
+}
+.scan-warning {
+  margin-bottom: 12px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 .tree-title {
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
+  font-size: 13px;
+  font-weight: 600;
   color: var(--text-dim);
-  margin-bottom: 12px;
+  margin: 4px 0 8px;
 }
 .ds {
-  margin-bottom: 8px;
+  margin-bottom: 2px;
 }
 .ds-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 10px;
-  border-radius: 8px;
+  gap: 8px;
+  padding: 6px 10px;
+  border-left: 3px solid transparent;
+  border-radius: 0 6px 6px 0;
   cursor: pointer;
-  background: var(--bg-panel);
-  border: 1px solid transparent;
 }
-.ds-head:hover,
+.ds-head:hover {
+  background: var(--hover);
+}
 .ds-head.active {
-  border-color: var(--accent);
+  border-left-color: var(--accent);
+  background: var(--bg-panel);
 }
 .ds-name {
-  font-weight: 700;
+  font-weight: 600;
   font-size: 13px;
+  overflow-wrap: anywhere;
 }
-button.xs {
-  padding: 2px 8px;
-  font-size: 11px;
-  border-radius: 999px;
-  background: transparent;
+.ds-count {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 .views {
-  margin-left: 14px;
+  margin: 2px 0 8px 13px;
   border-left: 1px solid var(--border);
-  padding-left: 8px;
-  margin-top: 4px;
 }
 .view {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 8px;
-  border-radius: 7px;
+  padding: 4px 10px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 13px;
+  color: var(--text-dim);
 }
 .view:hover {
-  background: var(--bg-panel);
+  background: var(--hover);
+  color: var(--text);
 }
 .view.active {
-  background: var(--bg-panel);
   color: var(--accent);
-  border: 1px solid var(--border);
-}
-.vi {
-  width: 16px;
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--bg-panel);
 }
 .vname {
   flex: 1;
 }
+.view .vname.mono {
+  font-size: 12.5px;
+}
 .vsize {
-  font-size: 11px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 .stream {
-  font-size: 10px;
+  font-size: 11px;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 .search {
-  margin-bottom: 14px;
+  margin-bottom: 18px;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
-.search input[type="text"],
 .search > input {
   width: 100%;
-  font-size: 12px;
-  padding: 7px 9px;
+  font-size: 13px;
 }
 .scope {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 11px;
+  font-size: 12px;
+  color: var(--text-dim);
 }
 .scope label {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   cursor: pointer;
 }
 .scope input {
-  accent-color: var(--accent);
   margin: 0;
 }
 .go {
@@ -244,9 +229,13 @@ button.xs {
 }
 .report-link .vname {
   font-weight: 600;
+  color: var(--text);
+}
+.report-link.active .vname {
+  color: var(--accent);
 }
 .ok {
   color: var(--ok);
-  font-weight: 700;
+  font-size: 12px;
 }
 </style>

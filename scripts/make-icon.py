@@ -4,6 +4,8 @@
 Draws a rounded-corner tile with a cyan->indigo gradient, a faint data grid,
 and a connected peptide-sequence sparkline motif. Output: icon-source.png
 """
+from pathlib import Path
+
 from PIL import Image, ImageDraw, ImageFilter
 
 SIZE = 1024
@@ -85,6 +87,6 @@ img = Image.alpha_composite(img, disc)
 final = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
 final.paste(img, (0, 0), mask)
 
-out = "/Users/yperez/work/qpxui/src-tauri/icons/icon-source.png"
+out = Path(__file__).resolve().parent.parent / "src-tauri" / "icons" / "icon-source.png"
 final.save(out)
 print("wrote", out)

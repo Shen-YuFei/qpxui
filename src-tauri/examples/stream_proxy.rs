@@ -12,10 +12,16 @@ async fn main() {
         std::process::exit(2);
     }
     let (paths, h) = if args[0].starts_with("http") {
-        (args.clone(), qpxui_lib::stream_register_http(&args).await.unwrap())
+        (
+            args.clone(),
+            qpxui_lib::stream_register_http(&args).await.unwrap(),
+        )
     } else {
         let path = format!("s3://{}/{}", args[0], args[1]);
-        (vec![path.clone()], qpxui_lib::stream_register(&args[0], &[path]).await.unwrap())
+        (
+            vec![path.clone()],
+            qpxui_lib::stream_register(&args[0], &[path]).await.unwrap(),
+        )
     };
     for p in &paths {
         println!("URL {p} {}", h[p].url);
@@ -23,7 +29,10 @@ async fn main() {
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         for (p, s) in qpxui_lib::stream_stats() {
-            println!("STAT {p} fetched={} requests={} size={}", s.fetched_bytes, s.requests, s.size_bytes);
+            println!(
+                "STAT {p} fetched={} requests={} size={}",
+                s.fetched_bytes, s.requests, s.size_bytes
+            );
         }
     }
 }

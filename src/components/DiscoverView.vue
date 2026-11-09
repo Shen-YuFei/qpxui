@@ -1,21 +1,22 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { api, type DatasetInfo, type PortalDataset, type PortalFacets, type PortalSearchResult, type ViewInfo } from "../lib/api";
-import { loadDatasets } from "../store";
-import { installProgress, overall, progress } from "../lib/progress";
-import { cancelDownload, confirmDownload, totalBytes, trackDownload, untrackDownload } from "../lib/downloads";
+import { computed, onMounted, ref } from "vue";
+import { api, portalRef, type PortalDataset, type PortalFacets, type PortalSearchResult } from "../lib/api";
+import { fmtCount, fmtBytes } from "../lib/format";
+import PortalViews from "./PortalViews.vue";
 import PeptideSearchPane from "./PeptideSearchPane.vue";
 
-const TABS = [
+type Tab = "datasets" | "peptides";
+const TABS: { key: Tab; label: string }[] = [
   { key: "datasets", label: "Dataset search" },
   { key: "peptides", label: "Peptide & protein search" },
 ];
 
-const tab = ref<"datasets" | "peptides">("datasets");
+const tab = ref<Tab>("datasets");
 
 const PAGE_SIZE = 50;
 
 const facets = ref<PortalFacets>({ organisms: [], instruments: [], collections: [] });
+const facetsError = ref("");
 const results = ref<PortalSearchResult>({ datasets: [], total: 0, page: 1, totalPages: 1, sort: "" });
 const q = ref("");
 const organism = ref("");
@@ -27,11 +28,6 @@ const busy = ref(false);
 const error = ref("");
 
 const selected = ref<PortalDataset | null>(null);
-const views = ref<ViewInfo[]>([]);
-const checked = ref<Record<string, boolean>>({});
-const downloading = ref(false);
-const downloadId = ref("");
-const cancelling = ref(false);
 
 const SORTS: { key: string; label: string }[] = [
   { key: "peptides", label: "Most peptides" },
@@ -40,39 +36,18 @@ const SORTS: { key: string; label: string }[] = [
   { key: "accession", label: "Accession A–Z" },
 ];
 
-function generateId(): string {
-  return crypto?.randomUUID?.() ?? `d${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-function isCancelledErr(e: unknown): boolean {
-  return /cancell?/i.test(String(e));
-}
-function clearProgressFor(files: string[]) {
-  for (const f of files) delete progress[f];
-}
-async function cancel() {
-  if (!downloadId.value) return;
-  cancelling.value = true;
-  await cancelDownload(downloadId.value);
-}
-
-let unmounted = false;
-onBeforeUnmount(() => {
-  unmounted = true;
-  void cancelDownload(downloadId.value);
-});
-
-function rowKey(ds: PortalDataset): string {
-  return ds.datasetRef ?? ds.accession;
-}
 function isOpen(ds: PortalDataset): boolean {
-  return !!selected.value && rowKey(selected.value) === rowKey(ds);
+  return !!selected.value && portalRef(selected.value) === portalRef(ds);
 }
 
+// Searches overlap (typing, filters, paging); only the latest one may show.
+let searchSeq = 0;
 async function load() {
+  const id = ++searchSeq;
   busy.value = true;
   error.value = "";
   try {
-    results.value = await api.portalSearch(q.value.trim() || null, {
+    const res = await api.portalSearch(q.value.trim() || null, {
       collection: collection.value || null,
       organism: organism.value || null,
       instrument: instrument.value || null,
@@ -80,21 +55,20 @@ async function load() {
       page: page.value,
       pageSize: PAGE_SIZE,
     });
-    // Drop the expanded dataset if it is no longer on this page.
+    if (id !== searchSeq) return;
+    results.value = res;
+    // Close the expanded dataset (and so cancel its download) if it is no
+    // longer on this page.
     if (selected.value) {
       const stillThere = results.value.datasets.some(
-        (d) => rowKey(d) === rowKey(selected.value!)
+        (d) => portalRef(d) === portalRef(selected.value!)
       );
-      if (!stillThere) {
-        selected.value = null;
-        views.value = [];
-        checked.value = {};
-      }
+      if (!stillThere) selected.value = null;
     }
   } catch (e: any) {
-    error.value = String(e);
+    if (id === searchSeq) error.value = String(e);
   } finally {
-    busy.value = false;
+    if (id === searchSeq) busy.value = false;
   }
 }
 
@@ -126,122 +100,10 @@ function clearFilters() {
   load();
 }
 
-async function selectDataset(ds: PortalDataset) {
-  if (downloadId.value) cancel();
-  if (isOpen(ds)) {
-    selected.value = null;
-    views.value = [];
-    checked.value = {};
-    return;
-  }
-  selected.value = ds;
-  views.value = [];
-  checked.value = {};
-  busy.value = true;
-  error.value = "";
-  try {
-    const ref = ds.datasetRef ?? ds.accession;
-    const v = await api.portalListViews(ref, ds.organism, ds.psmCount);
-    if (selected.value === ds) views.value = v;
-  } catch (e: any) {
-    if (selected.value === ds) error.value = String(e);
-  } finally {
-    if (selected.value === ds) busy.value = false;
-  }
+function selectDataset(ds: PortalDataset) {
+  selected.value = isOpen(ds) ? null : ds;
 }
 
-function portalName(ds: PortalDataset): string {
-  return ds.datasetRef ?? ds.accession;
-}
-
-function selectedCount() {
-  return views.value.filter((v) => checked.value[v.path]).length;
-}
-function selectedBytes() {
-  return totalBytes(views.value.filter((v) => checked.value[v.path]));
-}
-
-async function loadSelection() {
-  if (!selected.value) return;
-  busy.value = true;
-  downloading.value = true;
-  error.value = "";
-  const target = selected.value;
-  try {
-    const sel = views.value.filter((v) => checked.value[v.path]);
-    if (!sel.length) throw new Error("Select at least one view to load.");
-    if (!(await confirmDownload(sel, "portal"))) return;
-    if (unmounted || selected.value !== target) return;
-    const files = sel.map((v) => v.name);
-    cancelling.value = false;
-    const id = generateId();
-    downloadId.value = id;
-    trackDownload(id);
-    try {
-      const local = await api.portalCacheViews(sel.map((v) => v.path), id);
-      if (unmounted || selected.value !== target) return;
-      const ds: DatasetInfo = {
-        prefix: target.accession,
-        path: `quantms portal / ${portalName(target)}`,
-        views: local.sort((a, b) => a.view.localeCompare(b.view)),
-        sourceKind: "portal",
-      };
-      loadDatasets([ds], "portal | " + target.accession);
-    } catch (e: any) {
-      if (isCancelledErr(e)) {
-        if (!unmounted && selected.value === target) error.value = "Download cancelled; partial files were removed.";
-        clearProgressFor(files);
-      } else {
-        clearProgressFor(files);
-        throw e;
-      }
-    } finally {
-      untrackDownload(id);
-      if (downloadId.value === id) downloadId.value = "";
-      cancelling.value = false;
-    }
-  } catch (e: any) {
-    error.value = String(e);
-  } finally {
-    if (selected.value === target) busy.value = false;
-    downloading.value = false;
-  }
-}
-
-function streamSelection() {
-  if (!selected.value) return;
-  error.value = "";
-  const sel = views.value.filter((v) => checked.value[v.path]);
-  if (!sel.length) {
-    error.value = "Select at least one view to stream.";
-    return;
-  }
-  const ds: DatasetInfo = {
-    prefix: selected.value.accession,
-    path: `quantms portal / ${portalName(selected.value)}`,
-    views: sel.map((v) => ({ ...v })).sort((a, b) => a.view.localeCompare(b.view)),
-    sourceKind: "portal",
-  };
-  loadDatasets([ds], "portal | " + selected.value.accession + " (stream)");
-}
-
-function toggleAll() {
-  const allOn = views.value.every((v) => checked.value[v.path]);
-  for (const v of views.value) checked.value[v.path] = !allOn;
-}
-
-function fmtCount(n: number | null | undefined): string {
-  if (n === null || n === undefined) return "—";
-  if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M`;
-  if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}K`;
-  return String(n);
-}
-function fmt(n: number | null | undefined, force = false): string {
-  if (!n) return force ? "0 B" : "—";
-  const u = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(n) / Math.log(1024));
-  return `${(n / Math.pow(1024, i)).toFixed(1)} ${u[i]}`;
-}
 function clip(list: string[] | null | undefined, n: number): string[] {
   return (list ?? []).slice(0, n);
 }
@@ -250,33 +112,18 @@ function doiUrl(doi: string): string {
 }
 
 onMounted(() => {
-  installProgress();
-  api.portalFacets().then((f) => (facets.value = f)).catch(() => { /* non-fatal */ });
+  api.portalFacets().then((f) => (facets.value = f)).catch((e) => (facetsError.value = String(e?.message ?? e)));
   load();
 });
 
 const hasPrev = computed(() => page.value > 1);
 const hasNext = computed(() => page.value < results.value.totalPages);
-const activeBars = computed(() =>
-  Object.entries(progress)
-    .filter(([, b]) => b.phase === "downloading")
-    .map(([name, b]) => ({ name, ...b }))
-);
-const overallPct = computed(() => overall());
-function pct(n: number): string {
-  return `${Math.max(0, Math.min(100, n)).toFixed(0)}%`;
-}
-function fmtPx(n: number): string {
-  const u = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(n) / Math.log(1024));
-  return `${(n / Math.pow(1024, i)).toFixed(1)} ${u[i]}`;
-}
 </script>
 
 <template>
   <div class="discover">
     <div class="head">
-      <h3>Discover datasets on the quantms portal</h3>
+      <h2 class="section-title">Discover datasets on the quantms portal</h2>
       <p class="muted">
         Find reanalysed QPX datasets published on the
         <a href="https://portal.quantms.org" target="_blank" rel="noopener">quantms portal</a> — by
@@ -292,7 +139,7 @@ function fmtPx(n: number): string {
         :key="t.key"
         class="tab"
         :class="{ on: tab === t.key }"
-        @click="tab = t.key as any"
+        @click="tab = t.key"
       >
         {{ t.label }}
       </button>
@@ -324,10 +171,11 @@ function fmtPx(n: number): string {
       <select v-model="sort" class="sel" @change="changeFilter">
         <option v-for="s in SORTS" :key="s.key" :value="s.key">{{ s.label }}</option>
       </select>
-      <button class="ghost" @click="clearFilters">Reset</button>
+      <button @click="clearFilters">Reset</button>
     </div>
 
-    <div v-if="error && !results.datasets.length" class="error">{{ error }}</div>
+    <div v-if="facetsError" class="error">Filters: {{ facetsError }}</div>
+    <div v-if="error" class="error">{{ error }}</div>
     <div v-if="busy && !results.datasets.length" class="muted">
       Searching… <span class="spinner"></span>
     </div>
@@ -338,13 +186,13 @@ function fmtPx(n: number): string {
     </div>
 
     <div v-if="results.datasets.length" class="cards">
-      <article v-for="ds in results.datasets" :key="rowKey(ds)" class="card" :class="{ open: isOpen(ds) }">
+      <article v-for="ds in results.datasets" :key="portalRef(ds)" class="card" :class="{ open: isOpen(ds) }">
         <header class="card-head" @click="selectDataset(ds)">
           <div class="acc-row">
             <span class="acc">{{ ds.accession }}</span>
             <span v-if="ds.collectionTitle" class="chip" :title="ds.collectionTitle">{{ ds.collectionTitle }}</span>
             <span class="spacer"></span>
-            <span v-if="ds.totalSize" class="size muted">{{ fmt(ds.totalSize) }}</span>
+            <span v-if="ds.totalSize != null" class="size muted">{{ fmtBytes(ds.totalSize) }}</span>
             <span class="chev">{{ isOpen(ds) ? "▾" : "▸" }}</span>
           </div>
           <h4>{{ ds.title || ds.accession }}</h4>
@@ -379,55 +227,14 @@ function fmtPx(n: number): string {
           </div>
         </div>
 
-        <div v-if="isOpen(ds)" class="loadbox">
-          <div class="toolbar">
-            <span class="muted">
-              {{ views.length }} view(s) · {{ selectedCount() }} selected<template v-if="selectedCount()"> · {{ fmt(selectedBytes(), true) }}</template>
-            </span>
-            <div class="actions">
-              <button @click="streamSelection" :disabled="busy || !selectedCount()" title="Query the files in place — each query fetches only the byte ranges it needs">
-                ⚡ Stream (lazy)
-              </button>
-              <button class="primary" @click="loadSelection" :disabled="busy || !selectedCount()">
-                {{ downloading ? "Downloading…" : "Download to cache" }}
-              </button>
-            </div>
-          </div>
-
-          <div v-if="error" class="error">{{ error }}</div>
-
-          <div v-if="downloading && downloadId" class="progress-box">
-            <div class="overall">
-              <span class="muted">{{ cancelling ? "Cancelling…" : activeBars.length ? "Transferring to cache…" : "Checking sizes and disk space…" }}</span>
-              <span class="right">
-                <span class="muted">{{ overallPct !== null ? pct(overallPct) : "" }}</span>
-                <button class="cancel" @click="cancel" :disabled="!downloadId || cancelling">Cancel</button>
-              </span>
-            </div>
-            <div class="bar"><div class="fill" :style="{ width: pct(overallPct ?? 0) }"></div></div>
-            <div v-for="b in activeBars" :key="b.file" class="file-bar">
-              <div class="file-row">
-                <span class="mono file-name">{{ b.file }}</span>
-                <span class="muted">{{ fmtPx(b.done) }} / {{ b.total ? fmtPx(b.total) : "…" }} · {{ pct(b.percent) }}</span>
-              </div>
-              <div class="bar"><div class="fill" :style="{ width: pct(b.percent) }"></div></div>
-            </div>
-          </div>
-
-          <label class="all">
-            <input type="checkbox" :checked="views.length > 0 && selectedCount() === views.length" @change="toggleAll" />
-            <span>All views</span>
-          </label>
-          <div v-if="views.length" class="view-list">
-            <label v-for="v in views" :key="v.path" class="view">
-              <input v-model="checked[v.path]" type="checkbox" />
-              <span class="mono view-name">{{ v.name }}</span>
-              <span class="muted">{{ fmt(v.sizeBytes, true) }}</span>
-            </label>
-          </div>
-          <div v-else-if="busy" class="muted">Loading views… <span class="spinner"></span></div>
-          <div v-else class="muted">No QPX views listed for this dataset.</div>
-        </div>
+        <PortalViews
+          v-if="isOpen(ds)"
+          :accession="ds.accession"
+          :dataset-ref="portalRef(ds)"
+          :organism="ds.organism"
+          :psm-count="ds.psmCount"
+          :disabled="busy"
+        />
       </article>
     </div>
 
@@ -447,36 +254,32 @@ function fmtPx(n: number): string {
 </template>
 
 <style scoped>
-.discover {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 18px;
-  background: var(--bg-panel);
+.head p {
+  margin: 0 0 14px;
+  max-width: 900px;
+  font-size: 14px;
 }
-.head h3 {
-  margin: 0 0 6px;
-}
-a {
-  color: var(--accent);
-}
+/* Underlined tabs, as on the report page. */
 .tabbar {
-  display: inline-flex;
+  display: flex;
   gap: 4px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 3px;
-  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
 }
 .tab {
-  padding: 6px 14px;
-  font-size: 13px;
   border: none;
+  border-radius: 0;
   background: transparent;
-  border-radius: 6px;
+  padding: 8px 14px 9px;
+  color: var(--text-dim);
+  border-bottom: 3px solid transparent;
+  margin-bottom: -1px;
+}
+.tab:hover:not(:disabled) {
+  color: var(--accent);
 }
 .tab.on {
-  background: var(--accent);
-  color: #10142b;
+  color: var(--accent);
+  border-bottom-color: var(--accent);
   font-weight: 600;
 }
 .filters {
@@ -492,29 +295,21 @@ a {
 .sel {
   max-width: 220px;
 }
-.ghost {
-  padding: 6px 12px;
-}
 .meta {
-  margin: 6px 0 10px;
-  font-size: 12px;
+  margin: 6px 0 8px;
+  font-size: 13px;
 }
 .cards {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  max-height: calc(100vh - 380px);
+  border-top: 1px solid var(--border);
+  max-height: calc(100vh - 420px);
   overflow-y: auto;
-  padding-right: 4px;
 }
 .card {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-soft);
-  padding: 12px 14px;
+  border-bottom: 1px solid var(--rule);
+  padding: 12px 8px;
 }
 .card.open {
-  border-color: var(--accent);
+  background: var(--bg-alt);
 }
 .card-head {
   cursor: pointer;
@@ -522,60 +317,62 @@ a {
 .acc-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 .acc {
-  font-weight: 700;
+  font-weight: 500;
   color: var(--accent);
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 13px;
 }
 .chip {
-  font-size: 10px;
-  padding: 1px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
+  font-size: 12px;
   color: var(--muted);
-  max-width: 260px;
+  max-width: 320px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.chip::before {
+  content: "· ";
 }
 .spacer {
   flex: 1;
 }
 .size {
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
 }
 .chev {
   color: var(--muted);
 }
 .card h4 {
-  margin: 6px 0 2px;
-  font-size: 14px;
+  margin: 4px 0 2px;
+  font-size: 15px;
 }
 .sub {
-  font-size: 11px;
+  font-size: 13px;
 }
 .counts {
   display: flex;
-  gap: 16px;
-  margin-top: 6px;
-  font-size: 11px;
+  gap: 18px;
+  margin-top: 4px;
+  font-size: 13px;
   color: var(--muted);
 }
 .counts b {
   color: var(--text);
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 .meta-body {
-  margin-top: 8px;
+  margin-top: 6px;
 }
 .desc {
-  font-size: 12px;
+  margin: 0;
+  font-size: 13px;
   color: var(--text-dim);
-  line-height: 1.4;
+  line-height: 1.5;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -588,12 +385,12 @@ a {
   margin-top: 6px;
 }
 .tag {
-  font-size: 10px;
-  padding: 1px 8px;
-  border-radius: 999px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  color: var(--muted);
+  font-size: 12px;
+  padding: 0 7px;
+  border-radius: 3px;
+  background: var(--bg-alt);
+  border: 1px solid var(--rule);
+  color: var(--text-dim);
 }
 .tag.more {
   color: var(--accent);
@@ -604,109 +401,17 @@ a {
 .links {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-top: 8px;
-  font-size: 11px;
-}
-.loadbox {
-  margin-top: 10px;
-  border-top: 1px solid var(--border);
-  padding-top: 10px;
-}
-.toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 6px;
   font-size: 13px;
-  margin-bottom: 8px;
-}
-.actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.all {
-  font-weight: 600;
-  font-size: 12px;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 4px;
-}
-.view-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.view {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.view-name {
-  flex: 1;
 }
 .error {
   margin: 8px 0;
-  color: var(--err);
-  font-size: 12px;
-}
-.progress-box {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px;
-  margin: 8px 0;
-  background: var(--bg-panel);
-}
-.overall,
-.file-row {
-  display: flex;
-  justify-content: space-between;
-  font-size: 12px;
-  margin-bottom: 4px;
-}
-.right {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-}
-.cancel {
-  padding: 3px 12px;
-  font-size: 12px;
-  border-color: #d33;
-  color: #d33;
-}
-.file-name {
-  max-width: 60%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.bar {
-  height: 8px;
-  background: var(--border);
-  border-radius: 6px;
-  overflow: hidden;
-  margin-bottom: 8px;
-}
-.fill {
-  height: 100%;
-  background: var(--accent);
-  border-radius: 6px;
-  transition: width 0.15s linear;
-}
-.file-bar:last-child .bar {
-  margin-bottom: 0;
+  font-size: 13px;
 }
 .empty {
   padding: 14px 0;
-  font-size: 12px;
+  font-size: 13px;
 }
 .pager {
   display: flex;

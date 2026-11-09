@@ -1,32 +1,30 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { api, type DatasetInfo, type PsHit, type PsModification, type PsSearchResult, type ViewInfo } from "../lib/api";
-import { loadDatasets } from "../store";
-import { installProgress, overall, progress } from "../lib/progress";
-import { cancelDownload, confirmDownload, totalBytes, trackDownload, untrackDownload } from "../lib/downloads";
+import { computed, onMounted, ref } from "vue";
+import { api, type PsHit, type PsModification, type PsSearchResult } from "../lib/api";
+import { fmtCount } from "../lib/format";
+import PortalViews from "./PortalViews.vue";
 
 defineProps<{ organisms: string[] }>();
 
+type SearchType = "auto" | "peptide" | "protein" | "gene";
+
 const query = ref("");
-const explicitType = ref<"auto" | "peptide" | "protein" | "gene">("auto");
+const explicitType = ref<SearchType>("auto");
 const matchMode = ref("exact");
 const organism = ref("");
 const mod = ref("");
 const mods = ref<PsModification[]>([]);
+const modsError = ref("");
 
 const result = ref<PsSearchResult | null>(null);
 const busy = ref(false);
+/** The open hit is downloading; like a search, it holds the Search button. */
+const viewsDownloading = ref(false);
 const error = ref("");
 
 const expanded = ref<PsHit | null>(null);
-const views = ref<ViewInfo[]>([]);
-const checked = ref<Record<string, boolean>>({});
-const downloading = ref(false);
-const downloadId = ref("");
-const cancelling = ref(false);
-const viewsBusy = ref(false);
 
-const TYPES: { key: string; label: string }[] = [
+const TYPES: { key: SearchType; label: string }[] = [
   { key: "auto", label: "Auto" },
   { key: "peptide", label: "Peptide" },
   { key: "protein", label: "Protein" },
@@ -38,186 +36,51 @@ const MATCHES = [
 ];
 const showMatch = computed(() => explicitType.value === "auto" || explicitType.value === "peptide");
 
-function rowKey(h: PsHit): string {
+/** A hit's run ref (the portal leaves it empty for some hits). */
+function hitRef(h: PsHit): string {
   return h.datasetRef || h.datasetAccession;
 }
 function isExpanded(h: PsHit): boolean {
-  return !!expanded.value && rowKey(expanded.value) === rowKey(h);
+  return !!expanded.value && hitRef(expanded.value) === hitRef(h);
 }
 
-function generateId(): string {
-  return crypto?.randomUUID?.() ?? `d${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-function isCancelledErr(e: unknown): boolean {
-  return /cancell?/i.test(String(e));
-}
-function clearProgressFor(files: string[]) {
-  for (const f of files) delete progress[f];
-}
-async function cancel() {
-  if (!downloadId.value) return;
-  cancelling.value = true;
-  await cancelDownload(downloadId.value);
-}
-let unmounted = false;
-onBeforeUnmount(() => {
-  unmounted = true;
-  void cancelDownload(downloadId.value);
-});
-
+// Enter can start a search while another runs; only the latest one may show.
+let searchSeq = 0;
 async function runSearch() {
   const q = query.value.trim();
   if (!q) return;
+  const id = ++searchSeq;
   busy.value = true;
   error.value = "";
+  // The new hits replace the open one (closing it cancels its download).
   expanded.value = null;
-  views.value = [];
-  checked.value = {};
   try {
-    result.value = await api.psSearch(q, {
+    const res = await api.psSearch(q, {
       dtype: explicitType.value === "auto" ? null : explicitType.value,
       matchMode: explicitType.value === "protein" || explicitType.value === "gene" ? null : matchMode.value || null,
       organism: organism.value || null,
       modification: mod.value || null,
       limit: 50,
     });
+    if (id === searchSeq) result.value = res;
   } catch (e: any) {
-    error.value = String(e);
+    if (id === searchSeq) error.value = String(e);
   } finally {
-    busy.value = false;
+    if (id === searchSeq) busy.value = false;
   }
 }
 
-async function toggleHit(h: PsHit) {
-  if (downloadId.value) cancel();
-  if (isExpanded(h)) {
-    expanded.value = null;
-    views.value = [];
-    checked.value = {};
-    return;
-  }
-  expanded.value = h;
-  views.value = [];
-  checked.value = {};
-  viewsBusy.value = true;
-  error.value = "";
-  try {
-    const v = await api.portalListViews(h.datasetRef || h.datasetAccession, h.organism, null);
-    if (expanded.value === h) views.value = v;
-  } catch (e: any) {
-    if (expanded.value === h) error.value = String(e);
-  } finally {
-    if (expanded.value === h) viewsBusy.value = false;
-  }
-}
-
-function selectedCount() {
-  return views.value.filter((v) => checked.value[v.path]).length;
-}
-function selectedBytes() {
-  return totalBytes(views.value.filter((v) => checked.value[v.path]));
-}
-async function loadSelection(h: PsHit) {
-  busy.value = true;
-  downloading.value = true;
-  error.value = "";
-  try {
-    const sel = views.value.filter((v) => checked.value[v.path]);
-    if (!sel.length) throw new Error("Select at least one view to load.");
-    if (!(await confirmDownload(sel, "portal"))) return;
-    if (unmounted || expanded.value !== h) return;
-    const files = sel.map((v) => v.name);
-    cancelling.value = false;
-    const id = generateId();
-    downloadId.value = id;
-    trackDownload(id);
-    try {
-      const local = await api.portalCacheViews(sel.map((v) => v.path), id);
-      if (unmounted || expanded.value !== h) return;
-      const ds: DatasetInfo = {
-        prefix: h.datasetAccession,
-        path: `quantms portal / ${h.datasetRef || h.datasetAccession}`,
-        views: local.sort((a, b) => a.view.localeCompare(b.view)),
-        sourceKind: "portal",
-      };
-      loadDatasets([ds], "portal | " + h.datasetAccession);
-    } catch (e: any) {
-      if (isCancelledErr(e)) {
-        if (!unmounted && expanded.value === h) error.value = "Download cancelled; partial files were removed.";
-        clearProgressFor(files);
-      } else {
-        clearProgressFor(files);
-        throw e;
-      }
-    } finally {
-      untrackDownload(id);
-      if (downloadId.value === id) downloadId.value = "";
-      cancelling.value = false;
-    }
-  } catch (e: any) {
-    error.value = String(e);
-  } finally {
-    if (expanded.value === h) busy.value = false;
-    downloading.value = false;
-  }
-}
-function streamSelection(h: PsHit) {
-  error.value = "";
-  const sel = views.value.filter((v) => checked.value[v.path]);
-  if (!sel.length) {
-    error.value = "Select at least one view to stream.";
-    return;
-  }
-  const ds: DatasetInfo = {
-    prefix: h.datasetAccession,
-    path: `quantms portal / ${h.datasetRef || h.datasetAccession}`,
-    views: sel.map((v) => ({ ...v })).sort((a, b) => a.view.localeCompare(b.view)),
-    sourceKind: "portal",
-  };
-  loadDatasets([ds], "portal | " + h.datasetAccession + " (stream)");
-}
-function toggleAll() {
-  const allOn = views.value.every((v) => checked.value[v.path]);
-  for (const v of views.value) checked.value[v.path] = !allOn;
-}
-
-function fmtCount(n: number | null | undefined): string {
-  if (n === null || n === undefined) return "—";
-  if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M`;
-  if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}K`;
-  return String(n);
-}
-function fmt(n: number | null | undefined, force = false): string {
-  if (!n) return force ? "0 B" : "—";
-  const u = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(n) / Math.log(1024));
-  return `${(n / Math.pow(1024, i)).toFixed(1)} ${u[i]}`;
+function toggleHit(h: PsHit) {
+  expanded.value = isExpanded(h) ? null : h;
 }
 
 onMounted(async () => {
-  installProgress();
   try {
     mods.value = await api.psModifications();
-  } catch {
-    /* non-fatal */
+  } catch (e: any) {
+    modsError.value = String(e?.message ?? e);
   }
-  runSearch();
 });
-
-const activeBars = computed(() =>
-  Object.entries(progress)
-    .filter(([, b]) => b.phase === "downloading")
-    .map(([name, b]) => ({ name, ...b }))
-);
-const overallPct = computed(() => overall());
-function pct(n: number): string {
-  return `${Math.max(0, Math.min(100, n)).toFixed(0)}%`;
-}
-function fmtPx(n: number): string {
-  const u = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(n) / Math.log(1024));
-  return `${(n / Math.pow(1024, i)).toFixed(1)} ${u[i]}`;
-}
 </script>
 
 <template>
@@ -229,7 +92,7 @@ function fmtPx(n: number): string {
           :key="t.key"
           class="type"
           :class="{ on: explicitType === t.key }"
-          @click="explicitType = t.key as any"
+          @click="explicitType = t.key"
         >
           {{ t.label }}
         </button>
@@ -241,7 +104,7 @@ function fmtPx(n: number): string {
         :placeholder="explicitType === 'peptide' ? 'Peptide sequence, e.g. AVGKVLPELNGK…' : 'Peptide, protein or gene — e.g. GAPDH, P04406, AVGKVLPELNGK…'"
         @keydown.enter="runSearch"
       />
-      <button class="primary" @click="runSearch" :disabled="busy || !query.trim()">
+      <button class="primary" @click="runSearch" :disabled="busy || viewsDownloading || !query.trim()">
         {{ busy ? "Searching…" : "Search" }}
       </button>
     </div>
@@ -262,27 +125,29 @@ function fmtPx(n: number): string {
       </select>
     </div>
 
+    <div v-if="modsError" class="error">Modifications: {{ modsError }}</div>
+
     <p class="muted hint">
       Finds which quantms datasets contain the searched peptide, protein or gene across
       the whole portal — then expand a hit to list its QPX views and
       <b>Stream</b> (lazy) or <b>download to cache</b>.
     </p>
 
-    <div v-if="error && !result?.datasets.length" class="error">{{ error }}</div>
+    <div v-if="error" class="error">{{ error }}</div>
 
     <div v-if="busy && !result" class="muted">Searching… <span class="spinner"></span></div>
 
     <template v-if="result">
       <div class="meta muted">
         {{ result.totalDatasets.toLocaleString() }} dataset(s)
-        <template v-if="expanded || !result.unmapped"> · sorted by number of peptides</template>
+        <template v-if="!result.unmapped"> · sorted by number of peptides</template>
       </div>
       <div v-if="result.unmapped" class="note">
         Query didn't map cleanly to a known protein; showing the closest matches.
       </div>
 
       <div v-if="result.datasets.length" class="hits">
-        <article v-for="h in result.datasets" :key="rowKey(h)" class="hit" :class="{ open: isExpanded(h) }">
+        <article v-for="h in result.datasets" :key="hitRef(h)" class="hit" :class="{ open: isExpanded(h) }">
           <header class="hit-head" @click="toggleHit(h)">
             <div class="acc-row">
               <span class="acc">{{ h.datasetAccession }}</span>
@@ -306,55 +171,14 @@ function fmtPx(n: number): string {
             <span v-for="(pf, i) in h.samplePeptidoforms.slice(0, 3)" :key="i" class="mono pf">{{ pf }}</span>
           </div>
 
-          <div v-if="isExpanded(h)" class="loadbox">
-            <div class="toolbar">
-              <span class="muted">
-                {{ views.length }} view(s) · {{ selectedCount() }} selected<template v-if="selectedCount()"> · {{ fmt(selectedBytes(), true) }}</template>
-              </span>
-              <div class="actions">
-                <button @click="streamSelection(h)" :disabled="busy || !selectedCount()" title="Query the files in place — each query fetches only the byte ranges it needs">
-                  ⚡ Stream (lazy)
-                </button>
-                <button class="primary" @click="loadSelection(h)" :disabled="busy || !selectedCount()">
-                  {{ downloading ? "Downloading…" : "Download to cache" }}
-                </button>
-              </div>
-            </div>
-
-            <div v-if="error" class="error">{{ error }}</div>
-
-            <div v-if="downloading && downloadId" class="progress-box">
-              <div class="overall">
-                <span class="muted">{{ cancelling ? "Cancelling…" : activeBars.length ? "Transferring to cache…" : "Checking sizes and disk space…" }}</span>
-                <span class="right">
-                  <span class="muted">{{ overallPct !== null ? pct(overallPct) : "" }}</span>
-                  <button class="cancel" @click="cancel" :disabled="!downloadId || cancelling">Cancel</button>
-                </span>
-              </div>
-              <div class="bar"><div class="fill" :style="{ width: pct(overallPct ?? 0) }"></div></div>
-              <div v-for="b in activeBars" :key="b.file" class="file-bar">
-                <div class="file-row">
-                  <span class="mono file-name">{{ b.file }}</span>
-                  <span class="muted">{{ fmtPx(b.done) }} / {{ b.total ? fmtPx(b.total) : "…" }} · {{ pct(b.percent) }}</span>
-                </div>
-                <div class="bar"><div class="fill" :style="{ width: pct(b.percent) }"></div></div>
-              </div>
-            </div>
-
-            <label class="all">
-              <input type="checkbox" :checked="views.length > 0 && selectedCount() === views.length" @change="toggleAll" />
-              <span>All views</span>
-            </label>
-            <div v-if="views.length" class="view-list">
-              <label v-for="v in views" :key="v.path" class="view">
-                <input v-model="checked[v.path]" type="checkbox" />
-                <span class="mono view-name">{{ v.name }}</span>
-                <span class="muted">{{ fmt(v.sizeBytes, true) }}</span>
-              </label>
-            </div>
-            <div v-else-if="viewsBusy" class="muted">Loading views… <span class="spinner"></span></div>
-            <div v-else class="muted">No QPX views listed for this dataset.</div>
-          </div>
+          <PortalViews
+            v-if="isExpanded(h)"
+            :accession="h.datasetAccession"
+            :dataset-ref="hitRef(h)"
+            :organism="h.organism"
+            :disabled="busy"
+            @downloading="viewsDownloading = $event"
+          />
         </article>
       </div>
       <div v-else class="muted empty">No datasets match this search.</div>
@@ -373,22 +197,28 @@ function fmtPx(n: number): string {
   gap: 8px;
   align-items: center;
 }
+/* A segmented control. */
 .typebar {
   display: inline-flex;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: hidden;
 }
 .type {
-  padding: 6px 12px;
-  font-size: 12px;
+  padding: 6px 14px;
+  font-size: 13px;
   border: none;
-  background: transparent;
+  border-radius: 0;
+  background: var(--bg-panel);
+  color: var(--text-dim);
 }
-.type.on {
+.type + .type {
+  border-left: 1px solid var(--border);
+}
+.type.on,
+.type.on:hover:not(:disabled) {
   background: var(--accent);
-  color: #10142b;
-  font-weight: 600;
+  color: var(--on-accent);
 }
 .search {
   flex: 1 1 280px;
@@ -404,34 +234,29 @@ function fmtPx(n: number): string {
   max-width: 260px;
 }
 .hint {
-  font-size: 12px;
+  font-size: 13px;
   margin: 8px 0;
 }
 .meta {
   margin: 6px 0 8px;
-  font-size: 12px;
+  font-size: 13px;
 }
 .note {
-  font-size: 12px;
-  color: #a06a00;
+  font-size: 13px;
+  color: var(--warn);
   margin-bottom: 8px;
 }
 .hits {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: calc(100vh - 460px);
+  border-top: 1px solid var(--border);
+  max-height: calc(100vh - 500px);
   overflow-y: auto;
-  padding-right: 4px;
 }
 .hit {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-soft);
-  padding: 10px 12px;
+  border-bottom: 1px solid var(--rule);
+  padding: 10px 8px;
 }
 .hit.open {
-  border-color: var(--accent);
+  background: var(--bg-alt);
 }
 .hit-head {
   cursor: pointer;
@@ -442,17 +267,17 @@ function fmtPx(n: number): string {
   gap: 8px;
 }
 .acc {
-  font-weight: 700;
+  font-weight: 500;
   color: var(--accent);
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 13px;
 }
 .chip {
-  font-size: 10px;
-  padding: 1px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
+  font-size: 12px;
   color: var(--muted);
+}
+.chip::before {
+  content: "· ";
 }
 .spacer {
   flex: 1;
@@ -461,18 +286,19 @@ function fmtPx(n: number): string {
   color: var(--muted);
 }
 .sub {
-  font-size: 11px;
+  font-size: 13px;
   margin-top: 2px;
 }
 .counts {
   display: flex;
-  gap: 16px;
-  margin-top: 6px;
-  font-size: 11px;
+  gap: 18px;
+  margin-top: 4px;
+  font-size: 13px;
   color: var(--muted);
 }
 .counts b {
   color: var(--text);
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 .sample {
@@ -482,107 +308,15 @@ function fmtPx(n: number): string {
   margin-top: 8px;
 }
 .pf {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-dim);
-}
-.loadbox {
-  margin-top: 10px;
-  border-top: 1px solid var(--border);
-  padding-top: 10px;
-}
-.toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  font-size: 13px;
-  margin-bottom: 8px;
-}
-.actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.all {
-  font-weight: 600;
-  font-size: 12px;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 4px;
-}
-.view-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.view {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.view-name {
-  flex: 1;
 }
 .error {
   margin: 8px 0;
-  color: var(--err);
-  font-size: 12px;
-}
-.progress-box {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px;
-  margin: 8px 0;
-  background: var(--bg-panel);
-}
-.overall,
-.file-row {
-  display: flex;
-  justify-content: space-between;
-  font-size: 12px;
-  margin-bottom: 4px;
-}
-.right {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-}
-.cancel {
-  padding: 3px 12px;
-  font-size: 12px;
-  border-color: #d33;
-  color: #d33;
-}
-.file-name {
-  max-width: 60%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.bar {
-  height: 8px;
-  background: var(--border);
-  border-radius: 6px;
-  overflow: hidden;
-  margin-bottom: 8px;
-}
-.fill {
-  height: 100%;
-  background: var(--accent);
-  border-radius: 6px;
-  transition: width 0.15s linear;
-}
-.file-bar:last-child .bar {
-  margin-bottom: 0;
+  font-size: 13px;
 }
 .empty {
   padding: 12px 0;
-  font-size: 12px;
+  font-size: 13px;
 }
 </style>

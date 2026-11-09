@@ -13,21 +13,31 @@ export function scalarText(v: unknown): string {
   if (v === null || v === undefined) return "∅";
   if (typeof v === "boolean") return v ? "true" : "false";
   if (typeof v === "number") {
-    if (Number.isInteger(v) && Math.abs(v) > 1e12) return v.toLocaleString();
     if (!Number.isInteger(v)) return v.toLocaleString(undefined, { maximumFractionDigits: 4 });
     return v.toLocaleString();
   }
+  if (typeof v === "bigint") return v.toLocaleString();
   return String(v);
 }
 
-/** Short, single-line summary for a structured value (for collapsed cells). */
-function isScoreList(v: unknown): v is Array<Record<string, unknown>> {
+/** JSON text of a value. JSON.stringify rejects BigInt (64-bit integers past
+ * 2^53, see normalize in duck): they are written as numbers with all their
+ * digits. */
+export function toJson(v: unknown, space?: number): string {
+  return JSON.stringify(v, (_k, x) => (typeof x === "bigint" ? `\u0000${x}` : x), space).replace(/"\\u0000(-?\d+)"/g, "$1");
+}
+
+/** A QPX score list: STRUCTs with a `score_name`. A QPX 1.3 relayout may
+ * store additional_scores as one struct with a field per score name instead;
+ * that renders as a plain struct. */
+export function isScoreList(v: unknown): v is Array<Record<string, unknown>> {
   return (
     Array.isArray(v) &&
     v.length > 0 &&
     v.every((x) => isStructured(x) && "score_name" in (x as object))
   );
 }
+/** A QPX modification list: STRUCTs with a `name` and an `accession`. */
 function isModList(v: unknown): v is Array<Record<string, unknown>> {
   return (
     Array.isArray(v) &&
@@ -37,10 +47,16 @@ function isModList(v: unknown): v is Array<Record<string, unknown>> {
 }
 
 /** Short, single-line summary for a structured value (for collapsed cells). */
+/** A peak array as "N peaks" ("∅" when missing). */
+export function peakSummary(v: unknown): string {
+  if (!Array.isArray(v)) return "∅";
+  return v.length ? `${v.length.toLocaleString()} peaks` : "no peaks";
+}
+
 export function formatCompact(v: unknown): string {
   if (isScoreList(v)) {
     const shown = v.slice(0, 5).map(
-      (m) => `${m.score_name ?? "score"}=${scalarText(m.score_value ?? "∅")}`
+      (m) => `${m.score_name ?? "score"}=${scalarText(m.score_value)}`
     );
     const more = v.length > 5 ? ` … +${v.length - 5}` : "";
     return `${shown.join(", ")}${more}`;
@@ -69,78 +85,47 @@ export function formatCompact(v: unknown): string {
   return scalarText(v);
 }
 
-function build(v: unknown, depth: number, lines: string[]): void {
-  const pad = "  ".repeat(depth);
-  if (Array.isArray(v)) {
-    if (v.length === 0) {
-      lines.push(pad + "∅");
-      return;
-    }
-    // Flat array of plain scalars -> inline.
-    if (v.every((x) => !isStructured(x))) {
-      lines.push(pad + "[" + v.map(scalarText).join(", ") + "]");
-      return;
-    }
-    // Array of structured items -> one bulleted block per element.
-    v.forEach((item) => {
-      if (isStructured(item)) {
-        const entries = Object.entries(item as Structured);
-        if (!entries.length) {
-          lines.push(pad + "• { }");
-        } else if (entries.every(([, x]) => !isStructured(x))) {
-          lines.push(
-            pad + "• " + entries.map(([k, x]) => `${k}: ${scalarText(x)}`).join(" · ")
-          );
-        } else {
-          entries.forEach(([k, x], ei) => {
-            if (isStructured(x)) {
-              lines.push(pad + (ei === 0 ? "• " : "  ") + k + ":");
-              build(x, depth + 1, lines);
-            } else {
-              lines.push(pad + (ei === 0 ? "• " : "  ") + k + ": " + scalarText(x));
-            }
-          });
-        }
-      } else {
-        lines.push(pad + "• " + scalarText(item));
-      }
-    });
-    return;
-  }
-  if (isStructured(v)) {
-    const entries = Object.entries(v as Structured);
-    if (entries.length === 0) {
-      lines.push(pad + "{ }");
-      return;
-    }
-    if (entries.every(([, x]) => !isStructured(x))) {
-      lines.push(pad + entries.map(([k, x]) => `${k}: ${scalarText(x)}`).join(" · "));
-      return;
-    }
-    entries.forEach(([k, x]) => {
-      if (isStructured(x)) {
-        lines.push(pad + k + ":");
-        build(x, depth + 1, lines);
-      } else {
-        lines.push(pad + k + ": " + scalarText(x));
-      }
-    });
-    return;
-  }
-  lines.push(pad + scalarText(v));
-}
-
-/** Pretty, multi-line rendering of a (possibly deeply nested) value. */
-export function formatValue(v: unknown): string {
-  const lines: string[] = [];
-  build(v, 0, lines);
-  return lines.join("\n");
-}
-
-/** Byte count in binary units ("1.5 GB"). */
-export function fmtBytes(n: number): string {
+/** Byte count in binary units; missing values are shown as a dash. */
+export function fmtBytes(n: number | null | undefined): string {
+  if (n == null) return "—";
   if (!n || n < 0) return "0 B";
   const u = ["B", "KB", "MB", "GB", "TB", "PB"];
   const i = Math.min(u.length - 1, Math.floor(Math.log(n) / Math.log(1024)));
   return i === 0 ? `${n} B` : `${(n / 1024 ** i).toFixed(1)} ${u[i]}`;
+}
+
+export function fmtNum(x: number): string {
+  if (!Number.isFinite(x)) return String(x);
+  const a = Math.abs(x);
+  if (a === 0) return "0";
+  if (a >= 1000) return x.toFixed(0);
+  if (a >= 10) return x.toFixed(1);
+  if (a >= 1) return x.toFixed(2);
+  return x.toPrecision(2);
+}
+
+/** A dataset count for the portal lists (1.2K, 34K, 5.6M); a dash when the
+ * portal has none. */
+export function fmtCount(n: number | null | undefined): string {
+  if (n === null || n === undefined) return "—";
+  if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}K`;
+  return String(n);
+}
+export function fmtShort(n: number): string {
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e4) return `${(n / 1e3).toFixed(1)}K`;
+  return n.toLocaleString();
+}
+
+/** The first `max` elements of a list (or a scalar) as one line; struct
+ * elements in their compact form. */
+export function listText(v: unknown, max = 3): string {
+  if (v === null || v === undefined) return "";
+  if (Array.isArray(v)) {
+    const items = v.filter((x) => x !== null && x !== undefined).map((x) => (isStructured(x) ? formatCompact(x) : String(x)));
+    return items.length > max ? `${items.slice(0, max).join(", ")} +${items.length - max}` : items.join(", ");
+  }
+  return String(v);
 }

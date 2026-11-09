@@ -2,7 +2,8 @@
 import { computed, ref } from "vue";
 import { toCsv } from "../lib/charts";
 import { saveText } from "../lib/export";
-import { listText, type Column } from "../lib/report";
+import type { Column } from "../lib/report";
+import { listText } from "../lib/format";
 
 type Row = Record<string, any>;
 
@@ -121,7 +122,7 @@ defineExpose({ exportCsv });
 .rt {
   overflow: auto;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--bg-panel);
 }
 table {
@@ -131,15 +132,16 @@ table {
 th,
 td {
   text-align: left;
-  padding: 5px 10px;
-  border-bottom: 1px solid var(--border);
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--rule);
   white-space: nowrap;
-  font-size: 12px;
+  font-size: 13px;
 }
 th {
   position: sticky;
   top: 0;
-  background: var(--bg-soft);
+  background: var(--bg-alt);
+  border-bottom-color: var(--border);
   cursor: pointer;
   user-select: none;
   z-index: 1;
@@ -153,17 +155,21 @@ th:hover {
   font-variant-numeric: tabular-nums;
 }
 .sort {
-  font-size: 9px;
+  font-size: 10px;
   margin-left: 3px;
+  color: var(--accent);
 }
 tr.click {
   cursor: pointer;
 }
 tr.click:hover td {
-  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  background: var(--hover);
 }
 tr.sel td {
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  background: var(--brand-tint);
+}
+tr.sel td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 .empty {
   text-align: center;

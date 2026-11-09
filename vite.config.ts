@@ -13,6 +13,5 @@ export default defineConfig({
   build: {
     target: "es2021",
     assetsInlineLimit: 0, // keep wasm + worker files as separate assets
-    chunkSizeWarningLimit: 4000,
   },
 });

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { api } from "../lib/api";
-import { loadDatasets, state } from "../store";
+import { loadDatasets } from "../store";
 import S3Picker from "./S3Picker.vue";
 import PortalPicker from "./PortalPicker.vue";
 import DiscoverView from "./DiscoverView.vue";
@@ -38,131 +38,152 @@ async function openFolder() {
   await run(async () => {
     const path = await api.chooseFolder();
     if (!path) return;
-    const datasets = await api.scanCollection(path);
-    if (!datasets.length) {
-      // fall back to a flat scan of a data folder with multiple prefixes
-      const flat = await api.scanFolder(path);
-      if (!flat.length) throw new Error("No QPX parquet files found in this folder.");
-      loadDatasets(flat, "dataset");
-      return;
-    }
-    loadDatasets(datasets, "collection");
+    const scan = await api.scanCollection(path);
+    loadDatasets(scan.datasets, "collection", scan.skipped);
   });
 }
 </script>
 
 <template>
   <div class="picker">
-    <h2>Open a QPX data source</h2>
-    <p class="muted">
-      QPX datasets are folders of <span class="mono">&lt;prefix&gt;.&lt;view&gt;.parquet</span> files.
-      Open one, browse a collection, or connect to an S3 bucket — everything runs locally.
-    </p>
+    <section class="band">
+      <div class="band-inner">
+        <h1>Open a QPX dataset</h1>
+        <p class="lead">
+          QPX (Quantitative Proteomics eXchange) stores a dataset as a folder of
+          <span class="mono">&lt;prefix&gt;.&lt;view&gt;.parquet</span> views (PSMs, features, protein
+          groups, samples, …). Every query runs on this computer; remote files are read in place,
+          only the parts a query needs.
+        </p>
 
-    <div class="grid">
-      <button class="card" @click="openSingleFile" :disabled="busy">
-        <div class="card-title">📄 Single file</div>
-        <div class="card-desc">Open one <span class="mono">*.parquet</span> view and its siblings.</div>
-      </button>
-
-      <button class="card" @click="openFolder" :disabled="busy">
-        <div class="card-title">🗂️ Folder / collection</div>
-        <div class="card-desc">Scan a dataset folder or a folder of many QPX projects.</div>
-      </button>
-
-      <button class="card" @click="showS3 = !showS3" :disabled="busy">
-        <div class="card-title">☁️ S3 bucket</div>
-        <div class="card-desc">Browse and query projects hosted in a remote S3 bucket.</div>
-      </button>
-
-      <button class="card" @click="showPortal = !showPortal" :disabled="busy">
-        <div class="card-title">🌍 Quantms portal</div>
-        <div class="card-desc">Open a reanalysed dataset from the public quantms portal over HTTPS.</div>
-      </button>
-
-      <button class="card" @click="showDiscover = !showDiscover" :disabled="busy">
-        <div class="card-title">🔎 Discover quantms data</div>
-        <div class="card-desc">Search and filter datasets by text, organism, instrument or collection to find interesting QPX files.</div>
-      </button>
-
-      <div class="card info">
-        <div class="card-title">🔬 What is QPX?</div>
-        <div class="card-desc">
-          An open quantitative-proteomics format: a folder of
-          <span class="mono">&lt;prefix&gt;.&lt;view&gt;.parquet</span> views (peptides, proteins,
-          PSMs, …) queryable in place — no database needed.
+        <div class="sources">
+          <button class="source" @click="openSingleFile" :disabled="busy">
+            <span class="s-title">Single file</span>
+            <span class="s-desc">One <span class="mono">*.parquet</span> view and the views next to it.</span>
+          </button>
+          <button class="source" @click="openFolder" :disabled="busy">
+            <span class="s-title">Folder / collection</span>
+            <span class="s-desc">A dataset folder, or a folder of many QPX projects.</span>
+          </button>
+          <button class="source" :class="{ on: showS3 }" @click="showS3 = !showS3" :disabled="busy">
+            <span class="s-title">S3 bucket</span>
+            <span class="s-desc">Datasets in a bucket, read with your AWS credentials.</span>
+          </button>
+          <button class="source" :class="{ on: showPortal }" @click="showPortal = !showPortal" :disabled="busy">
+            <span class="s-title">Quantms portal</span>
+            <span class="s-desc">A reanalysed dataset from portal.quantms.org.</span>
+          </button>
+          <button class="source" :class="{ on: showDiscover }" @click="showDiscover = !showDiscover" :disabled="busy">
+            <span class="s-title">Discover quantms data</span>
+            <span class="s-desc">Search the portal by text, organism, instrument, peptide or protein.</span>
+          </button>
         </div>
       </div>
+    </section>
+
+    <div class="below">
+      <div class="error pad" v-if="error">{{ error }}</div>
+      <div v-if="busy" class="muted">Working… <span class="spinner"></span></div>
+
+      <S3Picker v-if="showS3" />
+      <PortalPicker v-if="showPortal" />
+      <DiscoverView v-if="showDiscover" />
+
+      <RecommendedDatasets v-if="!showS3 && !showPortal && !showDiscover" />
     </div>
-
-    <div class="err" v-if="error">⚠ {{ error }}</div>
-    <div v-if="busy" class="muted">Working… <span class="spinner"></span></div>
-    <div v-if="state.error">{{ state.error }}</div>
-
-    <S3Picker v-if="showS3" style="margin-top: 20px" />
-    <PortalPicker v-if="showPortal" style="margin-top: 20px" />
-    <DiscoverView v-if="showDiscover" style="margin-top: 20px" />
-
-    <RecommendedDatasets v-if="!showS3 && !showPortal && !showDiscover" />
   </div>
 </template>
 
 <style scoped>
+/* A flex child of the app body: fill it and scroll on its own. */
 .picker {
-  max-width: 1680px;
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+}
+/* The deep-blue opening band, as on portal.quantms.org. */
+.band {
+  background: var(--band);
+  color: var(--on-dark);
+}
+.band-inner,
+.below {
+  max-width: 1440px;
   margin: 0 auto;
-  padding: 28px 32px;
-  min-height: 100%;
-  display: flex;
-  flex-direction: column;
+  padding: 0 32px;
 }
-h2 {
-  margin: 0 0 6px;
+.band-inner {
+  padding-top: 34px;
+  padding-bottom: 34px;
 }
-.grid {
+h1 {
+  margin: 0 0 8px;
+  font-size: 30px;
+  line-height: 1.2;
+  color: #ffffff;
+}
+.lead {
+  margin: 0;
+  max-width: 820px;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--on-dark);
+}
+.lead .mono {
+  font-size: 13.5px;
+}
+.sources {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  grid-auto-rows: minmax(112px, auto);
-  gap: 14px;
-  margin-top: 20px;
-  flex: 0 0 auto;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 24px;
 }
-@media (max-width: 900px) {
-  .grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+@media (max-width: 1100px) {
+  .sources {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
-@media (max-width: 560px) {
-  .grid {
+@media (max-width: 640px) {
+  .sources {
     grid-template-columns: 1fr;
   }
 }
-.card {
-  text-align: left;
-  padding: 16px 18px;
-  min-height: 112px;
-  background: var(--bg-soft);
+.source {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
+  text-align: left;
+  padding: 14px 16px;
+  background: var(--bg-panel);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text);
 }
-.card.info {
-  cursor: default;
+/* On the dark band the cards need an edge to stand off it. */
+:global(:root[data-theme="dark"]) .source {
+  border-color: var(--border);
 }
-.card.info .card-desc {
-  line-height: 1.5;
+.source:hover:not(:disabled),
+.source.on {
+  border-color: var(--accent);
+  color: var(--text);
+  box-shadow: inset 0 -3px 0 var(--accent);
 }
-.card-title {
-  font-weight: 700;
+.s-title {
+  font-weight: 600;
   font-size: 15px;
 }
-.card-desc {
-  color: var(--text-dim);
+.s-desc {
+  color: var(--muted);
   font-size: 13px;
+  font-weight: 400;
   line-height: 1.4;
 }
-.err {
-  margin-top: 18px;
-  color: var(--err);
+.below {
+  padding-top: 8px;
+  padding-bottom: 36px;
+}
+.below > :deep(*:first-child) {
+  margin-top: 24px;
 }
 </style>

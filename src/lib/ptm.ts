@@ -17,6 +17,7 @@
 // portal's colour-coded residue + short-notation style.
 
 import { resolvePtmColor } from "./settings";
+import { COL } from "./qpx";
 
 export interface PTMSeg {
   /** Residue text: a plain amino acid, a run of plain residues, or a modified AA. */
@@ -47,7 +48,7 @@ export interface PTMMeta {
   code: string;
 }
 
-const PTM_META: Record<string, PTMMeta> = {
+export const PTM_META: Record<string, PTMMeta> = {
   phospho: { name: "Phospho", accession: "UNIMOD:21", mass: 79.966331, code: "P" },
   phosphorylation: { name: "Phosphorylation", accession: "UNIMOD:21", mass: 79.966331, code: "P" },
   oxidation: { name: "Oxidation", accession: "UNIMOD:35", mass: 15.994915, code: "Ox" },
@@ -70,12 +71,12 @@ const PTM_META: Record<string, PTMMeta> = {
   dimethylation: { name: "Dimethyl", accession: "UNIMOD:36", mass: 28.0313, code: "DiMe" },
   trimethyl: { name: "Trimethyl", accession: "UNIMOD:37", mass: 42.04695, code: "TriMe" },
   trimethylation: { name: "Trimethyl", accession: "UNIMOD:37", mass: 42.04695, code: "TriMe" },
-  guanidinyl: { name: "Guanidinyl", accession: "UNIMOD:43", mass: 42.021798, code: "Gu" },
-  guanidination: { name: "Guanidinyl", accession: "UNIMOD:43", mass: 42.021798, code: "Gu" },
-  sulfation: { name: "Sulfation", accession: "UNIMOD:39", mass: 79.956815, code: "SO3" },
-  sulfo: { name: "Sulfation", accession: "UNIMOD:39", mass: 79.956815, code: "SO3" },
+  guanidinyl: { name: "Guanidinyl", accession: "UNIMOD:52", mass: 42.021798, code: "Gu" },
+  guanidination: { name: "Guanidinyl", accession: "UNIMOD:52", mass: 42.021798, code: "Gu" },
+  sulfation: { name: "Sulfation", accession: "UNIMOD:40", mass: 79.956815, code: "SO3" },
+  sulfo: { name: "Sulfation", accession: "UNIMOD:40", mass: 79.956815, code: "SO3" },
   oxidation_orhydroxylation: { name: "Oxidation or Hydroxylation", accession: "UNIMOD:35", mass: 15.994915, code: "Ox" },
-  dethiomethyl: { name: "Dethiomethyl", accession: "UNIMOD:36", mass: 45.987721, code: "dM" },
+  dethiomethyl: { name: "Dethiomethyl", accession: "UNIMOD:526", mass: -48.003371, code: "dM" },
   carbamidomethylation_d: { name: "Carbamidomethyl (D)", accession: "UNIMOD:4", mass: 57.021464, code: "Cm" },
 };
 
@@ -106,7 +107,7 @@ export function isPeptideCol(col: string): boolean {
 }
 
 export function isModificationsCol(col: string): boolean {
-  return col.trim().toLowerCase() === "modifications";
+  return col.trim().toLowerCase() === COL.modifications;
 }
 
 /**
@@ -162,25 +163,10 @@ export function inlineToSegments(s: string): PTMSeg[] {
     if (c !== "[") break; // only bracket-prefixed terminals can appear up front
     const close = norm.indexOf("]", i);
     if (close === -1) break;
-    const content = norm.slice(i + 1, close);
-    const next = norm[close + 1];
-    i = close + 1;
-    if (next === "-") {
-      const r = resolveModToken(content);
-      segs.push({
-        text: "",
-        modified: true,
-        terminal: "N",
-        modName: r.name,
-        accession: r.accession,
-        modPos: 0,
-        pos: -1,
-      });
-      i++; // consume '-'
-      continue;
-    }
-    // A leading bracket not followed by '-' (rare) — render it as a terminal label.
-    const r = resolveModToken(content);
+    const r = resolveModToken(norm.slice(i + 1, close));
+    // "[Mod]-" is ProForma's N-terminal form; a leading bracket without the
+    // dash (rare) is shown the same way.
+    i = norm[close + 1] === "-" ? close + 2 : close + 1;
     segs.push({
       text: "",
       modified: true,
@@ -252,8 +238,7 @@ export function seqWithModsToSegments(sequence: string, mods: unknown): PTMSeg[]
       const acc = (m?.accession as string | undefined) ?? undefined;
       const poss = m?.positions as Array<Record<string, unknown>> | undefined;
       if (!Array.isArray(poss) || poss.length === 0) continue;
-      const meta = acc ? ptmMeta(name, acc) : ptmMeta(name);
-      const effectiveAcc = meta?.accession ?? acc;
+      const effectiveAcc = ptmMeta(name, acc)?.accession ?? acc;
       for (const p of poss) {
         const pos = p?.position as number | undefined;
         if (typeof pos === "number" && pos >= 0 && pos <= n + 1) {
@@ -309,6 +294,23 @@ export function seqWithModsToSegments(sequence: string, mods: unknown): PTMSeg[]
   return segs;
 }
 
+/** Per row, the PTM segments of each peptide cell keyed by column index: from
+ * the inline peptidoform, or from the sequence plus the row's structured
+ * `modifications` column. */
+export function peptideCells(columns: string[], rows: unknown[][]): Map<number, PTMSeg[]>[] {
+  const modsIdx = columns.findIndex((c) => isModificationsCol(c));
+  return rows.map((row) => {
+    const m = new Map<number, PTMSeg[]>();
+    columns.forEach((c, j) => {
+      const v = row[j];
+      if (typeof v !== "string" || !isPeptideCol(c)) return;
+      const segs = hasInlineMods(v) ? inlineToSegments(v) : modsIdx >= 0 ? seqWithModsToSegments(v, row[modsIdx]) : null;
+      if (segs?.length) m.set(j, segs);
+    });
+    return m;
+  });
+}
+
 /** Extract structured modifications as {name, position, aa, accession}[] for badge rendering. */
 export interface PTMBadge {
   name: string;
@@ -323,8 +325,7 @@ export function modBadges(mods: unknown): PTMBadge[] {
   for (const m of mods as Array<Record<string, unknown>>) {
     const name = (m?.name as string) || "PTM";
     const acc = (m?.accession as string | null) ?? null;
-    const meta = acc ? ptmMeta(name, acc) : ptmMeta(name);
-    const effectiveAcc = meta?.accession ?? acc;
+    const effectiveAcc = ptmMeta(name, acc ?? undefined)?.accession ?? acc;
     const poss = m?.positions as Array<Record<string, unknown>> | undefined;
     if (!Array.isArray(poss) || poss.length === 0) {
       out.push({ name, position: null, aa: null, accession: effectiveAcc });
@@ -345,16 +346,6 @@ export function modBadges(mods: unknown): PTMBadge[] {
 }
 
 /** Short superscript code for a modification name. */
-const PTM_CODE: Record<string, string> = {
-  Phospho: "P", Phosphorylation: "P",
-  Oxidation: "Ox", "Oxidized methionine": "Ox", "Oxidation or Hydroxylation": "Ox",
-  Acetyl: "Ac", Acetylation: "Ac",
-  GlyGly: "G", "GG": "G", Ubiquitination: "Ub",
-  Methyl: "Me", Dimethyl: "DiMe", Trimethyl: "TriMe",
-  Carbamidomethyl: "Cm", Carbamyl: "Cb", Deamidated: "Dn",
-  Guanidinyl: "Gu", Dethiomethyl: "dM",
-};
-
 export function shortCode(name?: string, accession?: string): string {
   if (!name && !accession) return "#";
   const meta = ptmMeta(name, accession);
@@ -373,15 +364,10 @@ export function shortCode(name?: string, accession?: string): string {
     if (ln.includes("itraq")) return "iT";
     if (ln.includes("chelator") || ln.includes("piol")) return "Pi";
     // Mass-delta shift like "+79.9663" -> "+80".
-    if (/^[+-]?\d+(\.\d+)?$/.test(ln)) {
-      const num = parseFloat(ln);
-      return (num >= 0 ? "+" : "") + num.toFixed(0);
-    }
     if (/^[+-]?\d/.test(ln)) {
       const num = parseFloat(ln.replace(/[^0-9.-]/g, "") || "0");
       return (num >= 0 ? "+" : "") + num.toFixed(0);
     }
-    if (PTM_CODE[name]) return PTM_CODE[name];
     const letters = name.replace(/[^A-Za-z]/g, "");
     if (!letters) return "#";
     if (letters.length <= 3) return letters;

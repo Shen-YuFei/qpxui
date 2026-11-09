@@ -2,7 +2,5 @@
 /target/
 /gen/schemas
 
-# Rust
-[/target]
+# rustfmt backups
 **/*.rs.bk
-Cargo.lock

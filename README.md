@@ -62,10 +62,13 @@ Download the installer for your platform from the
 ## Quick start
 
 1. Launch QPX UI and pick a source:
-   - **🌍 Quantms portal**: pick a reanalysed dataset (for example `PXD014414`), then press **⚡ Stream**.
-   - **🗂️ Folder / collection**: a folder with one dataset, or with many `PXD*/` dataset folders.
-   - **📄 Single file**: one `*.parquet` view; the files next to it are picked up too.
-   - **☁️ S3 bucket**: a bucket/prefix, read with your AWS credentials.
+   - **Quantms portal**: pick a reanalysed dataset (for example `PXD004452`), then press **Stream**.
+   - **Discover quantms data**: search the portal's datasets, or find the datasets that contain a
+     peptide, protein or gene; expand one to stream or download its views. The start page also
+     lists a few recommended datasets.
+   - **Folder / collection**: a folder with one dataset, or with many `PXD*/` dataset folders.
+   - **Single file**: one `*.parquet` view; the files next to it are picked up too.
+   - **S3 bucket**: a bucket/prefix, read with your AWS credentials.
 2. The **dataset report** opens. Browse the tabs, or type a protein, gene or peptide into the
    search box in the sidebar.
 3. Click any view in the sidebar (`feature`, `psm`, `pg`, …) to browse its rows, chart its columns,
@@ -80,28 +83,33 @@ Download the installer for your platform from the
 | Source | What it does |
 |--------|--------------|
 | **Single file** | Opens one `*.parquet` view plus its sibling views from the same folder. |
-| **Folder / collection** | Opens one QPX dataset folder, or a folder tree holding many projects. |
+| **Folder / collection** | Opens one QPX dataset folder, or a folder tree holding many projects. Subfolders that cannot be read are skipped and listed above the datasets in the sidebar. |
 | **S3 bucket** | Lists datasets under a bucket/prefix using your AWS credentials. You can stream the files lazily or download them to a local cache. S3-compatible stores (MinIO, Ceph) work too. |
 | **Quantms portal** | Searchable list of the datasets on [portal.quantms.org](https://portal.quantms.org) (title, organism, instrument, counts). You can stream a dataset lazily or download it to a local cache. No account needed. |
+| **Discover quantms data** | Searches the portal's datasets by text, organism, instrument and collection, and finds the datasets that contain a peptide, protein or gene. In **Auto** mode, an upper-case string of 8 or more standard amino acids is searched as a peptide, as in the sidebar search box, and anything else as a protein or gene. Expand a result to stream or download its views. |
 
 Downloads show progress and can be cancelled at any point, even in the middle of a file; partial
 files are removed. Before a download starts, the app checks the free space on the cache disk: it
 refuses a download that would leave less than 1 GB free, and asks before downloading more than
-2 GB. Choosing **New source** or another dataset cancels a running download and stops the previous
-dataset's queries.
+2 GB. A size that the portal listing or S3 does not report is shown as —; such a file counts as
+0 in these checks, and a selection that includes one shows its total as —. Choosing
+**New source** or another dataset cancels a running download and stops the previous dataset's
+queries.
 
 While you stream, the sidebar shows how much of each file has actually been fetched (for example
-`⚡ 16 MB / 170 MB`).
+`16 MB / 170 MB`).
 
 ### Dataset report
 
 Selecting a dataset that has a `feature`, `psm` or `pg` view opens its report. It works like the
 portal's Dataset Explorer, but runs locally on any QPX data. You can also reach it from
-**📈 Report & search** in the sidebar.
+**Report & search** in the sidebar.
 
 - **Header**: title, description, organisms, instruments, enzymes, software, and PRIDE/PubMed
   links. **Cite this data** copies a citation or saves it as BibTeX or RIS.
 - **Headline counts**: protein groups, peptides, features, PSMs, runs and samples.
+
+A count or header query that fails shows its error in place; the rest of the report still loads.
 
 The report has these tabs. A tab only appears when the dataset has the data for it:
 
@@ -110,12 +118,14 @@ The report has these tabs. A tab only appears when the dataset has the data for 
 | **Overview** | Identifications per run. Distributions of precursor charge, peptide length, missed cleavages, peptides per protein group, precursor mass error (ppm), retention time, intensity, posterior error probability and peptide q-value. |
 | **QC** | Identifications per run (features, peptides, proteins, protein groups). Median intensity and median mass error per run, to spot loading or calibration drift. Intensity distribution per sample (TMT channels are matched to samples through the run view). A per-run table with sample, fraction and instrument. |
 | **PTMs** | How often each modification occurs (counted by peptidoforms, peptides or features), drawn in your PTM colours. Modified sites by residue, modifications per peptide, and a table; click a modification to list its peptides. |
-| **Samples** | Charts of the sample metadata (organism, tissue, disease, cell line, sex, …) and a filterable sample table showing which runs and channels each sample was measured in. |
+| **Samples** | Charts of the sample metadata (organism, tissue, disease, cell line, sex, …), coloured by biological group (see below), and a filterable sample table showing which runs and channels each sample was measured in. |
 | **Proteins / Peptidoforms** | Search; see below. |
 | **Quantification** | Protein × sample abundance matrix, sample correlation, PCA and per-protein profiles; see below. |
 
 Statistics are computed over target rows only (decoys left out). Histograms show the central 99%
 of values, and the mass-error histogram also drops extreme outliers such as isotope-error matches.
+Continuous distributions are drawn as a filled line and counts as bars; points and bars are
+labelled with the start of their bin, and hovering one shows its range.
 Results are cached, so switching tabs is instant.
 
 ![QC tab: identifications, median intensity and mass error per run, intensity per sample](docs/screenshots/report-qc.png)
@@ -135,6 +145,12 @@ The **Quantification** tab appears when the `pg` view (or, failing that, the `fe
   variance explained.
 - **Abundance profile**: pick a protein from the table to see its abundance in every sample,
   coloured by group, with group means.
+- **Colours**: samples are coloured as on the portal. Tissues and cell types take the colour of
+  their organ system (looked up in UBERON through the EBI Ontology Lookup Service), organisms of
+  their taxonomic group (UniProt taxonomy), and diseases of their class (healthy, cancer, other);
+  the values of one group take lighter and darker shades of its colour. Developmental stages
+  take a ramp from youngest to oldest, and other attributes the palette by sample count. The
+  lookups are kept between sessions; without a connection, values take the palette by count.
 - **Export**: every chart as PNG/CSV, and the whole log2 matrix as CSV (**Matrix CSV**).
 
 ![Quantification tab: sample correlation, PCA coloured by disease and a protein abundance profile](docs/screenshots/quantification.png)
@@ -184,7 +200,8 @@ PSMs, and clicking one opens an annotated spectrum in the style of the PRIDE USI
 
 ![Spectrum viewer: annotated PSM mirrored against a Prosit prediction (cosine 0.71)](docs/screenshots/spectrum-mirror.png)
 
-Predictions and USI lookups need internet access; everything else is local.
+Predictions and USI lookups need internet access. Annotation and scoring run locally;
+reading a streamed PSM also needs access to its remote source.
 
 Only the selected PSM's row is read, so this also works on large streamed files. Whether a file
 has spectra is decided from the parquet footer statistics. π-MSNet file names
@@ -194,17 +211,24 @@ has spectra is decided from the parquet footer statistics. π-MSNet file names
 
 Click a view in the sidebar to work with its rows directly:
 
-- **Browse**: a table showing 500 rows per page, with column sorting and a live SQL `WHERE` filter.
+- **Browse**: a table showing 500 rows per page, with column sorting and a live SQL `WHERE` filter;
+  the row count follows the filter.
   Nested cells (lists and structs) can be expanded.
-- **Summary**: automatic charts per column, and a histogram for any numeric column.
+- **Summary**: automatic charts per column, and a histogram of any numeric column. It has up to 30
+  bins (whole-number bins for integer columns) labelled with their start value, and leaves out
+  infinite and NaN values. Hover a bar for its range and count.
 - **Query**: SQL (DuckDB dialect, the same engine as `qpxc query sql`) against the registered
   views, with example queries to start from.
 
 ### PTMs, settings & export
 
-- Peptides and peptidoforms are colour-coded by modification, with short codes and tooltips
-  (name, CV accession, residue, position).
-- **⚙ Settings**: dark or light theme, and a colour for each PTM, which every table and chart uses.
+- Peptides and peptidoforms are colour-coded by modification: a modified residue is tinted and
+  underlined in its modification's colour, with a short code and a tooltip (name, CV accession,
+  residue, position). A modification takes the colour of its CV accession, or else of the longest
+  known keyword in its name, so *Dimethyl* is not coloured as *Methyl*. The default colours follow
+  the portal: biological modifications (phosphorylation, oxidation, acetylation, …) take distinct
+  colours, and fixed or chemical ones such as carbamidomethylation are grey.
+- **Settings**: light or dark theme, and a colour for each PTM, which every table and chart uses.
 - **Export**: every chart can be saved as PNG or CSV, and every table as CSV, through the system
   save dialog.
 
@@ -212,9 +236,9 @@ Click a view in the sidebar to work with its rows directly:
 
 ## Streaming from S3 and the portal
 
-**⚡ Stream** queries files where they are stored, without downloading them:
+**Stream** queries files where they are stored, without downloading them:
 
-- The Rust backend runs a local HTTP range proxy on `127.0.0.1` (`src-tauri/src/commands/s3stream.rs`).
+- The Rust backend runs a local HTTP range proxy on `127.0.0.1` (`src-tauri/src/commands/stream/`).
 - DuckDB reads only the parquet footer plus the column chunks and row groups each query touches.
 - The proxy fetches just those byte ranges, in 4 MB requests, 8 in parallel. It keeps them in a
   512 MB in-memory cache of 256 KB blocks, so repeated queries don't refetch.
@@ -228,6 +252,10 @@ Click a view in the sidebar to work with its rows directly:
   ```
 - **Portal**: the proxy follows the portal's redirect to a short-lived signed storage URL, and gets
   a new one when it expires.
+
+Registry and filter requests to the portal API are retried twice, after 0.5 s and then 1 s, when
+the connection fails or the server answers with a 5xx error. Other errors, such as a 404 or an
+invalid reply, are reported at once.
 
 Portal HTTPS requests use the operating system's certificate verifier and trust store, including
 system-provided intermediates on macOS and Windows. If your company installs its CA in the system
@@ -247,12 +275,20 @@ On macOS, launch the executable directly (for example,
 `SSL_CERT_FILE=/path/to/ca-bundle.pem /Applications/qpxui.app/Contents/MacOS/qpxui`);
 on Windows PowerShell, set `$env:SSL_CERT_FILE` before launching the executable.
 Only use certificates from a trusted source. Restart the app after changing the configuration.
-These settings apply to portal registry, listing, downloads and streaming; the separate S3 client
+These settings apply to portal registry, search, listing, downloads and streaming; the separate S3 client
 may handle certificate configuration differently. HTTPS certificate verification remains enabled.
 
 **Download to cache** instead fetches whole files once (with progress and cancel), for fully
 offline use. Cached files are kept in the OS cache folder (`~/Library/Caches/qpxui/` on macOS,
-`~/.cache/qpxui/` on Linux, `%LOCALAPPDATA%\qpxui\` on Windows).
+`~/.cache/qpxui/` on Linux, `%LOCALAPPDATA%\qpxui\` on Windows). S3 downloads go to its `s3-cache/`
+folder. The first S3 download after the app starts deletes the files that older versions left
+there in their bucket/key layout. If one cannot be deleted, that download fails with its path and
+the reason, and the next S3 download tries again.
+
+The engine, workers and signed Parquet extensions are bundled with the app. Local and cached
+Parquet files can be queried on a first launch without an internet connection. Portal discovery,
+remote streaming, Koina predictions, USI retrieval and the organ-system and taxon lookups behind
+the sample colours still need a connection.
 
 ### Large streamed files
 
@@ -291,13 +327,32 @@ npm run tauri dev      # run the app with hot reload (also compiles the Rust bac
 npm run tauri build    # installers for this platform → src-tauri/target/release/bundle/
 ```
 
+`npm run dev` and `npm run build` first run `scripts/fetch-duckdb-extensions.mjs`; Tauri's
+dev/build hooks and the CI frontend build use these scripts too. The first build downloads the
+signed Parquet extension for both WASM bundles into the ignored `public/duckdb-extensions/`
+directory. Later builds verify SHA-256 and reuse these files without a download. A mismatched
+hash fails the build; remove the affected file before downloading it again. The application
+loads extensions from its own assets, with signature verification enabled and no online fallback.
+
+When upgrading `@duckdb/duckdb-wasm`, update `VERSION` and both `SHA256` entries in that script
+from the matching official Parquet extension downloads. The script reads the embedded engine's
+version through the installed package's Node bindings and fails if it differs from the pin.
+
 **Checks** (the same ones CI runs on every PR):
 
 ```bash
-npx vue-tsc --noEmit           # type-check the frontend
-npx vite build                 # build the frontend
-(cd src-tauri && cargo check)  # check the backend
+npm run lint                   # ESLint
+npm run typecheck              # vue-tsc
+npm test                       # Vitest unit tests (src/lib/**/*.test.ts)
+npm run build                  # vite build; the backend embeds dist/
+cd src-tauri
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test                     # add -- --ignored for the tests that need the portal
 ```
+
+CI also builds the installers for Linux, Windows and macOS (Apple Silicon and Intel), as the
+release does, and keeps them as artifacts of the workflow run.
 
 **Sample data**
 
@@ -307,7 +362,7 @@ pip install "qpx[all]"          # or convert your own search results to QPX
 qpxc convert diann --report-path report.tsv --sdrf-file data.sdrf.tsv --output-folder ./sample/PXD000000
 ```
 
-Many reanalysed datasets (e.g. `PXD014414`) can be opened directly with the **Quantms portal** source.
+Many reanalysed datasets (e.g. `PXD004452`) can be opened directly with the **Quantms portal** source.
 
 ---
 
@@ -316,7 +371,7 @@ Many reanalysed datasets (e.g. `PXD014414`) can be opened directly with the **Qu
 ```
 ┌───────────────────────────────────────────────────────────────────┐
 │ WebView: Vue 3 + duckdb-wasm + ECharts                            │
-│  SourcePicker · PortalPicker · S3Picker                           │
+│  SourcePicker · PortalPicker · S3Picker · DiscoverView            │
 │  DatasetExplorer (sidebar, search box)                            │
 │  ReportView ─ Overview · QC · PTMs · Samples · Proteins ·         │
 │               Quantification · Peptidoforms · SpectrumViewer      │
@@ -326,21 +381,54 @@ Many reanalysed datasets (e.g. `PXD014414`) can be opened directly with the **Qu
                │ Tauri IPC                        │ HTTP range reads
 ┌──────────────▼─────────────────────────────────▼──────────────────┐
 │ Rust backend                                                      │
-│  sources.rs   QPX discovery (file / folder / collection)          │
-│  io.rs        read local files, write exports                     │
-│  s3.rs        list / download S3 objects (aws-sdk-s3, rustls)     │
-│  portal.rs    quantms portal registry, listing, downloads         │
-│  s3stream.rs  127.0.0.1 range proxy with block cache (S3 + HTTP)  │
-│  transfers.rs progress events and cancellation                    │
+│  sources.rs     QPX discovery (file / folder / collection)        │
+│  io.rs          native save dialog and export writes              │
+│  s3.rs          list / download S3 objects (aws-sdk-s3, rustls)   │
+│  portal/        catalogue.rs  registry, search, facets            │
+│                 listing.rs    a dataset's runs and views          │
+│                 download.rs   views into the download cache       │
+│  peptide_search.rs  datasets holding a peptide, protein or gene   │
+│  portal_http.rs shared HTTPS client, certificate settings         │
+│  stream/        127.0.0.1 range proxy: S3, portal, local files    │
+│                 register.rs   files to stream, commands, stats    │
+│                 server.rs     DuckDB's range requests             │
+│                 fetch.rs      source reads, block cache           │
+│  transfers.rs   download loop, cache folders, free space, cancel  │
+│  progress.rs    download progress events                          │
 └───────────────────────────────────────────────────────────────────┘
 ```
 
-Report queries are built in `src/lib/report.ts`:
+The front end has three layers, kept apart by ESLint import rules (`eslint.config.js`):
 
-- They select only the columns they need and adapt to each dataset's schema: `anchor_protein`
-  vs `protein_accessions`, a struct- or list-typed `pg_accessions`, and LFQ or TMT `intensities`.
-- If the `sequence` column contains modification names, the plain sequence is derived from the
-  peptidoform instead.
+- `src/lib/` calls the backend (`api.ts`, `progress.ts`, `downloads.ts`), runs DuckDB
+  (`duck.ts`), builds every SQL query (`queries/`, one module per tab or view, on the shared
+  helpers in `report.ts`) and holds the charts and pure helpers. It imports neither the store
+  nor components.
+- `src/store.ts` holds the app state and imports only `lib`.
+- Components render and handle input; they reach the backend and run SQL only through `lib`.
+
+The release WebView CSP allows bundled assets, WASM, local DuckDB workers, Tauri IPC and the
+Rust range proxy on `127.0.0.1` with a dynamic port. Images can use `data:`/`blob:` and chart
+tooltips can use inline style attributes; scripts cannot use `unsafe-eval` or inline handlers.
+Charts load the bundled `vue-echarts/style.css` rather than inline styles, and the IBM Plex fonts
+are bundled too. The only
+allowed external connections are the Koina and two PROXI/USI endpoints used by spectrum mirrors,
+and the UniProt taxonomy search and EBI OLS ontology endpoints used to colour samples by
+biological group. Portal and S3 requests run in Rust
+and do not need external WebView permissions. CSP supplements the native IPC capabilities.
+Development loads Vite directly at `http://localhost:1420`, which does not serve this CSP;
+verify the policy in a release build.
+
+Exports go through `api.saveExport` to the Rust `save_export` command, which opens the native
+save dialog and writes only to its selected destination. Cancelling returns `null` without a
+write. The frontend has no arbitrary-path write command or dialog save permission; its dialog
+permissions cover only opening files/folders and showing messages or confirmations.
+
+QPX names live in `src/lib/qpx.ts`: the views the viewer reads and `COL`, every view column it
+reads, checked against the QPX schemas. Queries select only the columns they need and adapt to
+each dataset's schema: `anchor_protein` vs `protein_accessions`, a struct- or list-typed
+`pg_accessions`, and LFQ or TMT `intensities`. If the `sequence` column contains modification
+names, the plain sequence is derived from the peptidoform instead.
 
 <details>
 <summary>Project layout</summary>
@@ -353,27 +441,53 @@ qpxui/
 │   ├── lib/
 │   │   ├── api.ts                 # Tauri IPC wrappers + types
 │   │   ├── duck.ts                # DuckDB init, view registration, queries
-│   │   ├── report.ts              # report SQL helpers, dataset table registry, search
-│   │   ├── charts.ts              # ECharts option builder, CSV export
-│   │   ├── quant.ts               # normalisation, correlation, clustering, PCA
+│   │   ├── errors.ts              # cancellation and engine error texts
+│   │   ├── qpx.ts                 # QPX view and column names (COL), footer key, sample facets
+│   │   ├── queries/               # SQL per tab or view: overview, qc, ptms, samples, proteins,
+│   │   │                          #   peptides, quant, profile, header, summary, sqlConsole,
+│   │   │                          #   spectrum, table
+│   │   ├── report.ts              # shared SQL helpers, dataset tables, query cache, search
+│   │   ├── registry.ts            # portal registry search and sort
+│   │   ├── charts.ts              # ECharts setup and option builders, CSV export
+│   │   ├── colours.ts             # OKLab shades, ramps and mixes; sequential and diverging scales
+│   │   ├── sampleColours.ts       # sample colours by biological group (UBERON, UniProt, disease)
+│   │   ├── quantCharts.ts         # Quantification tab charts: correlation, PCA, profile
+│   │   ├── peptidoformCharts.ts   # peptidoform profile charts: samples, distribution, RT
+│   │   ├── spectrumChart.ts       # annotated spectrum chart (PRIDE USI viewer style)
+│   │   ├── quant.ts               # normalisation, correlation, clustering, PCA, grouping
 │   │   ├── fragments.ts           # peptidoform parsing, fragment ions, annotation
+│   │   ├── spectrumSummary.ts     # spectrum statistics, sequence coverage, ion table
+│   │   ├── useMirror.ts           # the spectrum viewer's mirror: other PSM, prediction, USI
 │   │   ├── mirror.ts              # Koina predictions, PROXI/USI, spectrum similarity
-│   │   ├── export.ts              # save dialog helpers (PNG / CSV / BibTeX)
+│   │   ├── downloads.ts           # free-space check, confirm, cancel
+│   │   ├── progress.ts            # download progress from backend events
+│   │   ├── export.ts              # export encoding + Rust save command (PNG / CSV / BibTeX)
+│   │   ├── format.ts              # number, size and cell formatting
 │   │   ├── ptm.ts, settings.ts    # PTM parsing/colours, theme + settings
-│   │   └── useSlots.ts            # sequential chart loading with progress
+│   │   ├── useSlots.ts            # sequential chart loading with progress
+│   │   ├── useLargeGate.ts        # hold whole-column reads on large streamed files
+│   │   └── *.test.ts              # Vitest unit tests
 │   └── components/
 │       ├── ReportView.vue         # report header, counts, citation, tabs
-│       ├── report/                # Overview, QC, PTMs, Samples, Proteins, Quant, Peptides
+│       ├── report/                # Overview, QC, PTMs, Samples (+ SampleFacet), Proteins, Quant
+│       │                          #   (+ protein profile), Peptides (+ peptidoform profile), LargeGate
 │       ├── SpectrumViewer.vue     # annotated spectrum + mirror
-│       ├── ChartCard.vue, ReportTable.vue, PeptideSeq.vue
-│       ├── SourcePicker.vue, PortalPicker.vue, S3Picker.vue
+│       ├── spectrum/              # CoverageMap, FragmentIonTable, MirrorControls
+│       ├── table/                 # ResultCell (Browse and Query cells), CellMenu, HScroll
+│       ├── portal/                # PortalPicker's registry list and dataset heading
+│       ├── ChartCard.vue, ReportTable.vue
+│       ├── PeptideSeq.vue, PTMSegs.vue, PTMBadges.vue, PTMTip.vue  # PTM-coloured cells
+│       ├── SourcePicker.vue, PortalPicker.vue, S3Picker.vue, DownloadProgress.vue
+│       ├── DiscoverView.vue, PeptideSearchPane.vue, RecommendedDatasets.vue
+│       ├── PortalViews.vue        # a portal dataset's views: stream or download (every portal list)
 │       ├── DatasetExplorer.vue    # sidebar: search, datasets, views
 │       ├── ViewPanel.vue, DataTable.vue, SummaryView.vue, QueryView.vue
-│       └── SettingsPanel.vue, StructuredView.vue, PTMTip.vue
+│       └── SettingsPanel.vue, StructuredView.vue
 ├── src-tauri/
 │   ├── tauri.conf.json, Cargo.toml, capabilities/
+│   ├── examples/stream_proxy.rs   # manual check of the stream proxy against S3 or the portal
 │   └── src/{lib.rs, qpx/, commands/}
-├── scripts/                       # fetch-sample.mjs, make-icon.py
+├── scripts/                       # fetch-duckdb-extensions.mjs, fetch-sample.mjs, make-icon.py
 └── .github/workflows/             # ci.yml (PR checks), release.yml (installers)
 ```
 </details>
@@ -405,9 +519,9 @@ with `npx tauri icon src-tauri/icons/icon-source.png`.
 
 - AnnData/HDF5 matrices (`.ae.h5ad`, `.de.h5ad`, `.h5mu`) are listed but not yet rendered; the
   viewer focuses on the Parquet views.
-- Local files are loaded into the webview's memory when first queried. Very large local views
-  (e.g. spectra in `mz`) may hit the limits of DuckDB-wasm, so streaming is preferable for big
-  remote files.
+- Local files are range-read through the same proxy as remote ones, but every query runs in
+  DuckDB-wasm inside the webview: queries that read whole large columns (e.g. spectra in `mz`)
+  may hit its memory limits.
 - The builds are not code-signed yet (see the macOS note under [Install](#install)).
 
 ## License

@@ -1,6 +1,37 @@
 use reqwest::{Certificate, Client, ClientBuilder};
 use std::ffi::OsStr;
 use std::path::Path;
+use std::sync::OnceLock;
+
+/// The portal HTTP client. Each client here is built once, so that requests
+/// reuse its pooled connections: a TLS handshake can take several times
+/// longer than the request it precedes.
+pub(super) fn client() -> Result<Client, String> {
+    static CLIENT: OnceLock<Client> = OnceLock::new();
+    shared(&CLIENT, client_builder)
+}
+
+/// The client for the stream proxy, which resolves the portal's redirect to
+/// signed storage URLs itself.
+pub(super) fn stream_client() -> Result<Client, String> {
+    static CLIENT: OnceLock<Client> = OnceLock::new();
+    shared(&CLIENT, || {
+        Ok(client_builder()?.redirect(reqwest::redirect::Policy::none()))
+    })
+}
+
+fn shared(
+    cell: &'static OnceLock<Client>,
+    builder: impl FnOnce() -> Result<ClientBuilder, String>,
+) -> Result<Client, String> {
+    if let Some(client) = cell.get() {
+        return Ok(client.clone());
+    }
+    let client = builder()?
+        .build()
+        .map_err(|e| format!("portal HTTP client: {e:?}"))?;
+    Ok(cell.get_or_init(|| client).clone())
+}
 
 pub(super) fn client_builder() -> Result<ClientBuilder, String> {
     let file = std::env::var_os("SSL_CERT_FILE");

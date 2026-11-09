@@ -1,22 +1,19 @@
 import { reactive } from "vue";
 import { cancelAllDownloads } from "./lib/downloads";
-import type { DatasetInfo, ViewInfo } from "./lib/api";
+import type { DatasetInfo, SkippedFolder, ViewInfo } from "./lib/api";
 import { clearReportCache } from "./lib/report";
-import { abandonQueries } from "./lib/duck";
+import { abandonQueries, forgetTables } from "./lib/duck";
+import { REPORT_VIEWS } from "./lib/qpx";
 
 // Simple reactive store (no Pinia needed for this scale).
 export const state = reactive({
   datasets: [] as DatasetInfo[],
-  sourceKind: "none" as string, // single-file | dataset | collection | s3
+  scanWarnings: [] as SkippedFolder[],
+  /** Source badge in the top bar: "single-file", "collection", "s3" or "portal | <accession>". */
+  sourceKind: "none" as string,
   selectedDataset: null as DatasetInfo | null,
   selectedView: null as ViewInfo | null,
-  /** Set of local file paths already registered as DuckDB tables. */
-  registered: new Set<string>(),
-  /** Map of view path -> DuckDB table name. */
-  tableName: {} as Record<string, string>,
-  busy: false,
   status: "" as string,
-  error: "" as string,
   /** Main panel: a single view (browse/summary/query) or the dataset report. */
   page: "view" as "view" | "report",
   reportTab: "overview" as ReportTab,
@@ -49,12 +46,9 @@ export function openProtein(acc: string) {
 }
 
 /** Leaving a dataset: stop its running queries so the next one starts at
- * once. A restarted engine has no tables, so forget what was registered. */
+ * once. A restarted engine has no tables, so its cached results go too. */
 export function stopQueries() {
-  if (!abandonQueries()) return;
-  clearReportCache();
-  state.registered = new Set();
-  state.tableName = {};
+  if (abandonQueries()) clearReportCache();
 }
 
 export function reset() {
@@ -62,40 +56,34 @@ export function reset() {
   stopQueries();
   clearReportCache();
   state.datasets = [];
+  state.scanWarnings = [];
   state.sourceKind = "none";
   state.selectedDataset = null;
   state.selectedView = null;
-  state.registered = new Set();
-  state.tableName = {};
-  state.busy = false;
+  forgetTables();
   state.status = "";
-  state.error = "";
   state.page = "view";
   state.reportTab = "overview";
   state.search = { proteins: "", peptides: "", mod: "", nonce: 0 };
   state.proteinFocus = null;
 }
 
-export function loadDatasets(datasets: DatasetInfo[], kind: string) {
+export function loadDatasets(datasets: DatasetInfo[], kind: string, skipped: SkippedFolder[] = []) {
   stopQueries();
   clearReportCache();
   state.datasets = datasets;
+  state.scanWarnings = skipped;
   state.sourceKind = kind;
   state.selectedDataset = datasets[0] ?? null;
   state.selectedView = datasets[0]?.views[0] ?? null;
-  state.registered = new Set();
-  state.tableName = {};
+  forgetTables();
   state.page = hasReport(datasets[0]) ? "report" : "view";
   state.reportTab = "overview";
   state.proteinFocus = null;
   state.status = `Loaded ${datasets.length} dataset(s)`;
 }
 
-export function datasetByView(view: ViewInfo): DatasetInfo | undefined {
-  return state.datasets.find((d) => d.views.some((v) => v.path === view.path));
-}
-
 /** A dataset gets a report when it has peptide-level evidence or protein groups. */
 export function hasReport(d: DatasetInfo | null | undefined): boolean {
-  return !!d && d.views.some((v) => v.format === "parquet" && ["feature", "psm", "pg"].includes(v.view));
+  return !!d && d.views.some((v) => v.format === "parquet" && REPORT_VIEWS.has(v.view));
 }

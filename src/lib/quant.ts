@@ -1,3 +1,4 @@
+import { COL } from "./qpx";
 // Protein x sample abundance matrix and the statistics the Quantification tab
 // draws from it: normalisation, sample correlation, clustering order and PCA.
 
@@ -192,10 +193,64 @@ export function groupingColumns(samples: string[], meta: Map<string, Record<stri
   if (!rows.length) return [];
   const out: string[] = [];
   for (const k of Object.keys(rows[0])) {
-    if (k === "sample_accession") continue;
+    if (k === COL.sample_accession) continue;
     const vals = new Set(rows.map((r) => (r[k] == null ? null : String(r[k]))).filter((v) => v !== null && v !== ""));
     if (vals.size >= 2 && vals.size < rows.length && vals.size <= 12) out.push(k);
   }
-  const pref = ["disease", "histologic_subtype", "organism_part", "cell_type", "cell_line", "sex", "developmental_stage"];
+  const pref = [COL.disease, "histologic_subtype", COL.organism_part, COL.cell_type, COL.cell_line, COL.sex, COL.developmental_stage];
   return out.sort((a, b) => ((pref.indexOf(a) + 1 || 99) - (pref.indexOf(b) + 1 || 99)) || a.localeCompare(b));
+}
+
+/** A sample's value of the attribute `by` in `meta` ("not available" when it
+ * has none), or "" when not grouping. */
+export function sampleGroup(meta: Map<string, Record<string, any>>, by: string, sample: string): string {
+  if (!by) return "";
+  const v = meta.get(sample)?.[by];
+  return v == null || v === "" ? "not available" : String(v);
+}
+
+/** The matrix without the proteins `flagged` marks (1 = drop). */
+export function withoutFlagged(m: QuantMatrix, flagged: Uint8Array): QuantMatrix {
+  const keep = m.proteins.map((_, i) => !flagged[i]);
+  return {
+    samples: m.samples,
+    proteins: m.proteins.filter((_, i) => keep[i]),
+    genes: m.genes.filter((_, i) => keep[i]),
+    values: m.values.filter((_, i) => keep[i]),
+  };
+}
+
+/** Column indices ordered by the `rank` of their group (its place in the
+ * legend), then by sample name. */
+export function groupedOrder(samples: string[], groupOf: (sample: string) => string, rank: (group: string) => number): number[] {
+  return samples.map((_, j) => j).sort((a, b) => rank(groupOf(samples[a])) - rank(groupOf(samples[b])) || natural(samples[a], samples[b]));
+}
+
+/** A protein of the matrix: columns quantified, mean and SD of log2 abundance. */
+export interface ProteinSummary {
+  protein: string;
+  gene: string | null;
+  n: number;
+  mean: number | null;
+  sd: number | null;
+}
+
+export function proteinSummaries(m: QuantMatrix): ProteinSummary[] {
+  return m.proteins.map((p, i) => {
+    const xs = [...m.values[i]].filter(Number.isFinite);
+    const mean = xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
+    const sd = xs.length > 1 && mean != null ? Math.sqrt(xs.reduce((a, b) => a + (b - mean) ** 2, 0) / (xs.length - 1)) : null;
+    return { protein: p, gene: m.genes[i], n: xs.length, mean, sd };
+  });
+}
+
+/** Proteins the protein list shows at most. */
+export const PROTEIN_LIST_MAX = 500;
+
+/** Proteins whose accession or gene contains `text` (any case), most
+ * quantified first, then most abundant; at most PROTEIN_LIST_MAX. */
+export function findProteins(all: ProteinSummary[], text: string): ProteinSummary[] {
+  const s = text.trim().toLowerCase();
+  const rows = s ? all.filter((r) => r.protein.toLowerCase().includes(s) || (r.gene ?? "").toLowerCase().includes(s)) : all;
+  return [...rows].sort((a, b) => b.n - a.n || (b.mean ?? 0) - (a.mean ?? 0)).slice(0, PROTEIN_LIST_MAX);
 }

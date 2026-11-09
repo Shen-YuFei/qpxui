@@ -2,19 +2,10 @@
 import { computed, ref, watch } from "vue";
 import { openReport, state, type ReportTab } from "../store";
 import type { DatasetInfo } from "../lib/api";
-import {
-  cachedSql,
-  datasetTables,
-  evidence,
-  fmtShort,
-  ident,
-  objects,
-  proteinExpr,
-  targetWhere,
-  viewScale,
-  type DatasetTables,
-  type TableRef,
-} from "../lib/report";
+import { datasetTables, evidence, proteinExpr, viewScale, type DatasetTables, type TableRef } from "../lib/report";
+import { countValue, datasetMeta, kpiSources, runInstrumentsEnzymes, sampleOrganisms } from "../lib/queries/header";
+import { quantSource } from "../lib/queries/quant";
+import { fmtShort } from "../lib/format";
 import { saveText } from "../lib/export";
 import ReportOverview from "./report/ReportOverview.vue";
 import ReportQC from "./report/ReportQC.vue";
@@ -23,6 +14,8 @@ import ReportSamples from "./report/ReportSamples.vue";
 import ReportProteins from "./report/ReportProteins.vue";
 import ReportPeptides from "./report/ReportPeptides.vue";
 import ReportQuant from "./report/ReportQuant.vue";
+import { COL } from "../lib/qpx";
+import { isCancelled } from "../lib/errors";
 
 const props = defineProps<{ ds: DatasetInfo }>();
 
@@ -30,6 +23,9 @@ const tables = ref<DatasetTables | null>(null);
 const error = ref("");
 const loading = ref(true);
 const meta = ref<Record<string, any>>({});
+const metaError = ref("");
+const runError = ref("");
+const organismError = ref("");
 const runMeta = ref<{ instruments: string[]; enzymes: string[]; organisms: string[] }>({ instruments: [], enzymes: [], organisms: [] });
 
 interface Kpi {
@@ -40,6 +36,7 @@ interface Kpi {
   /** Deferred whole-file count on a large streamed view. */
   defer?: () => Promise<number | null>;
   busy?: boolean;
+  error?: string;
 }
 const kpis = ref<Kpi[]>([]);
 
@@ -60,12 +57,12 @@ const tabs = computed(() => {
   const ev = evidence(t);
   const ok: Record<ReportTab, boolean> = {
     overview: !!ev,
-    qc: !!ev?.cols.has("run_file_name"),
-    ptms: !!ev?.cols.has("modifications"),
+    qc: !!ev?.cols.has(COL.run_file_name),
+    ptms: !!ev?.cols.has(COL.modifications),
     samples: !!(t.sample || t.run),
     proteins: !!(t.pg || (ev && proteinExpr(ev))),
     peptides: !!ev,
-    quant: !!(t.pg?.cols.has("intensities") || t.feature?.cols.has("intensities")),
+    quant: !!quantSource(t),
   };
   return TABS.filter((x) => ok[x.id]);
 });
@@ -77,49 +74,37 @@ watch(tabs, (list) => {
 const accession = computed(() => String(meta.value.project_accession && meta.value.project_accession !== "unknown" ? meta.value.project_accession : props.ds.prefix));
 const fileBase = computed(() => props.ds.prefix);
 
+let loadSeq = 0;
 async function load() {
+  const id = ++loadSeq;
   loading.value = true;
   error.value = "";
   tables.value = null;
   meta.value = {};
+  metaError.value = runError.value = organismError.value = "";
   kpis.value = [];
   runMeta.value = { instruments: [], enzymes: [], organisms: [] };
   try {
     const t = await datasetTables(props.ds);
+    if (id !== loadSeq) return;
     tables.value = t;
     loading.value = false;
-    await loadHeader(t);
+    await loadHeader(t, id);
   } catch (e: any) {
-    error.value = String(e?.message ?? e);
-    loading.value = false;
-  }
-}
-
-async function count(key: string, sql: string): Promise<number | null> {
-  try {
-    const r = await cachedSql(props.ds, key, sql);
-    return Number(r.rows[0]?.[0] ?? 0);
-  } catch {
-    return null;
+    if (id === loadSeq) {
+      error.value = String(e?.message ?? e);
+      loading.value = false;
+    }
   }
 }
 
 /** Row count of a view from its parquet footer (no data read). */
-async function footerRows(ref: TableRef): Promise<number | null> {
-  try {
-    return (await viewScale(ref)).rows;
-  } catch {
-    return null;
-  }
+async function footerRows(ref: TableRef): Promise<number> {
+  return (await viewScale(ref)).rows;
 }
 
-async function isLarge(ref: TableRef | undefined): Promise<boolean> {
-  if (!ref) return false;
-  try {
-    return (await viewScale(ref)).large;
-  } catch {
-    return false;
-  }
+async function isLarge(ref: TableRef): Promise<boolean> {
+  return (await viewScale(ref)).large;
 }
 
 async function compute(k: Kpi) {
@@ -129,26 +114,26 @@ async function compute(k: Kpi) {
   k.value = null;
   k.title = undefined;
   k.busy = true;
+  k.error = "";
   kpis.value = [...kpis.value];
   try {
     k.value = await f();
+  } catch (e: any) {
+    if (!isCancelled(e)) k.error = String(e?.message ?? e);
   } finally {
     k.busy = false;
     kpis.value = [...kpis.value];
   }
 }
 
-async function loadHeader(t: DatasetTables) {
+async function loadHeader(t: DatasetTables, id: number) {
+  const ds = props.ds;
   if (t.dataset) {
     try {
-      const sel = ["project_accession", "project_title", "project_description", "pubmed_id", "software_name", "software_version", "creation_date"]
-        .filter((c) => t.dataset!.cols.has(c));
-      if (sel.length) {
-        const r = await cachedSql(props.ds, "hdr.dataset", `SELECT ${sel.join(", ")} FROM ${ident(t.dataset.table)} LIMIT 1`);
-        meta.value = objects(r)[0] ?? {};
-      }
-    } catch {
-      /* optional */
+      const value = await datasetMeta(ds, t.dataset);
+      if (id === loadSeq) meta.value = value;
+    } catch (e: any) {
+      if (id === loadSeq && !isCancelled(e)) metaError.value = String(e?.message ?? e);
     }
   }
   const list: Kpi[] = [];
@@ -156,47 +141,41 @@ async function loadHeader(t: DatasetTables) {
     list.push(k);
     kpis.value = [...list];
   };
-  const ev = evidence(t);
   // Distinct counts read whole columns; on a large streamed view they wait
   // for a click. Plain row counts come from the parquet footer.
-  const distinct = async (ref: TableRef, k: Omit<Kpi, "value">, key: string, sql: string) => {
-    const run = () => count(key, sql);
-    if (await isLarge(ref)) push({ ...k, value: null, defer: run, title: "Large streamed view: click to count (reads a whole column)" });
-    else push({ ...k, value: await run() });
-  };
-  const rows = async (ref: TableRef, key: string) =>
-    (await isLarge(ref)) ? footerRows(ref) : count(key, `SELECT count(*) FROM ${ident(ref.table)}`);
-  if (t.pg) {
-    await distinct(t.pg, { key: "pg", label: "Protein groups", title: "Distinct anchor proteins (target) in the pg view" }, "kpi.pg", `SELECT count(DISTINCT anchor_protein) FROM ${ident(t.pg.table)} WHERE ${targetWhere(t.pg)}`);
-  } else if (ev && proteinExpr(ev)) {
-    await distinct(ev, { key: "pg", label: "Proteins" }, "kpi.prot", `SELECT count(DISTINCT ${proteinExpr(ev)}) FROM ${ident(ev.table)} WHERE ${targetWhere(ev)}`);
+  for (const s of kpiSources(t)) {
+    const k = { key: s.key, label: s.label, ...(s.title ? { title: s.title } : {}) };
+    const run = () => countValue(ds, s);
+    let value: Kpi;
+    try {
+      if (s.kind === "count") value = { ...k, value: await run() };
+      else if (s.kind === "rows") value = { ...k, value: (await isLarge(s.ref)) ? await footerRows(s.ref) : await run() };
+      else if (await isLarge(s.ref)) value = { ...k, value: null, defer: run, title: "Large streamed view: click to count (reads a whole column)" };
+      else value = { ...k, value: await run() };
+    } catch (e: any) {
+      value = { ...k, value: null, error: isCancelled(e) ? "" : String(e?.message ?? e) };
+    }
+    if (id !== loadSeq) return;
+    push(value);
   }
-  if (ev && ev.seq !== "NULL") {
-    await distinct(ev, { key: "pep", label: "Peptides", title: "Distinct target peptide sequences" }, "kpi.pep", `SELECT count(DISTINCT ${ev.seq}) FROM ${ident(ev.table)} WHERE ${targetWhere(ev)}`);
-  }
-  if (t.feature) push({ key: "feat", label: "Features", value: await rows(t.feature, "kpi.feat") });
-  if (t.psm) push({ key: "psm", label: "PSMs", value: await rows(t.psm, "kpi.psm") });
-  if (t.run) push({ key: "run", label: "Runs", value: await count("kpi.run", `SELECT count(*) FROM ${ident(t.run.table)}`) });
-  else if (ev?.cols.has("run_file_name")) await distinct(ev, { key: "run", label: "Runs" }, "kpi.run2", `SELECT count(DISTINCT run_file_name) FROM ${ident(ev.table)}`);
-  if (t.sample) push({ key: "smp", label: "Samples", value: await count("kpi.smp", `SELECT count(*) FROM ${ident(t.sample.table)}`) });
 
   try {
     if (t.run) {
-      const c = t.run.cols;
-      const parts = [
-        c.has("instrument") ? "list_sort(list_distinct(list(instrument))) AS instruments" : "[]::VARCHAR[] AS instruments",
-        c.has("enzymes") ? "list_sort(list_distinct(flatten(list(enzymes)))) AS enzymes" : "[]::VARCHAR[] AS enzymes",
-      ];
-      const r = objects(await cachedSql(props.ds, "hdr.run", `SELECT ${parts.join(", ")} FROM ${ident(t.run.table)}`))[0];
-      runMeta.value.instruments = (r?.instruments ?? []).filter(Boolean);
-      runMeta.value.enzymes = (r?.enzymes ?? []).filter(Boolean);
+      const r = await runInstrumentsEnzymes(ds, t.run);
+      if (id !== loadSeq) return;
+      runMeta.value.instruments = r.instruments;
+      runMeta.value.enzymes = r.enzymes;
     }
-    if (t.sample?.cols.has("organism")) {
-      const r = await cachedSql(props.ds, "hdr.org", `SELECT DISTINCT organism FROM ${ident(t.sample.table)} WHERE organism IS NOT NULL ORDER BY 1`);
-      runMeta.value.organisms = r.rows.map((x) => String(x[0]));
+  } catch (e: any) {
+    if (id === loadSeq && !isCancelled(e)) runError.value = String(e?.message ?? e);
+  }
+  if (t.sample?.cols.has(COL.organism)) {
+    try {
+      const organisms = await sampleOrganisms(ds, t.sample);
+      if (id === loadSeq) runMeta.value.organisms = organisms;
+    } catch (e: any) {
+      if (id === loadSeq && !isCancelled(e)) organismError.value = String(e?.message ?? e);
     }
-  } catch {
-    /* optional */
   }
 }
 
@@ -240,15 +219,18 @@ const descOpen = ref(false);
 
 <template>
   <div class="report">
-    <div v-if="error" class="error pad">⚠ {{ error }}</div>
+    <div v-if="error" class="error pad">{{ error }}</div>
     <div v-else-if="loading" class="pad muted">Opening dataset views… <span class="spinner"></span></div>
     <template v-else-if="tables">
       <header class="hdr">
         <div class="ident">
-          <div class="acc mono">{{ accession }}<span v-if="accession !== ds.prefix" class="muted"> · {{ ds.prefix }}</span></div>
-          <h2>{{ meta.project_title || "QPX dataset report" }}</h2>
+          <div v-if="meta.project_title" class="acc mono">{{ accession }}<span v-if="accession !== ds.prefix"> · {{ ds.prefix }}</span></div>
+          <h2>{{ meta.project_title || ds.prefix }}</h2>
+          <div v-if="metaError" class="error">Dataset metadata: {{ metaError }}</div>
           <p v-if="meta.project_description" class="desc muted" :class="{ open: descOpen }" @click="descOpen = !descOpen">{{ meta.project_description }}</p>
           <div class="facts">
+            <span v-if="runError" class="error">Run metadata: {{ runError }}</span>
+            <span v-if="organismError" class="error">Organisms: {{ organismError }}</span>
             <span v-if="runMeta.organisms.length"><b>Organisms</b> {{ runMeta.organisms.join(", ") }}</span>
             <span v-if="runMeta.instruments.length"><b>Instruments</b> {{ runMeta.instruments.join(", ") }}</span>
             <span v-if="runMeta.enzymes.length"><b>Enzymes</b> {{ runMeta.enzymes.join(", ") }}</span>
@@ -274,6 +256,7 @@ const descOpen = ref(false);
             <div v-else-if="k.busy" class="kv"><span class="spinner"></span></div>
             <div v-else class="kv">{{ k.value === null ? "–" : fmtShort(k.value) }}</div>
             <div class="kl">{{ k.label }}</div>
+            <div v-if="k.error" class="error">{{ k.error }}</div>
           </div>
           <div v-if="!kpis.length" class="muted"><span class="spinner"></span></div>
         </div>
@@ -301,31 +284,33 @@ const descOpen = ref(false);
 
 <style scoped>
 .report {
-  padding: 16px 18px 28px;
+  padding: 22px 28px 32px;
+  max-width: 1680px;
 }
 .hdr {
   display: flex;
-  justify-content: space-between;
-  gap: 18px;
-  flex-wrap: wrap;
-  margin-bottom: 14px;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 18px;
 }
 .ident {
-  flex: 1 1 420px;
   min-width: 0;
+  max-width: 1100px;
 }
 .acc {
-  font-size: 12px;
-  color: var(--accent);
-  font-weight: 700;
+  font-size: 13px;
+  color: var(--muted);
 }
 h2 {
   margin: 2px 0 6px;
-  font-size: 18px;
+  font-size: 24px;
+  line-height: 1.25;
+  font-weight: 600;
 }
 .desc {
-  font-size: 12px;
-  margin: 0 0 8px;
+  font-size: 14px;
+  margin: 0 0 10px;
+  color: var(--text-dim);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -338,67 +323,74 @@ h2 {
 .facts {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 16px;
-  font-size: 12px;
+  gap: 6px 22px;
+  font-size: 13px;
   align-items: center;
 }
 .facts b {
-  color: var(--text-dim);
-  font-weight: 600;
-  margin-right: 4px;
+  color: var(--muted);
+  font-weight: 400;
+  margin-right: 6px;
 }
 .facts a {
-  color: var(--accent);
   text-decoration: none;
 }
+.facts a:hover {
+  text-decoration: underline;
+}
 .cite {
-  margin-top: 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px 10px;
-  background: var(--bg-panel);
+  margin-top: 12px;
+  border-left: 3px solid var(--accent);
+  padding: 8px 12px;
+  background: var(--bg-alt);
+  border-radius: 0 6px 6px 0;
 }
 .cite p {
   margin: 0 0 6px;
-  font-size: 11px;
+  font-size: 12px;
   white-space: pre-wrap;
 }
 .cite-acts {
   display: flex;
   gap: 8px;
   align-items: center;
-  font-size: 11px;
+  font-size: 12px;
   flex-wrap: wrap;
 }
+/* Headline counts: a strip of figures between hairlines, as on the portal. */
 .kpis {
   display: flex;
-  gap: 10px;
   flex-wrap: wrap;
-  align-items: flex-start;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
 }
 .kpi {
-  min-width: 104px;
-  padding: 10px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-panel);
+  min-width: 128px;
+  padding: 10px 22px 10px 16px;
+  border-left: 1px solid var(--rule);
+  display: flex;
+  flex-direction: column-reverse;
+  justify-content: flex-end;
+}
+.kpi:first-child {
+  border-left: none;
+  padding-left: 0;
 }
 .kv {
   font-size: 22px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  line-height: 1.3;
 }
 .kl {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-  color: var(--text-dim);
+  font-size: 13px;
+  color: var(--muted);
 }
 .tabs {
   display: flex;
-  gap: 4px;
+  flex-wrap: wrap;
+  gap: 2px;
   border-bottom: 1px solid var(--border);
-  margin-bottom: 14px;
+  margin-bottom: 18px;
 }
 .tabs button {
   border: none;
@@ -406,17 +398,17 @@ h2 {
   border-radius: 0;
   background: transparent;
   padding: 8px 14px;
-  color: var(--text-dim);
+  margin-bottom: -1px;
+  color: var(--text);
+  font-weight: 500;
+}
+.tabs button:hover:not(:disabled) {
+  color: var(--accent);
 }
 .tabs button.active {
   color: var(--accent);
   border-bottom-color: var(--accent);
-  font-weight: 700;
-}
-button.xs {
-  padding: 2px 8px;
-  font-size: 11px;
-  border-radius: 6px;
+  font-weight: 600;
 }
 .pad {
   padding: 18px;

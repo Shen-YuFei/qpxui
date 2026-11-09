@@ -45,7 +45,7 @@ function flash(text: string) {
 async function exportPng() {
   const inst = (chart.value as any)?.chart;
   if (!inst) return;
-  const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg-panel").trim() || "#fff";
+  const bg = chartTheme().bg;
   try {
     const p = await savePng(name.value, inst.getDataURL({ type: "png", pixelRatio: 2, backgroundColor: bg }));
     if (p) flash("Saved");
@@ -81,7 +81,7 @@ async function exportCsv() {
       </div>
     </div>
     <div class="body" :style="{ height: (height ?? 260) + 'px' }">
-      <div v-if="error" class="state error">⚠ {{ error }}</div>
+      <div v-if="error" class="state error">{{ error }}</div>
       <div v-else-if="emptyText" class="state muted">{{ emptyText }}</div>
       <div v-else-if="loading || (!spec && !option)" class="state muted"><span class="spinner"></span></div>
       <div v-else-if="empty" class="state muted">No data</div>
@@ -95,7 +95,7 @@ async function exportCsv() {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-panel);
-  padding: 10px 12px 8px;
+  padding: 14px 16px 10px;
   min-width: 0;
 }
 .card.wide {
@@ -105,15 +105,16 @@ async function exportCsv() {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
 }
 .title {
   font-weight: 600;
-  font-size: 13px;
+  font-size: 14px;
 }
 .sub {
-  font-size: 11px;
-  margin-top: 2px;
+  font-size: 12.5px;
+  margin-top: 3px;
+  line-height: 1.4;
 }
 .acts {
   display: flex;
@@ -122,19 +123,14 @@ async function exportCsv() {
   flex-shrink: 0;
 }
 .msg {
-  font-size: 11px;
+  font-size: 12px;
   max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-button.xs {
-  padding: 2px 8px;
-  font-size: 11px;
-  border-radius: 6px;
-}
 .body {
-  margin-top: 6px;
+  margin-top: 8px;
   position: relative;
 }
 .chart {
@@ -146,7 +142,7 @@ button.xs {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: 13px;
   text-align: center;
   padding: 0 12px;
 }

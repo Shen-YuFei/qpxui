@@ -63,16 +63,16 @@ function onLeave() {
   display: block;
   max-width: 340px;
   padding: 7px 10px;
-  border-radius: 7px;
-  font-size: 11px;
-  font-weight: 500;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 400;
+  font-family: var(--font);
   line-height: 1.5;
   white-space: pre-line; /* keep the multi-line PTM body */
-  color: #e2e8f0;
-  background: rgba(15, 23, 42, 0.98);
-  border: 1px solid rgba(148, 163, 184, 0.45);
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+  color: var(--text);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
   pointer-events: none;
 }
 </style>

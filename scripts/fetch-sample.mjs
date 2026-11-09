@@ -25,10 +25,7 @@ await mkdir(outDir, { recursive: true });
 
 for (const [url, name] of files) {
   const res = await fetch(url);
-  if (!res.ok) {
-    console.error(`!! Failed to download ${name} (${res.status})`);
-    continue;
-  }
+  if (!res.ok) throw new Error(`Failed to download ${name} from ${url} (${res.status})`);
   const buf = Buffer.from(await res.arrayBuffer());
   await writeFile(join(outDir, name), buf);
   console.log(`✓ ${name}  (${(buf.length / 1024).toFixed(1)} KB)`);

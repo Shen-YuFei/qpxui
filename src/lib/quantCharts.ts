@@ -1,0 +1,260 @@
+// Charts of the Quantification tab: abundance distributions and protein
+// counts per sample, the sample correlation heatmap, the PCA scores and one
+// protein's abundance across samples, and their CSV exports.
+import { escapeHtml, legendStyle, toCsv, tooltipStyle, type ChartSpec, type ChartTheme, type GroupStyle } from "./charts";
+import { DIVERGING, lightness, mix, SEQUENTIAL_BLUE } from "./colours";
+import { column, quantile, type Pca, type QuantMatrix } from "./quant";
+
+/** How the charts name and colour samples. */
+export interface SampleStyle extends GroupStyle {
+  /** A sample's name without the prefix all samples share. */
+  short: (sample: string) => string;
+}
+
+/** Pearson r between samples, in the clustered order `ord`. */
+export function correlationChart(samples: string[], c: { r: number[][]; ord: number[] }, t: ChartTheme, short: (sample: string) => string) {
+  const labels = c.ord.map((j) => samples[j]);
+  const data: [number, number, number | string][] = [];
+  let lo = 1;
+  c.ord.forEach((a, x) =>
+    c.ord.forEach((b, y) => {
+      const v = c.r[a][b];
+      if (Number.isFinite(v)) lo = Math.min(lo, v);
+      data.push([x, y, Number.isFinite(v) ? +v.toFixed(4) : "-"]);
+    })
+  );
+  const min = Math.max(-1, Math.floor(lo * 20) / 20);
+  const showLabels = labels.length <= 40;
+  const axis = (pos: "x" | "y") => ({
+    type: "category",
+    data: labels,
+    axisLabel: { show: showLabels, color: t.dim, fontSize: 10, rotate: pos === "x" ? 50 : 0, formatter: short },
+    axisTick: { show: false },
+    axisLine: { lineStyle: { color: t.axis } },
+    splitArea: { show: false },
+  });
+  return {
+    animation: false,
+    backgroundColor: "transparent",
+    textStyle: { fontFamily: t.font },
+    tooltip: {
+      ...tooltipStyle(t),
+      formatter: (p: any) => {
+        const [x, y, v] = p.data;
+        return `${escapeHtml(labels[x])}<br/>${escapeHtml(labels[y])}<br/>Pearson r <b>${typeof v === "number" ? v.toFixed(3) : "–"}</b>`;
+      },
+    },
+    grid: { left: 8, right: 70, top: 10, bottom: 8, outerBoundsMode: "same", outerBoundsContain: "axisLabel" },
+    xAxis: axis("x"),
+    yAxis: { ...axis("y"), inverse: true },
+    visualMap: {
+      min,
+      max: 1,
+      calculable: true,
+      orient: "vertical",
+      right: 4,
+      top: "middle",
+      itemHeight: 160,
+      precision: 2,
+      textStyle: { color: t.dim },
+      inRange: { color: correlationColours(min, t) },
+    },
+    series: [{ type: "heatmap", data, progressive: 0, emphasis: { itemStyle: { borderColor: t.text, borderWidth: 1 } } }],
+  };
+}
+
+/** Colour stops from `min` to 1: one hue, light to dark, when every r is
+ * positive; otherwise red below 0 and blue above, through a grey at 0. On the
+ * dark theme the weak end sits near the surface and strong r is light. */
+export function correlationColours(min: number, t: ChartTheme): string[] {
+  const dark = lightness(t.bg) < 0.5;
+  if (min >= 0) return dark ? [...SEQUENTIAL_BLUE].reverse() : SEQUENTIAL_BLUE;
+  const mid = dark ? DIVERGING.midDark : DIVERGING.mid;
+  return Array.from({ length: 21 }, (_, k) => {
+    const r = min + (k * (1 - min)) / 20;
+    return r < 0 ? mix(mid, DIVERGING.negative, -r) : mix(mid, DIVERGING.positive, r);
+  });
+}
+
+/** Sample scores on principal components `cx` and `cy`. */
+export function pcaChart(samples: string[], p: Pca, cx: number, cy: number, st: SampleStyle) {
+  const t = st.theme;
+  const gs = st.groupBy ? st.groups : [""];
+  const labelsOn = samples.length <= 40;
+  const series = gs.map((g) => ({
+    name: g || "samples",
+    type: "scatter",
+    symbolSize: 11,
+    itemStyle: { color: st.groupColor(g), borderColor: t.bg, borderWidth: 2 },
+    label: { show: labelsOn, position: "right", fontSize: 10, color: t.dim, formatter: (d: any) => st.short(d.data[2]) },
+    labelLayout: { hideOverlap: true },
+    data: samples.map((s, j) => (st.groupOf(s) === g || !st.groupBy ? [p.scores[j][cx], p.scores[j][cy], s] : null)).filter(Boolean),
+  }));
+  const pct = (c: number) => `PC${c + 1} (${((p.explained[c] ?? 0) * 100).toFixed(1)}%)`;
+  const axis = (name: string) => ({
+    type: "value",
+    scale: true,
+    name,
+    nameLocation: "middle",
+    nameGap: 28,
+    nameTextStyle: { color: t.dim },
+    axisLabel: { color: t.dim },
+    axisLine: { lineStyle: { color: t.axis } },
+    splitLine: { lineStyle: { color: t.grid } },
+  });
+  return {
+    animation: false,
+    backgroundColor: "transparent",
+    textStyle: { fontFamily: t.font },
+    legend: st.groupBy ? legendStyle(t) : undefined,
+    tooltip: {
+      ...tooltipStyle(t),
+      formatter: (prm: any) => {
+        const [x, y, s] = prm.data;
+        const g = st.groupBy ? `<br/>${escapeHtml(st.groupBy)}: ${escapeHtml(st.groupOf(s))}` : "";
+        return `<b>${escapeHtml(s)}</b>${g}<br/>PC${cx + 1} ${x.toFixed(2)} · PC${cy + 1} ${y.toFixed(2)}`;
+      },
+    },
+    grid: { left: 34, right: 24, top: st.groupBy ? 34 : 14, bottom: 30, outerBoundsMode: "same", outerBoundsContain: "axisLabel" },
+    xAxis: axis(pct(cx)),
+    yAxis: { ...axis(pct(cy)), nameGap: 36, nameRotate: 90 },
+    series,
+  };
+}
+
+/** One protein's log2 abundance per sample (`row`), samples in `order`;
+ * with a grouping, each group's mean is drawn over its bars. */
+export function profileChart(samples: string[], order: number[], row: Float64Array, st: SampleStyle) {
+  const t = st.theme;
+  const labels = order.map((j) => samples[j]);
+  const data = order.map((j) => ({
+    value: Number.isFinite(row[j]) ? +row[j].toFixed(4) : null,
+    itemStyle: { color: st.groupColor(st.groupOf(samples[j])) },
+  }));
+  // Mean per group, drawn as a line segment over that group's bars.
+  const marks: any[] = [];
+  if (st.groupBy) {
+    let start = 0;
+    for (let k = 1; k <= labels.length; k++) {
+      if (k < labels.length && st.groupOf(labels[k]) === st.groupOf(labels[start])) continue;
+      const xs = order.slice(start, k).map((j) => row[j]).filter(Number.isFinite);
+      if (xs.length) {
+        const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
+        marks.push([
+          { coord: [labels[start], mean], name: st.groupOf(labels[start]), lineStyle: { color: st.groupColor(st.groupOf(labels[start])), width: 2, type: "solid" } },
+          { coord: [labels[k - 1], mean] },
+        ]);
+      }
+      start = k;
+    }
+  }
+  const finite = [...row].filter(Number.isFinite);
+  return {
+    animation: false,
+    backgroundColor: "transparent",
+    textStyle: { fontFamily: t.font },
+    legend: st.groupBy ? { ...legendStyle(t), data: st.groups.map((g) => ({ name: g, itemStyle: { color: st.groupColor(g) } })) } : undefined,
+    tooltip: {
+      ...tooltipStyle(t),
+      trigger: "axis",
+      axisPointer: { type: "shadow", shadowStyle: { color: `${t.axis}33` } },
+      formatter: (ps: any) => {
+        const p = (Array.isArray(ps) ? ps : [ps]).find((x: any) => x.seriesType === "bar");
+        if (!p) return "";
+        const s = labels[p.dataIndex];
+        const v = p.value;
+        const g = st.groupBy ? `<br/>${escapeHtml(st.groupBy)}: ${escapeHtml(st.groupOf(s))}` : "";
+        return `<b>${escapeHtml(s)}</b>${g}<br/>log2 abundance <b>${v == null ? "not quantified" : Number(v).toFixed(2)}</b>`;
+      },
+    },
+    grid: { left: 26, right: 18, top: st.groupBy ? 32 : 14, bottom: labels.length > 60 ? 8 : 4, outerBoundsMode: "same", outerBoundsContain: "axisLabel" },
+    xAxis: {
+      type: "category",
+      data: labels,
+      axisLabel: { show: labels.length <= 60, color: t.dim, rotate: labels.length > 10 ? 45 : 0, fontSize: 10, formatter: st.short, hideOverlap: true },
+      axisLine: { lineStyle: { color: t.axis } },
+    },
+    yAxis: {
+      type: "value",
+      name: "log2 abundance",
+      nameLocation: "middle",
+      nameGap: 34,
+      nameTextStyle: { color: t.dim },
+      min: finite.length ? Math.floor(Math.min(...finite) - 1) : undefined,
+      axisLabel: { color: t.dim },
+      splitLine: { lineStyle: { color: t.grid } },
+    },
+    series: [
+      {
+        name: "abundance",
+        type: "bar",
+        data,
+        barMaxWidth: 24,
+        itemStyle: { borderRadius: [4, 4, 0, 0] },
+        markLine: marks.length ? { silent: true, symbol: "none", label: { show: false }, data: marks } : undefined,
+      },
+      // Legend entries for the groups (bars are coloured per item).
+      ...st.groups.map((g) => ({ name: g, type: "line", data: [], itemStyle: { color: st.groupColor(g) } })),
+    ],
+  };
+}
+
+/** Box plot of each column's log2 abundances (5, 25, 50, 75, 95%), columns in `order`. */
+export function distributionSpec(m: QuantMatrix, order: number[]): ChartSpec {
+  const vals = order.map((j) => {
+    const c = column(m, j).sort((a, b) => a - b);
+    return c.length ? [0.05, 0.25, 0.5, 0.75, 0.95].map((p) => quantile(c, p)) : null;
+  });
+  return {
+    kind: "box",
+    labels: order.map((j) => m.samples[j]),
+    series: [{ name: "log2 abundance", values: vals }],
+    xName: "sample",
+    hideLabels: m.samples.length > 24,
+  };
+}
+
+/** Proteins quantified in each column, columns in `order`, bars coloured by
+ * group when grouping by `groupBy`. */
+export function proteinCountSpec(
+  m: QuantMatrix,
+  order: number[],
+  groupBy: string,
+  groupOf: (sample: string) => string,
+  groupColor: (group: string) => string
+): ChartSpec {
+  return {
+    kind: "bar",
+    labels: order.map((j) => m.samples[j]),
+    series: [{ name: "proteins", values: order.map((j) => column(m, j).length) }],
+    colors: groupBy ? order.map((j) => groupColor(groupOf(m.samples[j]))) : undefined,
+    notes: groupBy ? order.map((j) => `${groupBy}: ${groupOf(m.samples[j])}`) : undefined,
+    xName: "sample",
+    hideLabels: m.samples.length > 24,
+  };
+}
+
+/** The correlation matrix as CSV, in the clustered order. */
+export function correlationCsv(samples: string[], c: { r: number[][]; ord: number[] }): string {
+  return toCsv(["sample", ...c.ord.map((j) => samples[j])], c.ord.map((a) => [samples[a], ...c.ord.map((b) => c.r[a][b])]));
+}
+
+/** The PCA scores as CSV, with each sample's group when grouping by `groupBy`. */
+export function pcaCsv(samples: string[], p: Pca, groupBy: string, groupOf: (sample: string) => string): string {
+  const head = ["sample", ...(groupBy ? [groupBy] : []), ...p.explained.map((_, c) => `PC${c + 1}`)];
+  return toCsv(head, samples.map((s, j) => [s, ...(groupBy ? [groupOf(s)] : []), ...p.scores[j]]));
+}
+
+/** One protein's log2 abundance per sample (`row`) as CSV, samples in `order`. */
+export function profileCsv(samples: string[], order: number[], row: Float64Array, groupBy: string, groupOf: (sample: string) => string): string {
+  const head = ["sample", ...(groupBy ? [groupBy] : []), "log2_abundance"];
+  return toCsv(head, order.map((j) => [samples[j], ...(groupBy ? [groupOf(samples[j])] : []), Number.isFinite(row[j]) ? row[j] : null]));
+}
+
+/** The protein × sample matrix as CSV (log2, 5 decimals, empty = missing). */
+export function matrixCsv(m: QuantMatrix): string {
+  return toCsv(
+    ["anchor_protein", "gene", ...m.samples],
+    m.proteins.map((p, i) => [p, m.genes[i], ...[...m.values[i]].map((v) => (Number.isFinite(v) ? +v.toFixed(5) : null))])
+  );
+}

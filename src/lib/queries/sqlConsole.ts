@@ -1,0 +1,39 @@
+// The Query view: the user's SQL over one view, where `{table}` stands for
+// the view's table, with a row cap when the query sets none.
+import { runSql, type QueryResult } from "../duck";
+import { ident } from "../report";
+import { COL } from "../qpx";
+
+/** Rows a query returns when it ends without a LIMIT of its own. */
+export const QUERY_LIMIT = 2000;
+
+/** Example queries; `{table}` stands for the view's table. */
+export const QUERY_EXAMPLES = [
+  "SELECT * FROM {table} LIMIT 50",
+  `SELECT ${COL.anchor_protein}, COUNT(*) AS n FROM {table} WHERE ${COL.anchor_protein} IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 20`,
+  `SELECT ${COL.run_file_name}, COUNT(*) AS n FROM {table} GROUP BY 1 ORDER BY 2 DESC`,
+  `SELECT ${COL.charge}, COUNT(*) AS n FROM {table} GROUP BY 1 ORDER BY 1`,
+];
+
+/** The text with its first `{table}` replaced by the quoted table name. */
+export function substituteTable(text: string, table: string): string {
+  return text.replace("{table}", ident(table));
+}
+
+/** The statement run for the query text (the whole table when the text is
+ * empty, `{table}` substituted) and the rows kept of it. A query without a
+ * trailing LIMIT of its own keeps QUERY_LIMIT rows and asks for one more, so
+ * the result is marked truncated when it was cut; otherwise the engine's row
+ * cap applies. */
+export function querySql(text: string, table: string): { sql: string; maxRows?: number } {
+  let body = text.trim();
+  if (!body) body = `SELECT * FROM ${ident(table)}`;
+  body = substituteTable(body, table);
+  return /limit\s+\d+\s*$/i.test(body) ? { sql: body } : { sql: `${body} LIMIT ${QUERY_LIMIT + 1}`, maxRows: QUERY_LIMIT };
+}
+
+/** Runs the query text over the table. */
+export function runQuery(text: string, table: string): Promise<QueryResult> {
+  const q = querySql(text, table);
+  return runSql(q.sql, q.maxRows);
+}

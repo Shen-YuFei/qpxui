@@ -3,32 +3,20 @@ import { computed, onMounted, ref, watch } from "vue";
 import PeptideSeq from "../PeptideSeq.vue";
 import PeptidoformProfile from "./PeptidoformProfile.vue";
 import ReportTable from "../ReportTable.vue";
-import SpectrumViewer, { type PsmKey } from "../SpectrumViewer.vue";
+import SpectrumViewer from "../SpectrumViewer.vue";
+import type { PsmKey } from "../../lib/queries/spectrum";
 import type { Column } from "../../lib/report";
 import type { DatasetInfo } from "../../lib/api";
-import {
-  cachedSql,
-  evidence,
-  hasSpectra,
-  ident,
-  intensitySumExpr,
-  likePattern,
-  listText,
-  lit,
-  objects,
-  proteinExpr,
-  targetWhere,
-  viewScale,
-  type DatasetTables,
-  type ViewScale,
-} from "../../lib/report";
-import { runSql } from "../../lib/duck";
-import { fmtBytes } from "../../lib/format";
+import { evidence, hasSpectra, proteinExpr, viewScale, type DatasetTables, type ViewScale } from "../../lib/report";
+import { PEPTIDOFORM_LIMIT as LIMIT, peptidoformEvidence, searchPeptidoforms } from "../../lib/queries/peptides";
+import { modificationCounts } from "../../lib/queries/ptms";
+import { fmtBytes, listText } from "../../lib/format";
 import { openProtein, state } from "../../store";
+import { COL } from "../../lib/qpx";
+import { isCancelled } from "../../lib/errors";
 
 const props = defineProps<{ ds: DatasetInfo; t: DatasetTables; fileBase: string; accession?: string }>();
 
-const LIMIT = 500;
 const ev = evidence(props.t);
 const prot = ev ? proteinExpr(ev) : null;
 const evName = props.t.feature ? "features" : "PSMs";
@@ -41,10 +29,14 @@ const scale = ref<ViewScale | null>(null);
 const large = computed(() => !!scale.value?.large);
 // Row-group statistics only help when the peptide is the leading sort key
 // (relayouted psm views; feature views lead with anchor_protein).
-const sorted = computed(() => ["peptidoform", "sequence"].includes(scale.value?.sortedBy[0] ?? ""));
+const sorted = computed(() => {
+  const first = scale.value?.sortedBy[0];
+  return first === COL.peptidoform || first === COL.sequence;
+});
 const waiting = ref(false);
 const modsLoaded = ref(false);
 const modsBusy = ref(false);
+const modsError = ref("");
 const minCharge = ref<number | null>(null);
 const busy = ref(false);
 const error = ref("");
@@ -94,28 +86,6 @@ const evCols = computed<Column[]>(() =>
   ].filter((c) => evRows.value.length === 0 || c.key in evRows.value[0])
 );
 
-function whereClause(): string {
-  const E = ev!;
-  const parts = [targetWhere(E)];
-  // Strip anything that is not an amino-acid letter, so "pep tide" / lower case work.
-  const s = q.value.trim().toUpperCase();
-  if (s) {
-    const aa = s.replace(/[^A-Z]/g, "");
-    const seqCond =
-      mode.value === "exact" ? `${E.seq} = ${lit(aa)}`
-      : mode.value === "prefix" ? `starts_with(${E.seq}, ${lit(aa)})`
-      : `contains(${E.seq}, ${lit(aa)})`;
-    // Also match peptidoform text (e.g. "M[Oxidation]" or "UNIMOD:21").
-    const pfCond = E.cols.has("peptidoform") && /[\[\]:+]/.test(q.value) ? ` OR peptidoform ILIKE ${likePattern(q.value.trim())}` : "";
-    parts.push(`(${aa ? seqCond : "FALSE"}${pfCond})`);
-  }
-  if (mod.value && E.cols.has("modifications")) {
-    parts.push(`list_contains(list_transform(modifications, x -> x.name), ${lit(mod.value)})`);
-  }
-  if (minCharge.value && E.cols.has("charge")) parts.push(`charge >= ${Number(minCharge.value)}`);
-  return parts.join(" AND ");
-}
-
 async function search() {
   if (!ev) return;
   waiting.value = false;
@@ -124,30 +94,9 @@ async function search() {
   focus.value = null;
   const t0 = performance.now();
   try {
-    const E = ev;
-    const has = (c: string) => E.cols.has(c);
-    const isum = intensitySumExpr(E);
-    const pf = has("peptidoform") ? "peptidoform" : E.seq;
-    const sel = [
-      `${pf} AS peptidoform`,
-      `any_value(${E.seq}) AS sequence`,
-      has("modifications") ? "any_value(modifications) AS modifications" : null,
-      prot ? `any_value(${prot}) AS protein` : null,
-      has("gg_names") ? "any_value(gg_names) AS genes" : null,
-      has("charge") ? "list_sort(list_distinct(list(charge))) AS charges" : null,
-      "count(*)::BIGINT AS n_ev",
-      has("run_file_name") ? "count(DISTINCT run_file_name)::BIGINT AS runs" : null,
-      has("posterior_error_probability") ? "min(posterior_error_probability) AS best_pep" : null,
-      isum ? `avg(CASE WHEN ${isum} > 0 THEN log10(${isum}) END) AS log_int` : null,
-    ].filter(Boolean);
-    const r = await runSql(
-      `SELECT ${sel.join(", ")} FROM ${ident(E.table)} WHERE ${whereClause()}
-       GROUP BY 1 ORDER BY n_ev DESC, peptidoform LIMIT ${LIMIT + 1}`,
-      LIMIT + 1
-    );
-    const out = objects(r);
-    truncated.value = out.length > LIMIT;
-    rows.value = out.slice(0, LIMIT);
+    const r = await searchPeptidoforms(ev, prot, { q: q.value, mode: mode.value, mod: mod.value, minCharge: minCharge.value });
+    truncated.value = r.truncated;
+    rows.value = r.rows;
     elapsed.value = performance.now() - t0;
   } catch (e: any) {
     error.value = String(e?.message ?? e);
@@ -164,27 +113,9 @@ async function openPeptide(row: Record<string, any>) {
   evBusy.value = true;
   evRows.value = [];
   try {
-    const E = evSrc.value!;
-    const has = (c: string) => E.cols.has(c);
-    const isum = intensitySumExpr(E);
-    const pfCol = has("peptidoform") ? "peptidoform" : E.seq;
-    const scanList = /\[\]|list/i.test(E.types.scan ?? "");
-    const sel = [
-      has("run_file_name") ? "run_file_name" : null,
-      has("scan") ? (scanList ? "scan[1] AS scan_no" : "scan AS scan_no") : null,
-      has("charge") ? "charge" : null,
-      has("rt") ? "rt / 60.0 AS rt_min" : null,
-      has("observed_mz") ? "observed_mz" : null,
-      has("mass_error_ppm") ? "mass_error_ppm" : null,
-      has("posterior_error_probability") ? "posterior_error_probability" : null,
-      isum ? `CASE WHEN ${isum} > 0 THEN log10(${isum}) END AS log_int` : null,
-    ].filter(Boolean);
-    const r = await runSql(
-      `SELECT ${sel.join(", ")} FROM ${ident(E.table)} WHERE ${targetWhere(E)} AND ${pfCol} = ${lit(String(row.peptidoform))}
-       ORDER BY ${has("run_file_name") ? "run_file_name" : "1"}${has("posterior_error_probability") ? ", posterior_error_probability" : ""} LIMIT 5000`
-    );
+    const r = await peptidoformEvidence(evSrc.value!, String(row.peptidoform));
     if (id !== evSeq) return;
-    evRows.value = objects(r).map((x, i) => ({ ...x, _k: i }));
+    evRows.value = r.map((x, i) => ({ ...x, _k: i }));
   } finally {
     if (id === evSeq) evBusy.value = false;
   }
@@ -210,22 +141,14 @@ watch(
 );
 
 async function loadMods() {
-  if (!ev || modsLoaded.value || modsBusy.value || !ev.cols.has("modifications")) return;
+  if (!ev || modsLoaded.value || modsBusy.value || !ev.cols.has(COL.modifications)) return;
   modsBusy.value = true;
+  modsError.value = "";
   try {
-    const r = await cachedSql(
-      props.ds,
-      "ptm.mods",
-      `SELECT m.name AS name, any_value(m.accession) AS accession,
-              count(DISTINCT pf)::BIGINT AS n_pf, count(DISTINCT seq)::BIGINT AS n_pep, count(*)::BIGINT AS n_ev
-       FROM (SELECT unnest(modifications) AS m, ${ev.cols.has("peptidoform") ? "peptidoform" : ev.seq} AS pf, ${ev.seq} AS seq
-             FROM ${ident(ev.table)} WHERE ${targetWhere(ev)})
-       GROUP BY 1 ORDER BY n_ev DESC`
-    );
-    modNames.value = r.rows.map((x) => String(x[0])).filter((x) => x && x !== "null");
+    modNames.value = (await modificationCounts(props.ds, ev)).map((m) => String(m.name)).filter((x) => x && x !== "null");
     modsLoaded.value = true;
-  } catch {
-    /* optional filter */
+  } catch (e: any) {
+    if (!isCancelled(e)) modsError.value = String(e?.message ?? e);
   } finally {
     modsBusy.value = false;
   }
@@ -233,11 +156,15 @@ async function loadMods() {
 
 onMounted(async () => {
   if (!ev) return;
-  hasSpectra(props.t.psm).then((v) => (spectra.value = v && !!props.t.psm?.cols.has("peptidoform"))).catch(() => {});
+  hasSpectra(props.t.psm)
+    .then((v) => (spectra.value = v && !!props.t.psm?.cols.has(COL.peptidoform)))
+    .catch((e) => (error.value = String(e?.message ?? e)));
   try {
     scale.value = await viewScale(ev);
-  } catch {
-    scale.value = null;
+  } catch (e: any) {
+    // Without the footer the file's size is unknown: don't scan it blindly.
+    error.value = String(e?.message ?? e);
+    return;
   }
   if (large.value) {
     // Listing the top peptidoforms or the modifications reads whole columns of
@@ -271,7 +198,7 @@ onMounted(async () => {
         <option value="exact">exact</option>
       </select>
       <select
-        v-if="modNames.length || (large && ev.cols.has('modifications'))"
+        v-if="modNames.length || (large && ev.cols.has(COL.modifications))"
         v-model="mod"
         :title="modsLoaded ? 'Only peptidoforms carrying this modification' : 'Listing the modifications reads the modifications column of the whole file'"
         @focus="loadMods"
@@ -280,6 +207,7 @@ onMounted(async () => {
         <option value="">{{ modsBusy ? "loading modifications…" : "any modification" }}</option>
         <option v-for="m in modNames" :key="m" :value="m">{{ m }}</option>
       </select>
+      <span v-if="modsError" class="error">Modifications: {{ modsError }}</span>
       <input v-model.number="minCharge" type="number" min="1" max="9" placeholder="z ≥" class="z" title="Minimum charge" />
       <button class="primary" type="submit" :disabled="busy">Search</button>
       <button class="xs" type="button" :disabled="!rows.length" @click="table?.exportCsv()">CSV</button>
@@ -297,7 +225,7 @@ onMounted(async () => {
         · {{ (elapsed / 1000).toFixed(2) }} s · target {{ evName }} · click a peptidoform for its intensity and RT profile across samples and runs, and its {{ spectra ? "PSMs and spectra" : evDetail }}, a protein to open it
       </span>
     </div>
-    <div v-if="error" class="error">⚠ {{ error }}</div>
+    <div v-if="error" class="error">{{ error }}</div>
     <div v-else class="split" :class="{ open: !!focus, wide: !!focus && pane === 'profile' }">
       <ReportTable
         ref="table"
@@ -389,20 +317,35 @@ onMounted(async () => {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+/* A segmented control. */
 .tabs {
-  display: flex;
-  gap: 4px;
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  align-self: flex-start;
 }
-.tabs button.on {
+.tabs button {
+  border: none;
+  border-radius: 0;
+  padding: 4px 12px;
+  font-size: 13px;
+  background: var(--bg-panel);
+  color: var(--text-dim);
+}
+.tabs button + button {
+  border-left: 1px solid var(--border);
+}
+.tabs button.on,
+.tabs button.on:hover:not(:disabled) {
   background: var(--accent);
-  color: var(--bg);
-  border-color: var(--accent);
+  color: var(--on-accent);
 }
 .detail {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--bg-soft);
-  padding: 10px;
+  background: var(--bg-panel);
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -420,15 +363,10 @@ onMounted(async () => {
   color: var(--accent);
   text-decoration: none;
 }
-button.xs {
-  padding: 2px 8px;
-  font-size: 11px;
-  border-radius: 6px;
-}
 .pad {
   padding: 18px;
 }
 .hint {
-  font-size: 11px;
+  font-size: 12px;
 }
 </style>

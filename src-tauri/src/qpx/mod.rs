@@ -14,7 +14,7 @@ pub struct ViewInfo {
     pub format: String,
     /// Local absolute path, or an `s3://bucket/key` locator for remote views.
     pub path: String,
-    pub size_bytes: u64,
+    pub size_bytes: Option<u64>,
 }
 
 /// All views belonging to one dataset prefix.
@@ -25,8 +25,18 @@ pub struct DatasetInfo {
     /// Directory (or s3 locator) holding the dataset.
     pub path: String,
     pub views: Vec<ViewInfo>,
-    /// single-file | dataset | collection | s3
-    pub source_kind: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SkippedFolder {
+    pub path: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct CollectionScan {
+    pub datasets: Vec<DatasetInfo>,
+    pub skipped: Vec<SkippedFolder>,
 }
 
 /// Split a QPX filename into `(prefix, view, format)`.
@@ -50,9 +60,7 @@ pub fn parse_filename(filename: &str) -> Option<(String, String, String)> {
             }
         }
     }
-    let mut it2 = rest.rsplitn(2, '.');
-    let view = it2.next()?;
-    let prefix = it2.next()?;
+    let (prefix, view) = rest.rsplit_once('.')?;
     if prefix.is_empty() || view.is_empty() {
         return None;
     }
@@ -68,11 +76,7 @@ fn strip_msnet(s: &str) -> Option<&str> {
     }
 }
 
-fn into_datasets(
-    by_prefix: BTreeMap<String, Vec<ViewInfo>>,
-    dir: String,
-    source_kind: &str,
-) -> Vec<DatasetInfo> {
+fn into_datasets(by_prefix: BTreeMap<String, Vec<ViewInfo>>, dir: String) -> Vec<DatasetInfo> {
     by_prefix
         .into_iter()
         .map(|(prefix, mut views)| {
@@ -81,80 +85,78 @@ fn into_datasets(
                 prefix,
                 path: dir.clone(),
                 views,
-                source_kind: source_kind.to_string(),
             }
         })
         .collect()
 }
 
 /// Discover all datasets (grouped by prefix) directly inside `dir`.
-pub fn discover_dir(dir: &Path, source_kind: &str) -> Vec<DatasetInfo> {
+pub fn discover_dir(dir: &Path) -> Result<Vec<DatasetInfo>, String> {
+    let fail = |e: std::io::Error| format!("{}: {e}", dir.display());
     let mut by_prefix: BTreeMap<String, Vec<ViewInfo>> = BTreeMap::new();
-    if let Ok(readdir) = std::fs::read_dir(dir) {
-        for entry in readdir.flatten() {
-            let p = entry.path();
-            if p.is_file() {
-                if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
-                    if let Some((prefix, view, format)) = parse_filename(name) {
-                        let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
-                        by_prefix.entry(prefix).or_default().push(ViewInfo {
-                            name: name.to_string(),
-                            view,
-                            format,
-                            path: p.to_string_lossy().to_string(),
-                            size_bytes: size,
-                        });
-                    }
-                }
+    for entry in std::fs::read_dir(dir).map_err(fail)? {
+        let path = entry.map_err(fail)?.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let Some((prefix, view, format)) = parse_filename(name) else {
+            continue;
+        };
+        let meta = match std::fs::metadata(&path) {
+            Ok(meta) => meta,
+            // A dangling symlink is not a view.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(format!("{}: {e}", path.display())),
+        };
+        if !meta.is_file() {
+            continue;
+        }
+        by_prefix.entry(prefix).or_default().push(ViewInfo {
+            name: name.to_string(),
+            view,
+            format,
+            path: path.to_string_lossy().to_string(),
+            size_bytes: Some(meta.len()),
+        });
+    }
+    Ok(into_datasets(by_prefix, dir.to_string_lossy().to_string()))
+}
+
+/// Recursively walk a folder (up to `max_depth` levels below it) collecting
+/// datasets from every directory that directly contains QPX parquet files.
+/// This handles flat collections (many prefixes in one dir) and nested
+/// collections (one dataset per subdirectory). An error reading `root` is
+/// returned; an unreadable sub-folder (a protected system folder in a large
+/// tree, say) is skipped so that the rest of the tree still opens.
+pub fn collect_all(root: &Path, max_depth: u32) -> Result<CollectionScan, String> {
+    let mut out = CollectionScan::default();
+    walk(root, max_depth, &mut out)?;
+    Ok(out)
+}
+
+fn walk(dir: &Path, depth_left: u32, out: &mut CollectionScan) -> Result<(), String> {
+    out.datasets.extend(discover_dir(dir)?);
+    if depth_left == 0 {
+        return Ok(());
+    }
+    let fail = |e: std::io::Error| format!("{}: {e}", dir.display());
+    for entry in std::fs::read_dir(dir).map_err(fail)? {
+        let path = entry.map_err(fail)?.path();
+        if path.is_dir() {
+            if let Err(reason) = walk(&path, depth_left - 1, out) {
+                out.skipped.push(SkippedFolder {
+                    path: path.to_string_lossy().to_string(),
+                    reason,
+                });
             }
         }
     }
-    into_datasets(by_prefix, dir.to_string_lossy().to_string(), source_kind)
-}
-
-/// Recursively walk a folder (up to `max_depth`) collecting datasets from
-/// every directory that directly contains QPX parquet files. This handles
-/// flat collections (many prefixes in one dir) and nested collections
-/// (one dataset per subdirectory).
-pub fn collect_all(root: &Path, source_kind: &str, max_depth: u32) -> Vec<DatasetInfo> {
-    let mut out = Vec::new();
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    walk(root, source_kind, 0, max_depth, &mut out, &mut seen);
-    out
-}
-
-fn walk(
-    dir: &Path,
-    source_kind: &str,
-    depth: u32,
-    max_depth: u32,
-    out: &mut Vec<DatasetInfo>,
-    seen: &mut std::collections::HashSet<String>,
-) {
-    if depth > max_depth {
-        return;
-    }
-    for ds in discover_dir(dir, source_kind) {
-        // Avoid pushing the same dataset twice if a dir and a descendant
-        // both contain its files.
-        let key = format!("{}|{}", ds.path, ds.prefix);
-        if seen.insert(key) {
-            out.push(ds);
-        }
-    }
-    if let Ok(readdir) = std::fs::read_dir(dir) {
-        for entry in readdir.flatten() {
-            let p = entry.path();
-            if p.is_dir() {
-                walk(&p, source_kind, depth + 1, max_depth, out, seen);
-            }
-        }
-    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::parse_filename;
+    use super::{collect_all, discover_dir, parse_filename};
 
     fn p(s: &str) -> Option<(String, String, String)> {
         parse_filename(s)
@@ -163,10 +165,75 @@ mod tests {
     #[test]
     fn standard_and_msnet_names() {
         let t = |a: &str, b: &str, c: &str| Some((a.to_string(), b.to_string(), c.to_string()));
-        assert_eq!(p("PXD021013.feature.parquet"), t("PXD021013", "feature", "parquet"));
-        assert_eq!(p("PXD021013-MSNet.parquet"), t("PXD021013", "psm", "parquet"));
-        assert_eq!(p("PDC000219-MSNet.psm.parquet"), t("PDC000219", "psm", "parquet"));
-        assert_eq!(p("PXD019483-hCOV-MSNet.parquet"), t("PXD019483-hCOV", "psm", "parquet"));
+        assert_eq!(
+            p("PXD021013.feature.parquet"),
+            t("PXD021013", "feature", "parquet")
+        );
+        assert_eq!(
+            p("PXD021013-MSNet.parquet"),
+            t("PXD021013", "psm", "parquet")
+        );
+        assert_eq!(
+            p("PDC000219-MSNet.psm.parquet"),
+            t("PDC000219", "psm", "parquet")
+        );
+        assert_eq!(
+            p("PXD019483-hCOV-MSNet.parquet"),
+            t("PXD019483-hCOV", "psm", "parquet")
+        );
         assert_eq!(p("plain.parquet"), None);
+    }
+
+    #[test]
+    fn a_folder_groups_its_view_files_by_prefix() {
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        for (name, len) in [
+            ("B.psm.parquet", 3),
+            ("A.pg.parquet", 1),
+            ("A.feature.parquet", 2),
+            ("notes.txt", 1),
+            ("plain.parquet", 1),
+        ] {
+            std::fs::write(d.join(name), vec![0u8; len]).unwrap();
+        }
+        std::fs::create_dir(d.join("C.run.parquet")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(d.join("gone"), d.join("D.pg.parquet")).unwrap();
+        let found: Vec<_> = discover_dir(d)
+            .unwrap()
+            .into_iter()
+            .map(|ds| {
+                let views: Vec<_> = ds
+                    .views
+                    .into_iter()
+                    .map(|v| (v.view, v.size_bytes))
+                    .collect();
+                (ds.prefix, views)
+            })
+            .collect();
+        let view = |v: &str, n: u64| (v.to_string(), Some(n));
+        assert_eq!(
+            found,
+            [
+                ("A".to_string(), vec![view("feature", 2), view("pg", 1)]),
+                ("B".to_string(), vec![view("psm", 3)]),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_collection_scan_stops_at_its_depth() {
+        let tmp = tempfile::tempdir().unwrap();
+        let deep = tmp.path().join("a").join("b");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(tmp.path().join("a").join("X.pg.parquet"), b"x").unwrap();
+        std::fs::write(deep.join("Y.pg.parquet"), b"y").unwrap();
+        let prefixes = |depth| -> Vec<String> {
+            let found = collect_all(tmp.path(), depth).unwrap();
+            found.datasets.into_iter().map(|d| d.prefix).collect()
+        };
+        assert_eq!(prefixes(1), ["X"]);
+        assert_eq!(prefixes(2), ["X", "Y"]);
     }
 }

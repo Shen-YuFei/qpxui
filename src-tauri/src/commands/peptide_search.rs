@@ -22,46 +22,36 @@ pub struct PsHit {
     pub collection: Option<String>,
     #[serde(default)]
     pub organism: Option<String>,
-    #[serde(default, rename(deserialize = "organism_part", serialize = "organismPart"))]
+    #[serde(
+        default,
+        rename(deserialize = "organism_part", serialize = "organismPart")
+    )]
     pub organism_part: Option<String>,
     #[serde(default)]
-    pub disease: Option<String>,
-    #[serde(default)]
     pub instrument: Option<String>,
-    #[serde(rename(deserialize = "dataset_url", serialize = "datasetUrl"))]
-    pub dataset_url: String,
-    #[serde(default, rename(deserialize = "px_url", serialize = "pxUrl"))]
-    pub px_url: Option<String>,
-    #[serde(default, rename(deserialize = "n_peptidoforms", serialize = "nPeptidoforms"))]
+    #[serde(
+        default,
+        rename(deserialize = "n_peptidoforms", serialize = "nPeptidoforms")
+    )]
     pub n_peptidoforms: u64,
     #[serde(default, rename(deserialize = "n_peptides", serialize = "nPeptides"))]
     pub n_peptides: u64,
     #[serde(default, rename(deserialize = "total_obs", serialize = "totalObs"))]
     pub total_obs: u64,
-    #[serde(default, rename(deserialize = "sample_peptidoforms", serialize = "samplePeptidoforms"))]
+    #[serde(
+        default,
+        rename(deserialize = "sample_peptidoforms", serialize = "samplePeptidoforms")
+    )]
     pub sample_peptidoforms: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PsFacetValue {
-    pub value: String,
-    #[serde(default)]
-    pub datasets: usize,
-}
-
-/// Result of a peptide/protein/gene search: the datasets that matched, plus the
-/// query-specific organism facet breakdown.
+/// Result of a peptide/protein/gene search: the datasets that matched.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PsSearchResult {
-    #[serde(rename(serialize = "totalDatasets"))]
     pub total_datasets: usize,
     pub datasets: Vec<PsHit>,
-    #[serde(default)]
     pub unmapped: bool,
-    #[serde(default, rename(serialize = "organismFacet"))]
-    pub organism_facet: Vec<PsFacetValue>,
 }
 
 /// An available post-translational modification on the portal (for the
@@ -70,21 +60,60 @@ pub struct PsSearchResult {
 #[serde(rename_all = "camelCase")]
 pub struct PsModification {
     pub name: String,
-    #[serde(default)]
-    pub residues: Vec<String>,
     #[serde(default, rename(deserialize = "n_datasets", serialize = "nDatasets"))]
     pub n_datasets: usize,
 }
 
-/// A pure-uppercase amino-acid run (>= 5 letters) is read as a peptide sequence;
+/// A standard uppercase amino-acid run (>= 8 residues) is read as a peptide sequence;
 /// anything else is treated as a protein or gene identifier/name.
 fn looks_like_peptide(s: &str) -> bool {
     let t = s.trim();
-    t.len() >= 5 && t.chars().all(|c| c.is_ascii_alphabetic() && c.is_uppercase())
+    t.len() >= 8 && t.bytes().all(|c| b"ACDEFGHIKLMNPQRSTVWY".contains(&c))
 }
 
 fn non_empty(v: Option<&str>) -> Option<&str> {
     v.filter(|v| !v.trim().is_empty())
+}
+
+/// The portal API URL for one search. With `dtype` "auto" (or none), a
+/// peptide-like query goes to the peptide endpoint and anything else to the
+/// protein one.
+fn search_url(
+    query: &str,
+    dtype: Option<&str>,
+    match_mode: Option<&str>,
+    organism: Option<&str>,
+    modification: Option<&str>,
+    limit: Option<usize>,
+) -> Result<reqwest::Url, String> {
+    let path = match dtype.unwrap_or("auto").to_lowercase().as_str() {
+        "peptide" => "search/peptide",
+        "gene" => "search/gene",
+        "protein" => "search/protein",
+        _ if looks_like_peptide(query) => "search/peptide",
+        _ => "search/protein",
+    };
+    let mut url =
+        reqwest::Url::parse(&format!("{BASE}/{path}")).map_err(|e| format!("bad URL: {e}"))?;
+    {
+        let mut qp = url.query_pairs_mut();
+        if path == "search/peptide" {
+            qp.append_pair("sequence", query.trim());
+            if let Some(m) = non_empty(match_mode) {
+                qp.append_pair("match", m);
+            }
+        } else {
+            qp.append_pair("query", query.trim());
+        }
+        if let Some(o) = non_empty(organism) {
+            qp.append_pair("organism", o);
+        }
+        if let Some(m) = non_empty(modification) {
+            qp.append_pair("modification", m);
+        }
+        qp.append_pair("limit", &limit.unwrap_or(50).min(200).to_string());
+    }
+    Ok(url)
 }
 
 /// Search the quantms portal for a peptide sequence, protein identifier/name,
@@ -92,7 +121,6 @@ fn non_empty(v: Option<&str>) -> Option<&str> {
 ///
 /// `dtype` is `"auto"` (default), `"peptide"`, `"protein"` or `"gene"`.
 /// `match_mode` applies to peptide search: `"exact"` (default) or `"contains"`.
-#[allow(clippy::too_many_arguments)] // one argument per search filter/option, surfaced to the pane
 #[tauri::command]
 pub async fn ps_search(
     query: String,
@@ -100,69 +128,26 @@ pub async fn ps_search(
     match_mode: Option<String>,
     organism: Option<String>,
     modification: Option<String>,
-    min_length: Option<usize>,
-    max_length: Option<usize>,
     limit: Option<usize>,
-    offset: Option<usize>,
 ) -> Result<PsSearchResult, String> {
-    let kind = dtype.unwrap_or_else(|| "auto".to_string()).to_lowercase();
-    let path = match kind.as_str() {
-        "peptide" => "search/peptide",
-        "gene" => "search/gene",
-        "protein" => "search/protein",
-        _ => {
-            if looks_like_peptide(&query) {
-                "search/peptide"
-            } else {
-                "search/protein"
-            }
-        }
-    };
-
-    let mut url = reqwest::Url::parse(&format!("{BASE}/{path}")).map_err(|e| format!("bad URL: {e}"))?;
-    {
-        let mut qp = url.query_pairs_mut();
-        match kind.as_str() {
-            "peptide" | "auto" if path == "search/peptide" => {
-                qp.append_pair("sequence", query.trim());
-                if let Some(m) = non_empty(match_mode.as_deref()) {
-                    qp.append_pair("match", m);
-                }
-            }
-            _ => {
-                qp.append_pair("query", query.trim());
-            }
-        }
-        if let Some(o) = non_empty(organism.as_deref()) {
-            qp.append_pair("organism", o);
-        }
-        if let Some(m) = non_empty(modification.as_deref()) {
-            qp.append_pair("modification", m);
-        }
-        if let Some(n) = min_length {
-            qp.append_pair("min_length", &n.to_string());
-        }
-        if let Some(n) = max_length {
-            qp.append_pair("max_length", &n.to_string());
-        }
-        qp.append_pair("limit", &limit.unwrap_or(50).min(200).to_string());
-        qp.append_pair("offset", &offset.unwrap_or(0).to_string());
-    }
-
-    let client = portal_http::client_builder()?
-        .build()
-        .map_err(|e| format!("portal HTTP client: {e:?}"))?;
+    let url = search_url(
+        &query,
+        dtype.as_deref(),
+        match_mode.as_deref(),
+        organism.as_deref(),
+        modification.as_deref(),
+        limit,
+    )?;
+    let client = portal_http::client()?;
 
     #[derive(serde::Deserialize)]
     struct Raw {
-        #[serde(rename = "total_datasets", default)]
+        #[serde(default)]
         total_datasets: usize,
         #[serde(default)]
         datasets: Vec<PsHit>,
         #[serde(default)]
         unmapped: bool,
-        #[serde(default, rename = "organism_facet")]
-        organism_facet: Vec<PsFacetValue>,
     }
     let raw: Raw = client
         .get(url)
@@ -178,7 +163,6 @@ pub async fn ps_search(
         total_datasets: raw.total_datasets,
         datasets: raw.datasets,
         unmapped: raw.unmapped,
-        organism_facet: raw.organism_facet,
     })
 }
 
@@ -190,9 +174,7 @@ pub async fn ps_modifications() -> Result<Vec<PsModification>, String> {
         #[serde(default)]
         modifications: Vec<PsModification>,
     }
-    let client = portal_http::client_builder()?
-        .build()
-        .map_err(|e| format!("portal HTTP client: {e:?}"))?;
+    let client = portal_http::client()?;
     let raw: ModsRaw = client
         .get(format!("{BASE}/modifications"))
         .send()
@@ -204,4 +186,115 @@ pub async fn ps_modifications() -> Result<Vec<PsModification>, String> {
         .await
         .map_err(|e| format!("parse: {e}"))?;
     Ok(raw.modifications)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn auto_search_picks_the_endpoint_by_the_query() {
+        let url = |q: &str, dtype: Option<&str>| {
+            search_url(q, dtype, Some("exact"), None, None, None)
+                .unwrap()
+                .to_string()
+        };
+        assert_eq!(
+            url("AVGKVLPELNGK", None),
+            format!("{BASE}/search/peptide?sequence=AVGKVLPELNGK&match=exact&limit=50")
+        );
+        assert_eq!(
+            url("P04406", Some("auto")),
+            format!("{BASE}/search/protein?query=P04406&limit=50")
+        );
+        assert_eq!(
+            url("GAPDH", Some("gene")),
+            format!("{BASE}/search/gene?query=GAPDH&limit=50")
+        );
+        assert_eq!(
+            url("ACTB", Some("peptide")),
+            format!("{BASE}/search/peptide?sequence=ACTB&match=exact&limit=50")
+        );
+    }
+
+    #[test]
+    fn auto_requires_eight_standard_uppercase_residues() {
+        for query in [
+            "GAPDH",
+            "PEPTIDE",
+            "peptidek",
+            "PEPTIDEB",
+            "PEPTIDEX",
+            "PEPTIDEÜ",
+        ] {
+            let url = search_url(query, Some("auto"), None, None, None, None).unwrap();
+            assert_eq!(url.path(), "/peptide-search/search/protein", "{query}");
+        }
+        for query in ["PEPTIDEK", " PEPTIDEK ", "ACDEFGHIKLMNPQRSTVWY"] {
+            let url = search_url(query, Some("auto"), None, None, None, None).unwrap();
+            assert_eq!(url.path(), "/peptide-search/search/peptide", "{query}");
+        }
+    }
+
+    #[test]
+    fn search_skips_empty_filters_and_caps_the_limit() {
+        let url = search_url(
+            " PEPTIDEK ",
+            Some("peptide"),
+            Some(""),
+            Some("Homo sapiens"),
+            Some(" "),
+            Some(500),
+        )
+        .unwrap();
+        assert_eq!(
+            url.to_string(),
+            format!("{BASE}/search/peptide?sequence=PEPTIDEK&organism=Homo+sapiens&limit=200")
+        );
+    }
+
+    #[test]
+    fn results_read_snake_case_and_send_camel_case() {
+        let hit: PsHit = serde_json::from_value(json!({
+            "dataset_accession": "PXD1",
+            "dataset_ref": "PXD1/ab",
+            "organism_part": "liver",
+            "n_peptidoforms": 3,
+            "n_peptides": 2,
+            "total_obs": 17,
+            "sample_peptidoforms": ["PEPK"]
+        }))
+        .unwrap();
+        let result = PsSearchResult {
+            total_datasets: 1,
+            datasets: vec![hit],
+            unmapped: false,
+        };
+        assert_eq!(
+            serde_json::to_value(result).unwrap(),
+            json!({
+                "totalDatasets": 1,
+                "unmapped": false,
+                "datasets": [{
+                    "datasetAccession": "PXD1",
+                    "datasetRef": "PXD1/ab",
+                    "collection": null,
+                    "organism": null,
+                    "organismPart": "liver",
+                    "instrument": null,
+                    "nPeptidoforms": 3,
+                    "nPeptides": 2,
+                    "totalObs": 17,
+                    "samplePeptidoforms": ["PEPK"]
+                }]
+            })
+        );
+        let m: PsModification =
+            serde_json::from_value(json!({ "name": "Oxidation", "n_datasets": 4 })).unwrap();
+        assert_eq!(
+            serde_json::to_value(m).unwrap(),
+            json!({ "name": "Oxidation", "nDatasets": 4 })
+        );
+    }
 }

@@ -20,7 +20,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; worker-src 'self'; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* https://koina.wilhelmlab.org/v2/models/ https://www.ebi.ac.uk/pride/proxi/archive/v0.1/spectra https://proteomecentral.proteomexchange.org/api/proxi/v0.1/spectra https://rest.uniprot.org/taxonomy/search https://www.ebi.ac.uk/ols4/api/v2/ontologies/; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'"
     }
   },
   "bundle": {

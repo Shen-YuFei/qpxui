@@ -2,14 +2,15 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import ChartCard from "../ChartCard.vue";
 import ReportTable from "../ReportTable.vue";
-import type { Column } from "../../lib/report";
 import type { DatasetInfo } from "../../lib/api";
 import type { ChartSpec } from "../../lib/charts";
-import { cachedSql, evidence, ident, objects, targetWhere, type DatasetTables } from "../../lib/report";
+import { evidence, type Column, type DatasetTables } from "../../lib/report";
+import { PTM_COLUMNS, modificationCounts, modificationSites, modificationsPerPeptide, targetCount } from "../../lib/queries/ptms";
 import { ptmColor, shortCode } from "../../lib/ptm";
 import { searchFor } from "../../store";
 import { useLargeGate } from "../../lib/useLargeGate";
 import LargeGate from "./LargeGate.vue";
+import { COL } from "../../lib/qpx";
 
 const props = defineProps<{ ds: DatasetInfo; t: DatasetTables; fileBase: string }>();
 const ev = evidence(props.t);
@@ -83,52 +84,21 @@ const tableRows = computed(() =>
 );
 
 onMounted(() => {
-  if (!ev || !ev.cols.has("modifications")) {
+  if (!ev || !ev.cols.has(COL.modifications)) {
     busy.value = false;
     return;
   }
-  check([{ ref: ev, cols: ["is_decoy", "modifications", "peptidoform", "sequence"] }], build);
+  check([{ ref: ev, cols: PTM_COLUMNS }], build);
 });
 
 async function build() {
   if (!ev) return;
   busy.value = true;
-  const T = ident(ev.table);
-  const W = targetWhere(ev);
-  const pf = ev.cols.has("peptidoform") ? "peptidoform" : ev.seq;
   try {
-    const total = await cachedSql(props.ds, "ptm.total", `SELECT count(*) FROM ${T} WHERE ${W}`);
-    const n = Number(total.rows[0]?.[0] ?? 0) || 1;
-    const r = await cachedSql(
-      props.ds,
-      "ptm.mods",
-      `SELECT m.name AS name, any_value(m.accession) AS accession,
-              count(DISTINCT pf)::BIGINT AS n_pf, count(DISTINCT seq)::BIGINT AS n_pep, count(*)::BIGINT AS n_ev
-       FROM (SELECT unnest(modifications) AS m, ${pf} AS pf, ${ev.seq} AS seq FROM ${T} WHERE ${W})
-       GROUP BY 1 ORDER BY n_ev DESC`
-    );
-    mods.value = objects(r).map((m) => ({ ...m, pct: (100 * m.n_ev) / n }));
-    const s = await cachedSql(
-      props.ds,
-      "ptm.sites",
-      `SELECT name, coalesce(p.amino_acid, CASE WHEN p.position = 0 THEN 'N-term' ELSE '?' END) AS aa, count(*)::BIGINT AS n
-       FROM (SELECT m.name AS name, unnest(m.positions) AS p
-             FROM (SELECT unnest(modifications) AS m FROM ${T} WHERE ${W}))
-       GROUP BY ALL ORDER BY n DESC`
-    );
-    sites.value = objects(s);
-    const k = await cachedSql(
-      props.ds,
-      "ptm.perpep",
-      `SELECT least(len(list_filter(modifications, x -> x.name IS NOT NULL)), 6) AS k, count(*)::BIGINT
-       FROM ${T} WHERE ${W} GROUP BY 1 ORDER BY 1`
-    );
-    modsPerPep.value = {
-      kind: "bar",
-      labels: k.rows.map((x) => (Number(x[0]) === 6 ? "6+" : String(x[0]))),
-      series: [{ name: evName, values: k.rows.map((x) => Number(x[1])) }],
-      xName: "modification types per peptide (incl. fixed)",
-    };
+    const n = (await targetCount(props.ds, ev)) || 1;
+    mods.value = (await modificationCounts(props.ds, ev)).map((m) => ({ ...m, pct: (100 * m.n_ev) / n }));
+    sites.value = await modificationSites(props.ds, ev);
+    modsPerPep.value = await modificationsPerPeptide(props.ds, ev, evName);
   } catch (e: any) {
     error.value = String(e?.message ?? e);
   } finally {
@@ -139,9 +109,10 @@ async function build() {
 
 <template>
   <div>
-    <div v-if="!ev || !ev.cols.has('modifications')" class="muted pad">No `modifications` column in this dataset's feature/PSM view.</div>
-    <div v-else-if="error" class="error pad">⚠ {{ error }}</div>
+    <div v-if="!ev || !ev.cols.has(COL.modifications)" class="muted pad">No `modifications` column in this dataset's feature/PSM view.</div>
+    <div v-else-if="error" class="error pad">{{ error }}</div>
     <LargeGate v-else-if="gate.blocked" :bytes="gate.bytes" :size="gate.size" what="Counting modifications" @go="release" />
+    <div v-else-if="gate.error" class="error pad">{{ gate.error }}</div>
     <div v-else-if="gate.checking" class="muted pad"><span class="spinner"></span></div>
     <template v-else>
       <p class="muted note">
@@ -207,17 +178,12 @@ async function build() {
 }
 h3 {
   margin: 0;
-  font-size: 14px;
-}
-button.xs {
-  padding: 2px 8px;
-  font-size: 11px;
-  border-radius: 6px;
+  font-size: 15px;
 }
 select.mini {
-  padding: 1px 4px;
-  font-size: 11px;
-  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 12px;
+  border-radius: 4px;
 }
 .mod {
   display: inline-flex;
@@ -232,7 +198,7 @@ select.mini {
   background: var(--ptm);
 }
 .code {
-  font-size: 10px;
+  font-size: 11px;
 }
 .pad {
   padding: 18px;
