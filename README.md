@@ -351,6 +351,9 @@ cargo clippy --all-targets -- -D warnings
 cargo test                     # add -- --ignored for the tests that need the portal
 ```
 
+CI also builds the installers for Linux, Windows and macOS (Apple Silicon and Intel), as the
+release does, and keeps them as artifacts of the workflow run.
+
 **Sample data**
 
 ```bash
