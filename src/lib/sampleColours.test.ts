@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CATEGORICAL, type ChartTheme } from "./charts";
 import { shades } from "./colours";
+import { COL } from "./qpx";
 import { colourScale, diseaseGroup, isAnnotated } from "./sampleColours";
 
 const theme: ChartTheme = {
@@ -26,6 +27,12 @@ describe("sample colours", () => {
     expect(s.colourOf("normal")).toBe(GREEN);
     expect([s.colourOf("breast cancer"), s.colourOf("lung carcinoma")]).toEqual(shades(PURPLE, 2));
     expect(s.colourOf("not available")).not.toBe(theme.other);
+  });
+
+  it("gives the values of different grey groups different shades", () => {
+    const groups = new Map([["ascites", "Other or no organ system"], ["adjacent normal tissue", "Not found in UBERON"]]);
+    const s = colourScale(COL.organism_part, ["ascites", "adjacent normal tissue"], groups, theme);
+    expect(["adjacent normal tissue", "ascites"].map(s.colourOf)).toEqual(shades(theme.other, 2));
   });
 
   it("takes the palette by count until the groups are known", () => {

@@ -49,7 +49,7 @@ export function lightness(hex: string): number {
  * then alternately darker and lighter steps. */
 export function shades(hex: string, n: number): string[] {
   const L = oklab(hex)[0];
-  const step = Math.min(0.09, 0.3 / Math.max(1, Math.ceil((n - 1) / 2)));
+  const step = Math.min(0.12, 0.3 / Math.max(1, Math.ceil((n - 1) / 2)));
   return Array.from({ length: n }, (_, i) => {
     if (i === 0) return hex;
     const k = Math.ceil(i / 2) * (i % 2 ? -1 : 1);

@@ -181,6 +181,7 @@ export function colourScale(field: string, values: string[], groups: Map<string,
   const grouped = GROUPED[field];
   if (grouped && groups) {
     // Hue = biological group, in the group table's order (grey groups last); shade = value.
+    const slotOf = (g: string) => grouped.groups.find((x) => x.label === g)?.slot;
     const rank = (g: string) => {
       const i = grouped.groups.findIndex((x) => x.label === g);
       return i < 0 ? grouped.groups.length : i;
@@ -191,10 +192,13 @@ export function colourScale(field: string, values: string[], groups: Map<string,
       const g = groups.get(v) ?? NO_SYSTEM;
       families.set(g, [...(families.get(g) ?? []), v]);
     }
+    const sorted = [...families].sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b));
+    // The grey groups share one run of shades, so no two of their values look alike.
+    const greys = shades(t.other, sorted.filter(([g]) => slotOf(g) == null).reduce((n, [, m]) => n + m.length, 0));
     order = [];
-    for (const [g, members] of [...families].sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b))) {
-      const slot = grouped.groups.find((x) => x.label === g)?.slot;
-      const tones = shades(slot == null ? t.other : t.cat[slot], members.length);
+    for (const [g, members] of sorted) {
+      const slot = slotOf(g);
+      const tones = slot == null ? greys.splice(0, members.length) : shades(t.cat[slot], members.length);
       members.forEach((v, i) => colours.set(v, tones[i]));
       order.push(...members);
     }
