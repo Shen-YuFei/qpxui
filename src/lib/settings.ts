@@ -17,21 +17,25 @@ export interface PTMEntry {
   default: string;
 }
 
+// Default colours follow the portal's modification families: biological
+// PTMs take categorical slots (phospho red, oxidation orange, acetyl violet,
+// deamidation yellow, methyl pink, ubiquitin green, isobaric labels blue) and
+// fixed or chemical modifications are grey, so they recede.
 export const PTM_PALETTE: PTMEntry[] = [
-  { id: "phospho", label: "Phosphorylation", accessions: ["UNIMOD:21"], keywords: ["phospho"], default: "#f59e0b" },
-  { id: "oxidation", label: "Oxidation", accessions: ["UNIMOD:35"], keywords: ["oxid", "methion", "hydroxyl"], default: "#22c55e" },
-  { id: "acetyl", label: "Acetylation", accessions: ["UNIMOD:1"], keywords: ["acetyl"], default: "#a78bfa" },
-  { id: "carbamidomethyl", label: "Carbamidomethyl", accessions: ["UNIMOD:4"], keywords: ["carbamidomethyl"], default: "#f97316" },
-  { id: "carbamyl", label: "Carbamyl / Carbamylation", accessions: ["UNIMOD:5"], keywords: ["carbamyl"], default: "#fb923c" },
-  { id: "deamidated", label: "Deamidated", accessions: ["UNIMOD:7"], keywords: ["deamid", "deamidation"], default: "#e879e9" },
-  { id: "methyl", label: "Methylation", accessions: ["UNIMOD:34"], keywords: ["methyl", "methylation"], default: "#2dd4b6" },
-  { id: "dimethyl", label: "Dimethyl", accessions: ["UNIMOD:36"], keywords: ["dimethyl", "dethiomethyl"], default: "#14b8a6" },
-  { id: "trimethyl", label: "Trimethyl", accessions: ["UNIMOD:37"], keywords: ["trimethyl"], default: "#0d9488" },
-  { id: "glygly", label: "GlyGly / Ubiquitination", accessions: ["UNIMOD:121"], keywords: ["gly", "ubiquit"], default: "#38bdf8" },
-  { id: "sulfation", label: "Sulfation", accessions: ["UNIMOD:40"], keywords: ["sulfo", "sulf"], default: "#24d3cc" },
-  { id: "guanidinyl", label: "Guanidinyl", accessions: ["UNIMOD:52"], keywords: ["guanidin"], default: "#a78bfa" },
-  { id: "isobaric", label: "Isobaric labels (TMT / iTRAQ / SILAC)", accessions: [], keywords: ["tmt", "itraq", "silac", "label:", "isotopic", "icat", "chelator", "piol"], default: "#60a5fa" },
-  { id: "unknown", label: "Unknown / mass-shift", accessions: [], keywords: [], default: "#94a3b8" },
+  { id: "phospho", label: "Phosphorylation", accessions: ["UNIMOD:21"], keywords: ["phospho"], default: "#e34948" },
+  { id: "oxidation", label: "Oxidation", accessions: ["UNIMOD:35"], keywords: ["oxid", "methion", "hydroxyl"], default: "#eb6834" },
+  { id: "acetyl", label: "Acetylation", accessions: ["UNIMOD:1"], keywords: ["acetyl"], default: "#6250d6" },
+  { id: "carbamidomethyl", label: "Carbamidomethyl", accessions: ["UNIMOD:4"], keywords: ["carbamidomethyl"], default: "#8b96a3" },
+  { id: "carbamyl", label: "Carbamyl / Carbamylation", accessions: ["UNIMOD:5"], keywords: ["carbamyl"], default: "#a3acb6" },
+  { id: "deamidated", label: "Deamidated", accessions: ["UNIMOD:7"], keywords: ["deamid", "deamidation"], default: "#eda100" },
+  { id: "methyl", label: "Methylation", accessions: ["UNIMOD:34"], keywords: ["methyl", "methylation"], default: "#e87ba4" },
+  { id: "dimethyl", label: "Dimethyl", accessions: ["UNIMOD:36"], keywords: ["dimethyl", "dethiomethyl"], default: "#c95b87" },
+  { id: "trimethyl", label: "Trimethyl", accessions: ["UNIMOD:37"], keywords: ["trimethyl"], default: "#a8406b" },
+  { id: "glygly", label: "GlyGly / Ubiquitination", accessions: ["UNIMOD:121"], keywords: ["gly", "ubiquit"], default: "#008300" },
+  { id: "sulfation", label: "Sulfation", accessions: ["UNIMOD:40"], keywords: ["sulfo", "sulf"], default: "#1baf7a" },
+  { id: "guanidinyl", label: "Guanidinyl", accessions: ["UNIMOD:52"], keywords: ["guanidin"], default: "#a3acb6" },
+  { id: "isobaric", label: "Isobaric labels (TMT / iTRAQ / SILAC)", accessions: [], keywords: ["tmt", "itraq", "silac", "label:", "isotopic", "icat", "chelator", "piol"], default: "#2a78d6" },
+  { id: "unknown", label: "Unknown / mass-shift", accessions: [], keywords: [], default: "#6b7785" },
 ];
 
 const STORAGE_KEY = "qpxui.settings.v1";
