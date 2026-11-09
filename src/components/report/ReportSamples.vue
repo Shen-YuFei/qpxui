@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import ChartCard from "../ChartCard.vue";
+import SampleFacet from "./SampleFacet.vue";
 import ReportTable from "../ReportTable.vue";
 import type { DatasetInfo } from "../../lib/api";
 import type { ChartSpec } from "../../lib/charts";
@@ -61,15 +61,7 @@ onMounted(async () => {
     <div v-else-if="busy" class="muted pad">Loading samples… <span class="spinner"></span></div>
     <template v-else>
       <div v-if="facets.length" class="grid">
-        <ChartCard
-          v-for="f in facets"
-          :key="f.col"
-          :title="f.col.replace(/_/g, ' ')"
-          subtitle="Samples per value (top 25)."
-          :spec="f.spec"
-          :file-base="fileBase"
-          :height="Math.max(140, Math.min(25, f.spec.labels.length) * 22 + 40)"
-        />
+        <SampleFacet v-for="f in facets" :key="f.col" :col="f.col" :spec="f.spec" :file-base="fileBase" />
       </div>
       <div class="sec">
         <div class="sec-head">

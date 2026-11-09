@@ -6,7 +6,8 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import ChartCard from "../ChartCard.vue";
 import QuantProteinProfile from "./QuantProteinProfile.vue";
 import type { DatasetInfo } from "../../lib/api";
-import { chartTheme, commonPrefix, seriesColor, type ChartSpec } from "../../lib/charts";
+import { chartTheme, commonPrefix, type ChartSpec } from "../../lib/charts";
+import { colourScale, useValueGroups } from "../../lib/sampleColours";
 import {
   correlationChart,
   correlationCsv,
@@ -33,7 +34,6 @@ import {
   groupedOrder,
   groupingColumns,
   medianNormalize,
-  natural,
   pca,
   presence,
   proteinSummaries,
@@ -117,18 +117,23 @@ const groupOptions = computed(() =>
 
 const groupOf = (sample: string) => sampleGroup(meta.value, groupBy.value, sample);
 
-const groups = computed(() => {
-  const m = matrix.value;
-  if (!m || !groupBy.value) return [] as string[];
-  return [...new Set(m.samples.map(groupOf))].sort(natural);
+/** Each sample's value of the colour-by field. */
+const groupValues = computed(() => (matrix.value && groupBy.value ? matrix.value.samples.map(groupOf) : []));
+const { groups: lookedUp, failed: lookupFailed } = useValueGroups(groupBy, groupValues);
+const scale = computed(() => {
+  void settings.theme;
+  return colourScale(groupBy.value, groupValues.value, lookedUp.value);
 });
-const groupColor = (g: string) => (g ? seriesColor(groups.value, g) : chartTheme().pooled);
+/** The groups in legend order. */
+const groups = computed(() => (groupBy.value ? scale.value.order : []));
+const groupColor = (g: string) => (g ? scale.value.colourOf(g) : chartTheme().pooled);
 
 /** Samples ordered by group, then name. */
 const order = computed(() => {
   const m = matrix.value;
   if (!m) return [] as number[];
-  return groupedOrder(m.samples, groupOf);
+  const rank = new Map(groups.value.map((g, i) => [g, i]));
+  return groupedOrder(m.samples, groupOf, (g) => rank.get(g) ?? rank.size);
 });
 
 const prefix = computed(() => commonPrefix(raw.value?.samples ?? []));
@@ -300,6 +305,9 @@ const sourceText = computed(() => {
               <option v-for="g in groupOptions" :key="g" :value="g">{{ g.replace(/_/g, " ") }}</option>
             </select>
           </label>
+          <span v-if="lookupFailed" class="muted" title="UniProt or the EBI Ontology Lookup Service could not be reached">
+            biological groups unavailable; colours by count
+          </span>
           <span v-if="saved" class="muted">{{ saved }}</span>
           <button class="xs" title="Save the log2 protein × sample matrix as CSV" @click="exportMatrixFile">Matrix CSV</button>
         </span>

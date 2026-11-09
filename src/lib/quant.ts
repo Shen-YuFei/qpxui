@@ -220,9 +220,10 @@ export function withoutFlagged(m: QuantMatrix, flagged: Uint8Array): QuantMatrix
   };
 }
 
-/** Column indices ordered by group, then name. */
-export function groupedOrder(samples: string[], groupOf: (sample: string) => string): number[] {
-  return samples.map((_, j) => j).sort((a, b) => natural(groupOf(samples[a]), groupOf(samples[b])) || natural(samples[a], samples[b]));
+/** Column indices ordered by the `rank` of their group (its place in the
+ * legend), then by sample name. */
+export function groupedOrder(samples: string[], groupOf: (sample: string) => string, rank: (group: string) => number): number[] {
+  return samples.map((_, j) => j).sort((a, b) => rank(groupOf(samples[a])) - rank(groupOf(samples[b])) || natural(samples[a], samples[b]));
 }
 
 /** A protein of the matrix: columns quantified, mean and SD of log2 abundance. */

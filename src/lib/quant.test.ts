@@ -136,8 +136,8 @@ describe("protein list", () => {
     expect(findProteins(all, "p").map((r) => r.protein)).toEqual(["CON__P2", "P1", "P3"]);
   });
 
-  it("orders columns by group, then name", () => {
+  it("orders columns by group rank, then name", () => {
     const group: Record<string, string> = { "S-10": "a", "S-2": "a", "S-1": "b" };
-    expect(groupedOrder(["S-1", "S-10", "S-2"], (s) => group[s])).toEqual([2, 1, 0]);
+    expect(groupedOrder(["S-1", "S-10", "S-2"], (s) => group[s], (g) => (g === "b" ? 0 : 1))).toEqual([0, 2, 1]);
   });
 });

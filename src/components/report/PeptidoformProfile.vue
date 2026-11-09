@@ -6,7 +6,8 @@
 import { computed, ref, watch } from "vue";
 import ChartCard from "../ChartCard.vue";
 import type { DatasetInfo } from "../../lib/api";
-import { chartTheme, seriesColor, toCsv } from "../../lib/charts";
+import { chartTheme, toCsv } from "../../lib/charts";
+import { colourScale, useValueGroups } from "../../lib/sampleColours";
 import { distributionChart, retentionChart, sampleChart, type Feature, type ProfileStyle } from "../../lib/peptidoformCharts";
 import { groupingColumns, natural, quantile, sampleGroup } from "../../lib/quant";
 import type { DatasetTables, TableRef } from "../../lib/report";
@@ -97,13 +98,25 @@ const groupOptions = computed(() => (isSamples.value ? groupingColumns([...meta.
 const groupOf = (sample: string) => sampleGroup(meta.value, groupBy.value, sample);
 
 /** Every sample the peptidoform could be in (all mapped samples), else those seen. */
-const sampleAxis = computed(() => {
+const axisSamples = computed(() => {
   const seen = new Set(channels.value.map((c) => c.sample));
-  const all = isSamples.value ? new Set([...meta.value.keys(), ...seen]) : seen;
-  return [...all].sort((a, b) => natural(groupOf(a), groupOf(b)) || natural(a, b));
+  return [...(isSamples.value ? new Set([...meta.value.keys(), ...seen]) : seen)];
 });
-const groups = computed(() => (groupBy.value ? [...new Set(sampleAxis.value.map(groupOf))].sort(natural) : []));
-const groupColor = (g: string) => (g ? seriesColor(groups.value, g) : chartTheme().pooled);
+const groupValues = computed(() => (groupBy.value ? axisSamples.value.map(groupOf) : []));
+const { groups: lookedUp, failed: lookupFailed } = useValueGroups(groupBy, groupValues);
+const scale = computed(() => {
+  void settings.theme;
+  return colourScale(groupBy.value, groupValues.value, lookedUp.value);
+});
+/** The groups in legend order. */
+const groups = computed(() => (groupBy.value ? scale.value.order : []));
+const groupColor = (g: string) => (g ? scale.value.colourOf(g) : chartTheme().pooled);
+/** The samples by group, in legend order, then by name. */
+const sampleAxis = computed(() => {
+  const rank = new Map(groups.value.map((g, i) => [g, i]));
+  const r = (s: string) => rank.get(groupOf(s)) ?? rank.size;
+  return [...axisSamples.value].sort((a, b) => r(a) - r(b) || natural(a, b));
+});
 
 /** log2 intensity per sample, summed over the peptidoform's features (charges, fractions). */
 const perSample = computed(() => {
@@ -215,6 +228,9 @@ const base = computed(() => `${props.fileBase}_${props.peptidoform.replace(/[^A-
             <option v-for="g in groupOptions" :key="g" :value="g">{{ g.replace(/_/g, " ") }}</option>
           </select>
         </label>
+        <span v-if="lookupFailed" class="muted" title="UniProt or the EBI Ontology Lookup Service could not be reached">
+          biological groups unavailable; colours by count
+        </span>
         <label v-if="channels.length" title="Subtract each sample's median log2 intensity over all evidence (reads the whole intensities column once)">
           <input v-model="normalise" type="checkbox" :disabled="medBusy" /> Normalise to sample median
           <span v-if="medBusy" class="spinner"></span>
