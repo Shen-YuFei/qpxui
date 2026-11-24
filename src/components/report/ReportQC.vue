@@ -53,7 +53,8 @@ async function loadRuns() {
     { key: "pct_mc", label: "% missed cl.", num: true, fmt: (v) => (v == null ? "" : Number(v).toFixed(1)) },
     { key: "instrument", label: "Instrument" },
   ];
-  runCols.value = all.filter((c) => columns.includes(c.key));
+  // Leave out columns without a value (e.g. protein groups of fractionated samples).
+  runCols.value = all.filter((c) => columns.includes(c.key) && rows.some((r) => r[c.key] != null));
 }
 
 function runMetricsSpec(): ChartSpec | null {
@@ -63,7 +64,7 @@ function runMetricsSpec(): ChartSpec | null {
     { name: evName, values: rows.map((r) => r.n_ev) },
     rows[0].n_pep !== undefined ? { name: "peptides", values: rows.map((r) => r.n_pep) } : null,
     rows[0].n_prot !== undefined ? { name: "proteins", values: rows.map((r) => r.n_prot) } : null,
-    rows[0].n_pg !== undefined ? { name: "protein groups", values: rows.map((r) => r.n_pg) } : null,
+    rows.some((r) => r.n_pg != null) ? { name: "protein groups", values: rows.map((r) => r.n_pg) } : null,
   ].filter(Boolean) as ChartSpec["series"];
   return { kind: "bar", labels: rows.map((r) => String(r.run_file_name)), series, xName: "run", hideLabels: rows.length > 30 };
 }

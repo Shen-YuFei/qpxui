@@ -44,13 +44,13 @@ export async function runMetrics(
     extra.push("ps.n_psm");
   }
   const pg = t.pg;
-  // A flat pg view (QPX 1.1+) has a row per unit and label: count the groups
-  // in each raw file of the units.
+  // A flat pg view (QPX 1.1+) has a row per unit and label. A unit of one raw
+  // file counts that file's groups; one of several (fractions) has no per-file count.
   const pgc = pg?.cols.has(COL.run_file_name)
     ? `SELECT ${COL.run_file_name}, count(*)::BIGINT AS n_pg FROM ${ident(pg.table)} WHERE ${targetWhere(pg)} GROUP BY 1`
     : pg?.cols.has(COL.grouped_runs)
-      ? `SELECT r AS ${COL.run_file_name}, count(DISTINCT p)::BIGINT AS n_pg
-         FROM (SELECT unnest(${COL.grouped_runs}) AS r, ${COL.anchor_protein} AS p FROM ${ident(pg.table)} WHERE ${targetWhere(pg)}) GROUP BY 1`
+      ? `SELECT ${COL.grouped_runs}[1] AS ${COL.run_file_name}, count(DISTINCT ${COL.anchor_protein})::BIGINT AS n_pg
+         FROM ${ident(pg.table)} WHERE ${targetWhere(pg)} AND len(${COL.grouped_runs}) = 1 GROUP BY 1`
       : null;
   if (pgc) {
     parts.push(`pgc AS (${pgc})`);
