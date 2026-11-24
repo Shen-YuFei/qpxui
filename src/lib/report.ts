@@ -48,6 +48,11 @@ export function datasetTables(ds: DatasetInfo): Promise<DatasetTables> {
         for (const c of desc) types[c.name.toLowerCase()] = c.type;
         const ref: TableRef = { view, table, cols: new Set(Object.keys(types)), types, seq: COL.sequence };
         if (kind === "feature" || kind === "psm") ref.seq = await detectSeqExpr(ref);
+        // Identification-only data gives a flat pg view an all-null intensity
+        // column: leave it out so no report reads the view as quantified.
+        if (kind === "pg" && ref.cols.has(COL.intensity) && !(await hasValues(ref, COL.intensity, `${COL.intensity} IS NOT NULL`))) {
+          ref.cols.delete(COL.intensity);
+        }
         out[kind] = ref;
       }
       return out;
@@ -107,24 +112,28 @@ export function evidence(t: DatasetTables): TableRef | undefined {
 
 const spectraCache = new Map<string, Promise<boolean>>();
 
-/** Does the psm view carry fragment spectra (non-null `mz_array`)? Answered
- * from the parquet footer statistics, so no column data is read. */
+/** Does column `col` hold a value in any row? Answered from the parquet
+ * footer statistics, so no column data is read; without null counts, looks
+ * for one row where `rowHas` holds. */
+async function hasValues(ref: TableRef, col: string, rowHas: string): Promise<boolean> {
+  const stats = await runSql(
+    `SELECT sum(num_values)::BIGINT, sum(coalesce(stats_null_count, 0))::BIGINT, count(stats_null_count)::BIGINT, count(*)::BIGINT
+     FROM parquet_metadata(${lit(`${ref.table}.parquet`)}) WHERE lower(split_part(path_in_schema, ', ', 1)) = ${lit(col)}`
+  );
+  const [vals, nulls, withStats, chunks] = stats.rows[0].map(Number);
+  if (chunks > 0 && withStats === chunks) return vals > nulls;
+  // Some writers leave out null counts.
+  const r = await runSql(`SELECT 1 FROM ${ident(ref.table)} WHERE ${rowHas} LIMIT 1`, 1);
+  return r.rows.length > 0;
+}
+
+/** Does the psm view carry fragment spectra (non-null `mz_array`)? */
 export function hasSpectra(ref: TableRef | undefined): Promise<boolean> {
   if (!ref || !ref.cols.has(COL.mz_array) || !ref.cols.has(COL.intensity_array)) return Promise.resolve(false);
   const key = ref.view.path;
   let p = spectraCache.get(key);
   if (!p) {
-    p = (async () => {
-      const stats = await runSql(
-        `SELECT sum(num_values)::BIGINT, sum(coalesce(stats_null_count, 0))::BIGINT, count(stats_null_count)::BIGINT, count(*)::BIGINT
-         FROM parquet_metadata(${lit(`${ref.table}.parquet`)}) WHERE path_in_schema LIKE 'mz_array%'`
-      );
-      const [vals, nulls, withStats, chunks] = stats.rows[0].map(Number);
-      if (chunks > 0 && withStats === chunks) return vals > nulls;
-      // Some writers leave out null counts: look for one spectrum instead.
-      const r = await runSql(`SELECT 1 FROM ${ident(ref.table)} WHERE len(${COL.mz_array}) > 0 LIMIT 1`, 1);
-      return r.rows.length > 0;
-    })();
+    p = hasValues(ref, COL.mz_array, `len(${COL.mz_array}) > 0`);
     p.catch(() => spectraCache.delete(key));
     spectraCache.set(key, p);
   }
@@ -276,10 +285,11 @@ export function likePattern(s: string): string {
   return `${lit(`%${esc}%`)} ESCAPE '\\'`;
 }
 
-/** Summed reporter/label intensity per row (works for LFQ and TMT). */
+/** Summed reporter/label intensity per row (works for LFQ and TMT); a flat
+ * pg row (QPX 1.1+) carries one label's scalar intensity. */
 export function intensitySumExpr(ref: TableRef): string | null {
-  if (!ref.cols.has(COL.intensities)) return null;
-  return `list_sum(list_transform(${COL.intensities}, x -> x.intensity))`;
+  if (ref.cols.has(COL.intensities)) return `list_sum(list_transform(${COL.intensities}, x -> x.intensity))`;
+  return ref.cols.has(COL.intensity) ? COL.intensity : null;
 }
 
 export function log10Expr(expr: string): string {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { QueryResult } from "./duck";
-import { histogramData, ident, likePattern, lit, parseSortOrder, proteinExpr, proteinMatchWhere, sampleMapSql, targetWhere, type TableRef } from "./report";
+import { histogramData, ident, intensitySumExpr, likePattern, lit, parseSortOrder, proteinExpr, proteinMatchWhere, sampleMapSql, targetWhere, type TableRef } from "./report";
+import { quantSource } from "./queries/quant";
 
 function ref(types: Record<string, string>): TableRef {
   return {
@@ -40,6 +41,16 @@ describe("schema-dependent expressions", () => {
   it("drops decoys only when the column exists", () => {
     expect(targetWhere(ref({ is_decoy: "BOOLEAN" }))).toBe("NOT coalesce(is_decoy, false)");
     expect(targetWhere(ref({}))).toBe("TRUE");
+  });
+
+  it("reads an intensities list or a flat pg row's scalar intensity", () => {
+    expect(intensitySumExpr(ref({ intensities: "STRUCT(label VARCHAR, intensity FLOAT)[]" }))).toBe(
+      "list_sum(list_transform(intensities, x -> x.intensity))",
+    );
+    const flatPg = ref({ grouped_runs: "VARCHAR[]", label: "VARCHAR", intensity: "FLOAT" });
+    expect(intensitySumExpr(flatPg)).toBe("intensity");
+    expect(intensitySumExpr(ref({ sequence: "VARCHAR" }))).toBeNull();
+    expect(quantSource({ pg: flatPg, feature: ref({ intensities: "STRUCT(label VARCHAR, intensity FLOAT)[]" }) })?.ref).toBe(flatPg);
   });
 
   it("maps channels to samples only with a run view that lists them", () => {

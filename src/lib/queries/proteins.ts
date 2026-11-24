@@ -13,12 +13,18 @@ function pgSql(P: TableRef, where: string): string {
   const T = ident(P.table);
   const has = (c: string) => P.cols.has(c);
   const isum = intensitySumExpr(P);
+  // A flat pg view (QPX 1.1+) lists the raw files of each unit in grouped_runs.
+  const runs = has(COL.run_file_name)
+    ? `count(DISTINCT ${COL.run_file_name})`
+    : has(COL.grouped_runs)
+      ? `len(list_distinct(flatten(list(${COL.grouped_runs}))))`
+      : null;
   const sel = [
     `${COL.anchor_protein} AS protein`,
     has(COL.pg_accessions) ? `any_value(${COL.pg_accessions}) AS accessions` : null,
     has(COL.pg_names) ? `any_value(${COL.pg_names}) AS names` : null,
     has(COL.gg_names) ? `any_value(${COL.gg_names}) AS genes` : null,
-    has(COL.run_file_name) ? `count(DISTINCT ${COL.run_file_name})::BIGINT AS runs` : null,
+    runs ? `${runs}::BIGINT AS runs` : null,
     has(COL.peptide_counts) ? `max(${COL.peptide_counts}.total_sequences)::BIGINT AS peptides` : null,
     has(COL.peptide_counts) ? `max(${COL.peptide_counts}.unique_sequences)::BIGINT AS unique_peptides` : null,
     has(COL.global_qvalue) ? `min(${COL.global_qvalue}) AS qvalue` : has(COL.pg_qvalue) ? `min(${COL.pg_qvalue}) AS qvalue` : null,
@@ -27,7 +33,7 @@ function pgSql(P: TableRef, where: string): string {
   ].filter(Boolean);
   return `SELECT ${sel.join(", ")} FROM ${T}
 WHERE ${targetWhere(P)} AND ${COL.anchor_protein} IS NOT NULL AND ${where}
-GROUP BY ${COL.anchor_protein} ORDER BY ${has(COL.run_file_name) ? "runs DESC, " : ""}${has(COL.peptide_counts) ? "peptides DESC, " : ""}protein
+GROUP BY ${COL.anchor_protein} ORDER BY ${runs ? "runs DESC, " : ""}${has(COL.peptide_counts) ? "peptides DESC, " : ""}protein
 LIMIT ${PROTEIN_LIMIT + 1}`;
 }
 
@@ -110,12 +116,15 @@ export async function proteinRunsChart(ev: TableRef, acc: string, evName: string
 }
 
 /** The protein group's row in each run (pg view): peptides, unique
- * peptides, features, q-value and log10 intensity. */
+ * peptides, features, q-value and log10 intensity. A flat pg view (QPX 1.1+)
+ * has a row per unit (its grouped_runs, as `run_file_name`) and label. */
 export async function proteinGroupRuns(pg: TableRef, acc: string): Promise<Record<string, any>[]> {
   const isum = intensitySumExpr(pg);
   const has = (c: string) => pg.cols.has(c);
+  const flat = !has(COL.run_file_name);
   const sel = [
-    COL.run_file_name,
+    flat ? `${COL.grouped_runs} AS ${COL.run_file_name}` : COL.run_file_name,
+    flat ? COL.label : null,
     has(COL.peptide_counts) ? `${COL.peptide_counts}.total_sequences AS peptides` : null,
     has(COL.peptide_counts) ? `${COL.peptide_counts}.unique_sequences AS unique_peptides` : null,
     has(COL.feature_counts) ? `${COL.feature_counts}.total_features AS features` : null,
@@ -123,7 +132,7 @@ export async function proteinGroupRuns(pg: TableRef, acc: string): Promise<Recor
     isum ? `CASE WHEN ${isum} > 0 THEN log10(${isum}) END AS log_int` : null,
   ].filter(Boolean);
   const r = await runSql(
-    `SELECT ${sel.join(", ")} FROM ${ident(pg.table)} WHERE ${targetWhere(pg)} AND ${COL.anchor_protein} = ${lit(acc)} ORDER BY ${COL.run_file_name}`
+    `SELECT ${sel.join(", ")} FROM ${ident(pg.table)} WHERE ${targetWhere(pg)} AND ${COL.anchor_protein} = ${lit(acc)} ORDER BY ${COL.run_file_name}${flat ? `, ${COL.label}` : ""}`
   );
   return objects(r);
 }

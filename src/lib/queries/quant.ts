@@ -7,9 +7,11 @@ import { cachedSql, ident, objects, proteinExpr, sampleMapSql, targetWhere, type
 import { COL } from "../qpx";
 
 /** Columns the matrix query reads (for the large-view gate). */
-export const QUANT_COLUMNS = [COL.is_decoy, COL.anchor_protein, COL.protein_accessions, COL.pg_accessions, COL.gg_names, COL.run_file_name, COL.contaminant, COL.intensities];
+export const QUANT_COLUMNS = [COL.is_decoy, COL.anchor_protein, COL.protein_accessions, COL.pg_accessions, COL.gg_names, COL.run_file_name, COL.contaminant, COL.intensities,
+  COL.grouped_runs, COL.label, COL.intensity];
 
-const hasInt = (r?: TableRef) => !!r?.cols.has(COL.intensities);
+// An intensities list, or a flat pg view's scalar intensity (QPX 1.1+).
+const hasInt = (r?: TableRef) => !!r?.cols.has(COL.intensities) || !!r?.cols.has(COL.intensity);
 
 /** The view the matrix comes from: the pg view when it has intensities,
  * else the feature view; none when neither has. */
@@ -22,7 +24,12 @@ export function quantSource(t: DatasetTables): { ref: TableRef; kind: "pg" | "fe
 function matrixSql(t: DatasetTables, S: TableRef, kind: "pg" | "feature"): string {
   const prot = kind === "pg" ? COL.anchor_protein : proteinExpr(S);
   const gene = S.cols.has(COL.gg_names) ? `${COL.gg_names}[1]` : "NULL";
-  const run = S.cols.has(COL.run_file_name) ? COL.run_file_name : "'all'";
+  // A flat pg view (QPX 1.1+) has a row per unit and label; the unit's first
+  // raw file maps it to a sample like a run.
+  const flat = !S.cols.has(COL.intensities);
+  const run = S.cols.has(COL.run_file_name) ? COL.run_file_name : flat ? `${COL.grouped_runs}[1]` : "'all'";
+  const item = flat ? `{'label': ${COL.label}, 'intensity': ${COL.intensity}}` : `unnest(${COL.intensities})`;
+  const quantified = flat ? `${COL.intensity} IS NOT NULL` : `len(${COL.intensities}) > 0`;
   // The contaminant flag is not always set; also match the usual name tags.
   const byName = `(contains(upper(${prot}), 'CONTAMINANT') OR contains(upper(${prot}), 'CON__'))`;
   const cont = S.cols.has(COL.contaminant) ? `(coalesce(${COL.contaminant}, false) OR ${byName})` : byName;
@@ -30,9 +37,9 @@ function matrixSql(t: DatasetTables, S: TableRef, kind: "pg" | "feature"): strin
   const { ctes: maps, joins, col } = sampleMapSql(R);
   return `
 WITH x AS (
-  SELECT ${prot} AS p, ${gene} AS g, ${run} AS r, ${cont} AS c, unnest(${COL.intensities}) AS i
+  SELECT ${prot} AS p, ${gene} AS g, ${run} AS r, ${cont} AS c, ${item} AS i
   FROM ${ident(S.table)}
-  WHERE ${targetWhere(S)} AND ${prot} IS NOT NULL AND len(${COL.intensities}) > 0
+  WHERE ${targetWhere(S)} AND ${prot} IS NOT NULL AND ${quantified}
 )${maps}
 SELECT x.p AS protein, any_value(x.g) AS gene, bool_or(x.c) AS cont, ${col} AS col,
        sum(x.i.intensity)::DOUBLE AS v, ${R ? "bool_and(m.sa IS NULL AND m1.sa IS NOT NULL)" : "false"} AS by_run,

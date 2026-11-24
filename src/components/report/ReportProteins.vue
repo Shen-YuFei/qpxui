@@ -81,6 +81,8 @@ const detail = ref<Record<string, any> | null>(null);
 const peptides = ref<Record<string, any>[]>([]);
 const perRun = ref<ChartSpec | null>(null);
 const pgRuns = ref<Record<string, any>[]>([]);
+// Distinct raw files: a flat pg view has a row per unit (a list of files) and label.
+const pgRunCount = computed(() => new Set(pgRuns.value.flatMap((r) => r.run_file_name)).size);
 const dBusy = ref(false);
 const dError = ref("");
 const pepTable = ref<InstanceType<typeof ReportTable> | null>(null);
@@ -97,7 +99,8 @@ const pepCols = computed<Column[]>(() =>
   ].filter((c) => peptides.value.length === 0 || c.key in peptides.value[0])
 );
 const pgRunCols: Column[] = [
-  { key: "run_file_name", label: "Run" },
+  { key: "run_file_name", label: "Run", fmt: (v) => listText(v) },
+  { key: "label", label: "Label" },
   { key: "peptides", label: "Peptides", num: true },
   { key: "unique_peptides", label: "Unique", num: true },
   { key: "features", label: "Features", num: true },
@@ -122,7 +125,7 @@ async function loadDetail(acc: string) {
       peptides.value = await proteinPeptidoforms(ev, acc);
       perRun.value = await proteinRunsChart(ev, acc, evName);
     }
-    if (pg && pg.cols.has(COL.run_file_name)) {
+    if (pg && (pg.cols.has(COL.run_file_name) || pg.cols.has(COL.grouped_runs))) {
       pgRuns.value = await proteinGroupRuns(pg, acc);
       if (!detail.value?.names && pgRuns.value.length) {
         detail.value = { ...detail.value, ...(await proteinGroupNames(pg, acc)) };
@@ -245,7 +248,7 @@ const accessionLinks = computed(() => {
           <div><b>{{ peptides.length.toLocaleString() }}</b><span>peptidoforms</span></div>
           <div><b>{{ new Set(peptides.map((p) => p.sequence)).size.toLocaleString() }}</b><span>peptides</span></div>
           <div><b>{{ peptides.reduce((a, p) => a + Number(p.n_ev || 0), 0).toLocaleString() }}</b><span>{{ evName }}</span></div>
-          <div v-if="pgRuns.length"><b>{{ pgRuns.length.toLocaleString() }}</b><span>runs (pg)</span></div>
+          <div v-if="pgRuns.length"><b>{{ pgRunCount.toLocaleString() }}</b><span>runs (pg)</span></div>
         </div>
         <ChartCard v-if="perRun" title="Per-run evidence" :subtitle="`${evName} and peptides of this protein in each run.`" :spec="perRun" :file-base="`${fileBase}_${focus}`" :height="200" />
         <div class="sec">

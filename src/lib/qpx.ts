@@ -69,6 +69,9 @@ export const COL = names(
   "peptide_counts",
   "feature_counts",
   "contaminant",
+  "grouped_runs", // flat pg (QPX 1.1+): a row per grouped_runs unit and label
+  "label",
+  "intensity",
   // run
   "instrument",
   "fraction",

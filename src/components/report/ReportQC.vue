@@ -5,7 +5,7 @@ import ReportTable from "../ReportTable.vue";
 import type { DatasetInfo } from "../../lib/api";
 import type { ChartSpec } from "../../lib/charts";
 import { evidence, type Column, type DatasetTables } from "../../lib/report";
-import { QC_COUNT_COLUMNS, QC_EVIDENCE_COLUMNS, runMetrics, sampleIntensities } from "../../lib/queries/qc";
+import { QC_COUNT_COLUMNS, QC_EVIDENCE_COLUMNS, QC_PG_COLUMNS, runMetrics, sampleIntensities } from "../../lib/queries/qc";
 import { fmtNum } from "../../lib/format";
 import { useSlots } from "../../lib/useSlots";
 import { useLargeGate } from "../../lib/useLargeGate";
@@ -104,7 +104,7 @@ async function build() {
 
 onMounted(() => {
   const psm = props.t.feature ? props.t.psm : undefined;
-  check([{ ref: ev, cols: QC_EVIDENCE_COLUMNS }, { ref: psm, cols: QC_COUNT_COLUMNS }, { ref: props.t.pg, cols: QC_COUNT_COLUMNS }], build);
+  check([{ ref: ev, cols: QC_EVIDENCE_COLUMNS }, { ref: psm, cols: QC_COUNT_COLUMNS }, { ref: props.t.pg, cols: QC_PG_COLUMNS }], build);
 });
 </script>
 

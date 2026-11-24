@@ -10,6 +10,7 @@ export const QC_EVIDENCE_COLUMNS = [COL.is_decoy, COL.run_file_name, COL.sequenc
   COL.pg_accessions, COL.intensities, COL.mass_error_ppm, COL.rt, COL.charge, COL.missed_cleavages];
 /** Columns read from the psm (beside features) and pg views. */
 export const QC_COUNT_COLUMNS = [COL.is_decoy, COL.run_file_name];
+export const QC_PG_COLUMNS = [...QC_COUNT_COLUMNS, COL.grouped_runs, COL.anchor_protein];
 
 /** Per-run metrics: one row per run of the evidence view `ev`, with the
  * columns its views allow (see the QC table). */
@@ -43,8 +44,16 @@ export async function runMetrics(
     extra.push("ps.n_psm");
   }
   const pg = t.pg;
-  if (pg?.cols.has(COL.run_file_name)) {
-    parts.push(`pgc AS (SELECT ${COL.run_file_name}, count(*)::BIGINT AS n_pg FROM ${ident(pg.table)} WHERE ${targetWhere(pg)} GROUP BY 1)`);
+  // A flat pg view (QPX 1.1+) has a row per unit and label: count the groups
+  // in each raw file of the units.
+  const pgc = pg?.cols.has(COL.run_file_name)
+    ? `SELECT ${COL.run_file_name}, count(*)::BIGINT AS n_pg FROM ${ident(pg.table)} WHERE ${targetWhere(pg)} GROUP BY 1`
+    : pg?.cols.has(COL.grouped_runs)
+      ? `SELECT r AS ${COL.run_file_name}, count(DISTINCT p)::BIGINT AS n_pg
+         FROM (SELECT unnest(${COL.grouped_runs}) AS r, ${COL.anchor_protein} AS p FROM ${ident(pg.table)} WHERE ${targetWhere(pg)}) GROUP BY 1`
+      : null;
+  if (pgc) {
+    parts.push(`pgc AS (${pgc})`);
     joins.push(`LEFT JOIN pgc USING (${COL.run_file_name})`);
     extra.push("pgc.n_pg");
   }
