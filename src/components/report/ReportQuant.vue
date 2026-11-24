@@ -72,6 +72,13 @@ const minPresence = ref(0.5);
 const groupBy = ref("");
 const q = ref("");
 const focus = ref<string | null>(null);
+// Follow a protein picked elsewhere (Proteins tab, search) once the matrix is loaded.
+watch(
+  () => state.proteinFocus,
+  (acc) => {
+    if (acc && raw.value?.proteins.includes(acc)) focus.value = acc;
+  }
+);
 
 onMounted(() => {
   if (!src) return;
