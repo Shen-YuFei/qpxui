@@ -16,6 +16,7 @@ describe("cvMap", () => {
   });
   it("maps converter-specific names to one key", () => {
     expect(cvMap([{ name: "fragmentation method", value: "CID" }])).toEqual({ "dissociation method": "CID" });
+    expect(cvMap({ fragmentation: "HCD", "mass analyzer": "FTMS" })).toEqual({ "dissociation method": "HCD", "mass analyzer": "FTMS" });
   });
   it("gives an empty map for missing values", () => {
     expect(cvMap(null)).toEqual({});

@@ -114,6 +114,7 @@ export const SAMPLE_FACETS = [
 // quantms uses short struct field names).
 const CV_ALIASES: Record<string, string> = {
   "fragmentation method": "dissociation method",
+  fragmentation: "dissociation method", // MaxQuant psm
   "collision energy": "normalized collision energy",
 };
 
