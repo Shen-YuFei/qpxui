@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import { describeTable, ensureViewReady, type QueryResult } from "../lib/duck";
-import { isStructured, toJson } from "../lib/format";
+import { isStructured, structScores, toJson, type Structured } from "../lib/format";
 import type { ViewInfo } from "../lib/api";
 import type { TableRef } from "../lib/report";
-import { viewScale } from "../lib/report";
+import { footerValue, viewScale } from "../lib/report";
 import { cellFilter, isOptionalColumn, isPeakColumn, tableCount, tablePage } from "../lib/queries/table";
 import { columnEnabledDefault, setViewColumnShown, settings, viewColumnShown } from "../lib/settings";
 import { state } from "../store";
@@ -14,7 +14,7 @@ import HScroll from "./table/HScroll.vue";
 import SpectrumViewer from "./SpectrumViewer.vue";
 import { psmKeyOf, whyNoSpectrum, type PsmKey } from "../lib/queries/spectrum";
 import { isModificationsCol, peptideCells, type PTMSeg } from "../lib/ptm";
-import { COL, type ViewKind } from "../lib/qpx";
+import { COL, STRUCT_LISTS_KEY, structScoreDirections, type ViewKind } from "../lib/qpx";
 
 const props = defineProps<{ view: ViewInfo }>();
 const table = ref("");
@@ -44,6 +44,9 @@ const optVis = ref<Record<string, boolean>>({});
 const largeRemote = ref(false);
 const colTypes = ref<Record<string, string>>({});
 const colNames = ref<string[]>([]);
+// A struct-stored additional_scores (QPX 1.3) shows as the score list it
+// stands for, with each score's direction from the footer.
+const scoreDirs = ref<Record<string, boolean | null> | null>(null);
 const hasPeakCols = computed(() => colNames.value.some(isPeakColumn));
 const hasExtra = computed(() => colNames.value.some((c) => isOptionalColumn(c) && !isPeakColumn(c)));
 const extraCols = computed(() => colNames.value.filter((c) => isOptionalColumn(c) && !isPeakColumn(c)));
@@ -62,6 +65,8 @@ async function load() {
       const desc = await describeTable(table.value);
       colNames.value = desc.map((d) => d.name);
       colTypes.value = Object.fromEntries(desc.map((d) => [d.name.toLowerCase(), d.type]));
+      const st = colTypes.value.additional_scores;
+      scoreDirs.value = st?.startsWith("STRUCT(") && st.endsWith(")") ? structScoreDirections(await footerValue(table.value, STRUCT_LISTS_KEY)) : null;
       const vis: Record<string, boolean> = {};
       for (const c of colNames.value) {
         if (!isOptionalColumn(c)) continue;
@@ -123,6 +128,10 @@ function togglePeaks() {
 /** Hidden optional columns of this view, in column order: shown as a
  * placeholder column with a "load" affordance instead of silently vanishing. */
 const hiddenOptionals = computed(() => colNames.value.filter((c) => isOptionalColumn(c) && !optVis.value[c.toLowerCase()]));
+
+function cellValue(v: unknown, j: number): unknown {
+  return scoreDirs.value && isStructured(v) && result.value.columns[j]?.toLowerCase() === "additional_scores" ? structScores(v as Structured, scoreDirs.value) : v;
+}
 
 function isPeakCol(j: number): boolean {
   return isPeakColumn(result.value.columns[j] ?? "");
@@ -386,7 +395,7 @@ function isModsCell(j: number): boolean {
               @contextmenu.prevent="openMenu($event, i, j)"
             >
               <ResultCell
-                :value="v"
+                :value="cellValue(v, j)"
                 :expanded="!!expanded[cellKey(i, j)]"
                 :segs="segsFor(i, j)"
                 :mods="isModsCell(j)"

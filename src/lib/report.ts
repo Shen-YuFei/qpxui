@@ -159,6 +159,13 @@ export interface ViewScale {
 
 const scaleCache = new Map<string, Promise<ViewScale>>();
 
+/** A key-value entry of a view's parquet footer, or null. */
+export async function footerValue(table: string, key: string): Promise<string | null> {
+  const r = await runSql(`SELECT decode(value) FROM parquet_kv_metadata(${lit(`${table}.parquet`)}) WHERE decode(key) = ${lit(key)} LIMIT 1`, 1);
+  const v = r.rows[0]?.[0];
+  return v == null ? null : String(v);
+}
+
 /** Size, row count and sort order of a view, from the parquet footer only. */
 export function viewScale(ref: Pick<TableRef, "view" | "table">): Promise<ViewScale> {
   const key = ref.view.path;
@@ -181,12 +188,8 @@ export function viewScale(ref: Pick<TableRef, "view" | "table">): Promise<ViewSc
         total += Number(n);
       }
       const bytes = Math.max(ref.view.sizeBytes ?? 0, total);
-      const kv = await runSql(
-        `SELECT decode(value) FROM parquet_kv_metadata(${file}) WHERE decode(key) = ${lit(SORT_ORDER_KEY)} LIMIT 1`,
-        1
-      );
-      const order = kv.rows[0]?.[0];
-      const sortedBy = order == null ? [] : parseSortOrder(String(order));
+      const order = await footerValue(ref.table, SORT_ORDER_KEY);
+      const sortedBy = order == null ? [] : parseSortOrder(order);
       return { remote, rows, bytes, large: remote && bytes >= LARGE_STREAM_BYTES, sortedBy, colBytes };
     })();
     p.catch(() => scaleCache.delete(key));

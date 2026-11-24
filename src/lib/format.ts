@@ -28,14 +28,22 @@ export function toJson(v: unknown, space?: number): string {
 }
 
 /** A QPX score list: STRUCTs with a `score_name`. A QPX 1.3 relayout may
- * store additional_scores as one struct with a field per score name instead;
- * that renders as a plain struct. */
+ * store additional_scores as one struct with a field per score name instead
+ * (see structScores). */
 export function isScoreList(v: unknown): v is Array<Record<string, unknown>> {
   return (
     Array.isArray(v) &&
     v.length > 0 &&
     v.every((x) => isStructured(x) && "score_name" in (x as object))
   );
+}
+/** A struct-stored additional_scores (one field per score name) as the score
+ * list it stands for: its non-null fields, with the directions known. */
+export function structScores(v: Structured, dirs: Record<string, boolean | null>): Array<Record<string, unknown>> | null {
+  const out = Object.entries(v)
+    .filter(([, x]) => x != null)
+    .map(([k, x]) => ({ score_name: k, score_value: x, higher_better: dirs[k] ?? null }));
+  return out.length ? out : null;
 }
 /** A QPX modification list: STRUCTs with a `name` and an `accession`. */
 function isModList(v: unknown): v is Array<Record<string, unknown>> {

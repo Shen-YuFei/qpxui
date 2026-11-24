@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { COL, cvMap } from "./qpx";
+import { COL, cvMap, structScoreDirections } from "./qpx";
+
+describe("structScoreDirections", () => {
+  it("reads each score's direction from the qpx.struct_lists footer", () => {
+    const layout = JSON.stringify({
+      additional_scores: [{ name: "pg_pep", higher_better: false }, { name: "pg_maxlfq_quality", higher_better: true }, { name: "x" }],
+      cv_params: [{ name: "quantification_method" }],
+    });
+    expect(structScoreDirections(layout)).toEqual({ pg_pep: false, pg_maxlfq_quality: true, x: null });
+    expect(structScoreDirections(null)).toEqual({});
+  });
+});
 
 describe("cvMap", () => {
   it("reads a list of {cv_name, cv_value} structs", () => {

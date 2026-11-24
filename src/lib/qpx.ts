@@ -100,6 +100,18 @@ export const COL = names(
 /** Footer key holding the comma-separated sort columns that relayout wrote. */
 export const SORT_ORDER_KEY = "qpx.sort_order";
 
+/** Footer key holding the layout of name-value lists stored as structs (QPX
+ * 1.3): per column its fields, each score with its `higher_better`. */
+export const STRUCT_LISTS_KEY = "qpx.struct_lists";
+
+/** Score name -> higher_better of a struct-stored additional_scores, from the
+ * `qpx.struct_lists` footer value (empty without one). */
+export function structScoreDirections(layout: string | null): Record<string, boolean | null> {
+  if (!layout) return {};
+  const scores = (JSON.parse(layout) as { additional_scores?: { name: string; higher_better?: boolean | null }[] }).additional_scores ?? [];
+  return Object.fromEntries(scores.map((s) => [s.name, s.higher_better ?? null]));
+}
+
 /** Sample-view characteristics charted as facets, in display order.
  * histologic_subtype is not in the spec; it shows when a sample view has it. */
 export const SAMPLE_FACETS = [

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fmtBytes, fmtCount, formatCompact, listText, peakSummary, scalarText, toJson } from "./format";
+import { fmtBytes, fmtCount, formatCompact, listText, peakSummary, scalarText, structScores, toJson } from "./format";
 
 describe("scalarText", () => {
   it("marks missing values", () => {
@@ -9,6 +9,16 @@ describe("scalarText", () => {
 
   it("keeps at most four decimals", () => {
     expect(scalarText(0.123456)).toBe((0.1235).toLocaleString(undefined, { maximumFractionDigits: 4 }));
+  });
+});
+
+describe("structScores", () => {
+  it("lists a struct-stored additional_scores as scores, without the null fields", () => {
+    expect(structScores({ andromeda_score: 120.5, rank: 1, glycan_qvalue: null }, { andromeda_score: true, rank: false })).toEqual([
+      { score_name: "andromeda_score", score_value: 120.5, higher_better: true },
+      { score_name: "rank", score_value: 1, higher_better: false },
+    ]);
+    expect(structScores({ a: null }, {})).toBeNull();
   });
 });
 
