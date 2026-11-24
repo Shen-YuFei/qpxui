@@ -98,6 +98,12 @@ const pepCols = computed<Column[]>(() =>
     { key: "unique", label: "Unique" },
   ].filter((c) => peptides.value.length === 0 || c.key in peptides.value[0])
 );
+// Label-free rows all carry the label "LFQ" (QPX convention): no Label column then.
+const pgRunColsShown = computed(() => {
+  const first = pgRuns.value[0] ?? {};
+  const labelled = pgRuns.value.some((r) => r.label != null && r.label !== "LFQ");
+  return pgRunCols.filter((c) => c.key in first && (c.key !== "label" || labelled));
+});
 const pgRunCols: Column[] = [
   { key: "run_file_name", label: "Run", fmt: (v) => listText(v) },
   { key: "label", label: "Label" },
@@ -264,7 +270,7 @@ const accessionLinks = computed(() => {
         </div>
         <div v-if="pgRuns.length" class="sec">
           <div class="sec-head"><h3>Protein group per run</h3></div>
-          <ReportTable :columns="pgRunCols.filter((c) => c.key in pgRuns[0])" :rows="pgRuns" max-height="300px" :file-name="`${fileBase}_${focus}_runs`" />
+          <ReportTable :columns="pgRunColsShown" :rows="pgRuns" max-height="300px" :file-name="`${fileBase}_${focus}_runs`" />
         </div>
       </template>
     </div>
