@@ -39,7 +39,8 @@ pub struct CollectionScan {
     pub skipped: Vec<SkippedFolder>,
 }
 
-/// Split a QPX filename into `(prefix, view, format)`.
+/// Split a QPX filename into `(prefix, view, format)`; only parquet files are
+/// views (a dataset folder may also hold `<prefix>.sdrf.tsv` and the like).
 ///
 /// `PXD021013.feature.parquet` -> `("PXD021013", "feature", "parquet")`.
 ///
@@ -49,6 +50,9 @@ pub struct CollectionScan {
 pub fn parse_filename(filename: &str) -> Option<(String, String, String)> {
     let mut it = filename.rsplitn(2, '.');
     let format = it.next()?.to_ascii_lowercase();
+    if format != "parquet" {
+        return None;
+    }
     let rest = it.next()?;
     if let Some(prefix) = strip_msnet(rest) {
         return Some((prefix.to_string(), "psm".to_string(), format));
@@ -182,6 +186,7 @@ mod tests {
             t("PXD019483-hCOV", "psm", "parquet")
         );
         assert_eq!(p("plain.parquet"), None);
+        assert_eq!(p("PXD021013.sdrf.tsv"), None);
     }
 
     #[test]
