@@ -3,7 +3,7 @@
 // per-run evidence.
 import type { ChartSpec } from "../charts";
 import { runSql } from "../duck";
-import { ident, intensitySumExpr, lit, objects, proteinMatchWhere, proteinTextWhere, targetWhere, type TableRef } from "../report";
+import { ident, intensitySumExpr, lit, log10Expr, objects, proteinMatchWhere, proteinTextWhere, targetWhere, type TableRef } from "../report";
 import { COL } from "../qpx";
 
 /** Rows a search lists; one more is read to tell that there are more. */
@@ -12,7 +12,13 @@ export const PROTEIN_LIMIT = 500;
 function pgSql(P: TableRef, where: string): string {
   const T = ident(P.table);
   const has = (c: string) => P.cols.has(c);
-  const isum = intensitySumExpr(P);
+  // Mean log10 intensity per sample: over the channels of an intensities list
+  // (a QPX 1.0 row holds a run's channels), as over flat pg rows (one label each).
+  const logInt = has(COL.intensities)
+    ? `list_avg(list_transform(flatten(list(list_filter(list_transform(${COL.intensities}, x -> x.intensity), v -> v > 0))), v -> log10(v)))`
+    : has(COL.intensity)
+      ? `avg(CASE WHEN ${COL.intensity} > 0 THEN log10(${COL.intensity}) END)`
+      : null;
   // A flat pg view (QPX 1.1+) lists the raw files of each unit in grouped_runs.
   const runs = has(COL.run_file_name)
     ? `count(DISTINCT ${COL.run_file_name})`
@@ -29,7 +35,7 @@ function pgSql(P: TableRef, where: string): string {
     has(COL.peptide_counts) ? `max(${COL.peptide_counts}.unique_sequences)::BIGINT AS unique_peptides` : null,
     has(COL.global_qvalue) ? `min(${COL.global_qvalue}) AS qvalue` : has(COL.pg_qvalue) ? `min(${COL.pg_qvalue}) AS qvalue` : null,
     has(COL.sequence_coverage) ? `max(${COL.sequence_coverage}) AS coverage` : null,
-    isum ? `avg(CASE WHEN ${isum} > 0 THEN log10(${isum}) END) AS log_int` : null,
+    logInt ? `${logInt} AS log_int` : null,
   ].filter(Boolean);
   return `SELECT ${sel.join(", ")} FROM ${T}
 WHERE ${targetWhere(P)} AND ${COL.anchor_protein} IS NOT NULL AND ${where}
@@ -117,23 +123,25 @@ export async function proteinRunsChart(ev: TableRef, acc: string, evName: string
 
 /** The protein group's row in each run (pg view): peptides, unique
  * peptides, features, q-value and log10 intensity. A flat pg view (QPX 1.1+)
- * has a row per unit (its grouped_runs, as `run_file_name`) and label. */
+ * has a row per unit (its grouped_runs, as `run_file_name`) and label; a
+ * QPX 1.0 row, holding a run's channels, gives a row per channel the same way. */
 export async function proteinGroupRuns(pg: TableRef, acc: string): Promise<Record<string, any>[]> {
-  const isum = intensitySumExpr(pg);
   const has = (c: string) => pg.cols.has(c);
   const flat = !has(COL.run_file_name);
+  const list = has(COL.intensities);
+  const int = list ? "ch.intensity" : has(COL.intensity) ? COL.intensity : null;
   const sel = [
     flat ? `${COL.grouped_runs} AS ${COL.run_file_name}` : COL.run_file_name,
-    flat ? COL.label : null,
+    flat ? COL.label : list ? `ch.label AS ${COL.label}` : null,
     has(COL.peptide_counts) ? `${COL.peptide_counts}.total_sequences AS peptides` : null,
     has(COL.peptide_counts) ? `${COL.peptide_counts}.unique_sequences AS unique_peptides` : null,
     has(COL.feature_counts) ? `${COL.feature_counts}.total_features AS features` : null,
     has(COL.pg_qvalue) ? `${COL.pg_qvalue} AS qvalue` : has(COL.global_qvalue) ? `${COL.global_qvalue} AS qvalue` : null,
-    isum ? `CASE WHEN ${isum} > 0 THEN log10(${isum}) END AS log_int` : null,
+    int ? `${log10Expr(int)} AS log_int` : null,
   ].filter(Boolean);
-  const r = await runSql(
-    `SELECT ${sel.join(", ")} FROM ${ident(pg.table)} WHERE ${targetWhere(pg)} AND ${COL.anchor_protein} = ${lit(acc)} ORDER BY ${COL.run_file_name}${flat ? `, ${COL.label}` : ""}`
-  );
+  const W = `${targetWhere(pg)} AND ${COL.anchor_protein} = ${lit(acc)}`;
+  const from = list ? `(SELECT *, unnest(${COL.intensities}) AS ch FROM ${ident(pg.table)} WHERE ${W})` : `${ident(pg.table)} WHERE ${W}`;
+  const r = await runSql(`SELECT ${sel.join(", ")} FROM ${from} ORDER BY ${COL.run_file_name}${flat || list ? `, ${COL.label}` : ""}`);
   return objects(r);
 }
 
