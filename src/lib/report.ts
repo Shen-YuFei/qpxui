@@ -5,7 +5,7 @@
 import type { DatasetInfo, ViewInfo } from "./api";
 import { describeTable, ensureViewReady, runSql, type QueryResult } from "./duck";
 import { fmtNum, scalarText } from "./format";
-import { COL, SORT_ORDER_KEY, VIEW_KINDS, type ViewKind } from "./qpx";
+import { COL, QVALUE_COLUMNS, SORT_ORDER_KEY, VIEW_KINDS, type ViewKind } from "./qpx";
 
 export interface TableRef {
   view: ViewInfo;
@@ -48,11 +48,15 @@ export function datasetTables(ds: DatasetInfo): Promise<DatasetTables> {
         for (const c of desc) types[c.name.toLowerCase()] = c.type;
         const ref: TableRef = { view, table, cols: new Set(Object.keys(types)), types, seq: COL.sequence };
         if (kind === "feature" || kind === "psm") ref.seq = await detectSeqExpr(ref);
-        // Identification-only data gives a flat pg view an all-null intensity
-        // column: leave it out so no report reads the view as quantified.
-        if (kind === "pg" && ref.cols.has(COL.intensity) && !(await hasValues(ref, COL.intensity, `${COL.intensity} IS NOT NULL`))) {
-          ref.cols.delete(COL.intensity);
-        }
+        // QPX writes every column of a view's schema, so a converter can leave
+        // one all-null: a flat pg intensity for identification-only data, a
+        // q-value level, PEP or missed-cleavage count the search engine does
+        // not report. Leave these out, so no report reads the view as
+        // quantified or charts an empty column, and q-values come from the
+        // next level that has them.
+        const optional = (DROP_IF_EMPTY[kind] ?? []).filter((c) => ref.cols.has(c));
+        const filled = await Promise.all(optional.map((c) => hasValues(table, c, `${c} IS NOT NULL`)));
+        for (const [j, c] of optional.entries()) if (!filled[j]) ref.cols.delete(c);
         out[kind] = ref;
       }
       return out;
@@ -115,16 +119,30 @@ const spectraCache = new Map<string, Promise<boolean>>();
 /** Does column `col` hold a value in any row? Answered from the parquet
  * footer statistics, so no column data is read; without null counts, looks
  * for one row where `rowHas` holds. */
-async function hasValues(ref: TableRef, col: string, rowHas: string): Promise<boolean> {
+async function hasValues(table: string, col: string, rowHas: string): Promise<boolean> {
   const stats = await runSql(
     `SELECT sum(num_values)::BIGINT, sum(coalesce(stats_null_count, 0))::BIGINT, count(stats_null_count)::BIGINT, count(*)::BIGINT
-     FROM parquet_metadata(${lit(`${ref.table}.parquet`)}) WHERE lower(split_part(path_in_schema, ', ', 1)) = ${lit(col)}`
+     FROM parquet_metadata(${lit(`${table}.parquet`)}) WHERE lower(split_part(path_in_schema, ', ', 1)) = ${lit(col)}`
   );
   const [vals, nulls, withStats, chunks] = stats.rows[0].map(Number);
   if (chunks > 0 && withStats === chunks) return vals > nulls;
   // Some writers leave out null counts.
-  const r = await runSql(`SELECT 1 FROM ${ident(ref.table)} WHERE ${rowHas} LIMIT 1`, 1);
+  const r = await runSql(`SELECT 1 FROM ${ident(table)} WHERE ${rowHas} LIMIT 1`, 1);
   return r.rows.length > 0;
+}
+
+/** Per view, the columns reports leave out when they hold no value. */
+const EVIDENCE_OPTIONAL = [...QVALUE_COLUMNS, COL.posterior_error_probability, COL.missed_cleavages];
+const DROP_IF_EMPTY: Partial<Record<ViewKind, string[]>> = {
+  pg: [COL.intensity, COL.pg_qvalue, COL.global_qvalue],
+  feature: EVIDENCE_OPTIONAL,
+  psm: EVIDENCE_OPTIONAL,
+};
+
+/** The first of `cols` (columns of `table`) that holds a value, or null. */
+export async function firstWithValues(table: string, cols: string[]): Promise<string | null> {
+  for (const c of cols) if (await hasValues(table, c, `${c} IS NOT NULL`)) return c;
+  return null;
 }
 
 /** Does the psm view carry fragment spectra (non-null `mz_array`)? */
@@ -133,7 +151,7 @@ export function hasSpectra(ref: TableRef | undefined): Promise<boolean> {
   const key = ref.view.path;
   let p = spectraCache.get(key);
   if (!p) {
-    p = hasValues(ref, COL.mz_array, `len(${COL.mz_array}) > 0`);
+    p = hasValues(ref.table, COL.mz_array, `len(${COL.mz_array}) > 0`);
     p.catch(() => spectraCache.delete(key));
     spectraCache.set(key, p);
   }

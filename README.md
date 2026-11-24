@@ -132,7 +132,7 @@ The report has these tabs. A tab only appears when the dataset has the data for 
 
 | Tab | Contents |
 |-----|----------|
-| **Overview** | Identifications per run. Distributions of precursor charge, peptide length, missed cleavages, peptides per protein group, precursor mass error (ppm), retention time, intensity, posterior error probability and peptide q-value. |
+| **Overview** | Identifications per run. Distributions of precursor charge, peptide length, missed cleavages, peptides per protein group, precursor mass error (ppm), retention time, intensity, posterior error probability and q-value (peptide level, else precursor or PSM). |
 | **QC** | Identifications per run (features, peptides, proteins, protein groups). Median intensity and median mass error per run, to spot loading or calibration drift. Intensity distribution per sample (TMT channels are matched to samples through the run view). A per-run table with sample, fraction and instrument. |
 | **PTMs** | How often each modification occurs (counted by peptidoforms, peptides or features), drawn in your PTM colours. Modified sites by residue, modifications per peptide, and a table; click a modification to list its peptides. |
 | **Samples** | Charts of the sample metadata (organism, tissue, disease, cell line, sex, …), coloured by biological group (see below), and a filterable sample table showing which runs and channels each sample was measured in. |

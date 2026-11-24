@@ -32,8 +32,9 @@ async function counts(label: string, sql: string, key: string): Promise<CountCha
 }
 
 /** The count charts the table's columns (lower-case `names`) support, those
- * with data; `unit` names a row ("PSMs", "features", …). */
-export async function summaryCounts(table: string, names: Set<string>, unit: string): Promise<CountChart[]> {
+ * with data; `unit` names a row ("PSMs", "features", …) and `qcol` is the
+ * score column to bin, if any. */
+export async function summaryCounts(table: string, names: Set<string>, unit: string, qcol: string | null): Promise<CountChart[]> {
   const t = ident(table);
   const list: CountChart[] = [];
   const push = (c: CountChart) => {
@@ -49,12 +50,11 @@ export async function summaryCounts(table: string, names: Set<string>, unit: str
   if (names.has(COL.run_file_name)) {
     push(await counts(`${unit[0].toUpperCase()}${unit.slice(1)} per run`, `SELECT ${COL.run_file_name} AS k, COUNT(*) AS n FROM ${t} GROUP BY 1 ORDER BY 2 DESC LIMIT 25`, "run"));
   }
-  if (names.has(COL.peptide_qvalue) || names.has(COL.posterior_error_probability)) {
-    const col = names.has(COL.peptide_qvalue) ? COL.peptide_qvalue : COL.posterior_error_probability;
-    push(await counts(`${col} distribution`, `SELECT round(${col},2) AS k, COUNT(*) AS n FROM ${t} WHERE ${col} IS NOT NULL GROUP BY 1 ORDER BY 1`, "q"));
+  if (qcol) {
+    push(await counts(`${qcol} distribution`, `SELECT round(${qcol},2) AS k, COUNT(*) AS n FROM ${t} WHERE ${qcol} IS NOT NULL GROUP BY 1 ORDER BY 1`, "q"));
   }
   if (names.has(COL.missed_cleavages)) {
-    push(await counts("Missed cleavages", `SELECT ${COL.missed_cleavages} AS k, COUNT(*) AS n FROM ${t} GROUP BY 1 ORDER BY 1`, "mc"));
+    push(await counts("Missed cleavages", `SELECT ${COL.missed_cleavages} AS k, COUNT(*) AS n FROM ${t} WHERE ${COL.missed_cleavages} IS NOT NULL GROUP BY 1 ORDER BY 1`, "mc"));
   }
   return list;
 }

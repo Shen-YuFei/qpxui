@@ -3,11 +3,11 @@ import { computed, onMounted, ref } from "vue";
 import VChart from "vue-echarts";
 import { ensureViewReady, describeTable, countRows, type ColumnInfo } from "../lib/duck";
 import type { ViewInfo } from "../lib/api";
-import { scanBytes, viewScale, type ViewScale } from "../lib/report";
+import { firstWithValues, scanBytes, viewScale, type ViewScale } from "../lib/report";
 import { columnHistogram, isNumericScalar, summaryCounts } from "../lib/queries/summary";
 import { chartTheme, tooltipStyle } from "../lib/charts";
 import { fmtBytes } from "../lib/format";
-import { COL } from "../lib/qpx";
+import { COL, QVALUE_COLUMNS } from "../lib/qpx";
 
 const props = defineProps<{ view: ViewInfo }>();
 const table = ref("");
@@ -18,8 +18,10 @@ const busy = ref(true);
 // Large streamed views: charts read whole columns, so wait for a click.
 const scale = ref<ViewScale | null>(null);
 const held = ref(false);
+// The score column binned: the first q-value level with values, else PEP.
+const qcol = ref<string | null>(null);
 const heldBytes = computed(() =>
-  scale.value ? scanBytes(scale.value, [COL.charge, COL.anchor_protein, COL.pg_accessions, COL.run_file_name, COL.peptide_qvalue, COL.posterior_error_probability, COL.missed_cleavages, numericCol.value]) : 0
+  scale.value ? scanBytes(scale.value, [COL.charge, COL.anchor_protein, COL.pg_accessions, COL.run_file_name, qcol.value ?? "", COL.missed_cleavages, numericCol.value]) : 0
 );
 
 const cards = ref<any[]>([]);
@@ -68,7 +70,7 @@ async function buildSummaries() {
   busy.value = true;
   error.value = "";
   const names = new Set(cols.value.map((c) => c.name.toLowerCase()));
-  const list = await summaryCounts(table.value, names, unit());
+  const list = await summaryCounts(table.value, names, unit(), qcol.value);
   cards.value = list.map((c) => ({ label: c.label, key: c.key, option: barOption(c.labels, c.values, c.label) }));
 }
 
@@ -92,6 +94,8 @@ onMounted(async () => {
     table.value = await ensureViewReady(props.view);
     cols.value = await describeTable(table.value);
     numericCol.value = numericCols.value[0]?.name ?? "";
+    const names = new Set(cols.value.map((c) => c.name.toLowerCase()));
+    qcol.value = await firstWithValues(table.value, [...QVALUE_COLUMNS, COL.posterior_error_probability].filter((c) => names.has(c)));
     if (/^(s3|https?):\/\//.test(props.view.path)) {
       scale.value = await viewScale({ view: props.view, table: table.value });
     }

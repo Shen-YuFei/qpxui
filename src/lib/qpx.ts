@@ -51,12 +51,14 @@ export const COL = names(
   "global_qvalue",
   // feature
   "peptide_qvalue",
+  "precursor_qvalue",
   "unique",
   "intensities",
   "rt_start",
   "rt_stop",
   // psm
   "protein_accessions",
+  "qvalue",
   "mz_array",
   "intensity_array",
   "charge_array",
@@ -111,6 +113,10 @@ export function structScoreDirections(layout: string | null): Record<string, boo
   const scores = (JSON.parse(layout) as { additional_scores?: { name: string; higher_better?: boolean | null }[] }).additional_scores ?? [];
   return Object.fromEntries(scores.map((s) => [s.name, s.higher_better ?? null]));
 }
+
+/** The q-value columns peptide-level charts read, by preference:
+ * peptide_qvalue, precursor_qvalue (feature), the psm view's qvalue. */
+export const QVALUE_COLUMNS: string[] = [COL.peptide_qvalue, COL.precursor_qvalue, COL.qvalue];
 
 /** Sample-view characteristics charted as facets, in display order.
  * histologic_subtype is not in the spec; it shows when a sample view has it. */

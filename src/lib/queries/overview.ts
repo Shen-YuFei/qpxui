@@ -13,14 +13,28 @@ import {
   targetWhere,
   type TableRef,
 } from "../report";
-import { COL } from "../qpx";
+import { COL, QVALUE_COLUMNS } from "../qpx";
 
 export const OVERVIEW_CHARTS = ["perRun", "charge", "length", "mc", "ppg", "ppm", "rt", "intensity", "pep", "qvalue"] as const;
 export type OverviewChart = (typeof OVERVIEW_CHARTS)[number];
 
-/** Evidence-view columns the charts read (for the large-view gate). */
+/** Evidence-view columns the charts read (for the large-view gate), besides
+ * the q-value column (overviewQvalue). */
 export const OVERVIEW_COLUMNS = [COL.is_decoy, COL.run_file_name, COL.charge, COL.sequence, COL.peptidoform, COL.missed_cleavages, COL.anchor_protein,
-  COL.protein_accessions, COL.pg_accessions, COL.mass_error_ppm, COL.rt, COL.intensities, COL.posterior_error_probability, COL.peptide_qvalue];
+  COL.protein_accessions, COL.pg_accessions, COL.mass_error_ppm, COL.rt, COL.intensities, COL.posterior_error_probability];
+
+const QVALUE_TITLES: Record<string, string> = {
+  [COL.peptide_qvalue]: "Peptide q-value",
+  [COL.precursor_qvalue]: "Precursor q-value",
+  [COL.qvalue]: "PSM q-value",
+};
+
+/** The q-value column the q-value chart of `ev` reads, and its title: the
+ * first level with values (tables() leaves out empty ones). */
+export function overviewQvalue(ev: TableRef): { col: string; title: string } | null {
+  const col = QVALUE_COLUMNS.find((c) => ev.cols.has(c));
+  return col ? { col, title: QVALUE_TITLES[col] } : null;
+}
 
 /** A loader per chart the evidence view `ev` has the columns for; `evName`
  * names its rows ("features" or "PSMs"). */
@@ -34,6 +48,7 @@ export function overviewCharts(
   const has = (c: string) => ev.cols.has(c);
   const prot = proteinExpr(ev);
   const isum = intensitySumExpr(ev);
+  const q = overviewQvalue(ev);
 
   async function counts(key: string, sql: string, xName: string, yName = evName): Promise<ChartSpec> {
     const r = await cachedSql(ds, key, sql);
@@ -105,8 +120,6 @@ export function overviewCharts(
     pep: has(COL.posterior_error_probability)
       ? () => hist("ov.pep", log10Expr(COL.posterior_error_probability), W, "log10 PEP", evName)
       : undefined,
-    qvalue: has(COL.peptide_qvalue)
-      ? () => hist("ov.q", COL.peptide_qvalue, W, "peptide q-value", evName)
-      : undefined,
+    qvalue: q ? () => hist("ov.q", q.col, W, q.title, evName) : undefined,
   };
 }

@@ -3,7 +3,7 @@ import { onMounted, onUnmounted } from "vue";
 import ChartCard from "../ChartCard.vue";
 import type { DatasetInfo } from "../../lib/api";
 import { evidence, type DatasetTables } from "../../lib/report";
-import { OVERVIEW_CHARTS, OVERVIEW_COLUMNS, overviewCharts } from "../../lib/queries/overview";
+import { OVERVIEW_CHARTS, OVERVIEW_COLUMNS, overviewCharts, overviewQvalue } from "../../lib/queries/overview";
 import { useSlots } from "../../lib/useSlots";
 import { useLargeGate } from "../../lib/useLargeGate";
 import LargeGate from "./LargeGate.vue";
@@ -14,6 +14,7 @@ const { slots, progress, run } = useSlots(OVERVIEW_CHARTS);
 
 const ev = evidence(props.t);
 const evName = props.t.feature ? "features" : "PSMs";
+const qvalue = ev ? overviewQvalue(ev) : null;
 const { gate, check, release, dispose } = useLargeGate();
 onUnmounted(dispose);
 
@@ -22,7 +23,7 @@ onMounted(() => {
     run({});
     return;
   }
-  check([{ ref: ev, cols: OVERVIEW_COLUMNS }], () => run(overviewCharts(props.ds, ev, evName)));
+  check([{ ref: ev, cols: qvalue ? [...OVERVIEW_COLUMNS, qvalue.col] : OVERVIEW_COLUMNS }], () => run(overviewCharts(props.ds, ev, evName)));
 });
 </script>
 
@@ -47,7 +48,7 @@ onMounted(() => {
         <ChartCard v-if="!slots.rt.skip" title="Retention time (min)" :subtitle="`Target ${evName} by retention time.`" v-bind="slots.rt" :file-base="fileBase" />
         <ChartCard v-if="!slots.intensity.skip" title="Feature intensity" subtitle="log10 of the intensity summed over channels." v-bind="slots.intensity" :file-base="fileBase" />
         <ChartCard v-if="!slots.pep.skip" title="Posterior error probability" subtitle="log10 PEP." v-bind="slots.pep" :file-base="fileBase" />
-        <ChartCard v-if="!slots.qvalue.skip" title="Peptide q-value" subtitle="Central 99% of values." v-bind="slots.qvalue" :file-base="fileBase" />
+        <ChartCard v-if="qvalue && !slots.qvalue.skip" :title="qvalue.title" subtitle="Central 99% of values." v-bind="slots.qvalue" :file-base="fileBase" />
       </div>
     </template>
   </div>
